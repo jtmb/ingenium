@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "present": true,
+      "sha256": "0dfbd44093e98f776ca9f214ae6447a85c605edf82941d11f1c2e0cae96b73d8",
+      "bytes": 31999,
+      "path": "Dockerfile"
+    },
+    {
+      "present": true,
+      "sha256": "e0070f091e9500c6e13ef02822c1a56bb50285ab9974d0c6bae543465e7f0e23",
+      "bytes": 4696,
+      "path": "scripts/runtime-entrypoint.sh"
+    },
+    {
+      "present": true,
+      "sha256": "5e8a4e59ca3ad94005c3a5ca08de8c55cbd966cca6e423c70e087d64f9be9f78",
+      "bytes": 6154,
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts"
+    },
+    {
+      "present": true,
+      "sha256": "12207a7fdf5e358e97793d36294821a76b740e182219f67a816752d8209b7a4a",
+      "bytes": 23008,
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs"
+    },
+    {
+      "present": true,
+      "sha256": "06e94e2bdaa4cb4a6c99042698f9f1d014279ad15718f0e8c9cdf75e0c36fc1b",
+      "bytes": 5501,
+      "path": "services/ingenium-api/lib/dot-v2/core126-http.mjs"
+    },
+    {
+      "present": true,
+      "sha256": "00d1008145943107a90375fa3dd10040547d47d0a1e8986da9b0946136511942",
+      "bytes": 3475,
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs"
+    },
+    {
+      "present": true,
+      "sha256": "bb8322e867562dc44c04dd9acec797d978594096d6da54efb0659c0f2839d25a",
+      "bytes": 1928,
+      "path": "services/ingenium-api/scripts/runtime-job-child.ts"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "present": false
+    },
+    {
+      "present": true,
+      "sha256": "a900896af67a97ea153183324b199542f3e84062dc340bbce8c4a5f36cac01a4",
+      "bytes": 22551,
+      "path": "services/ingenium-api/scripts/runtime-manager.ts"
+    },
+    {
+      "present": true,
+      "sha256": "0e3c8514ca4ba2df0eab9dae653019f81766701f3dbc33dd58afee4e8b1ba32a",
+      "bytes": 7574,
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts"
+    },
+    {
+      "present": true,
+      "sha256": "24d56e1853162d94a2254bf3ba2766097e552b144162a78d8c4369fb21f3b8b6",
+      "bytes": 11202,
+      "path": "services/ingenium-api/lib/runtime-manager-contract.ts"
+    },
+    {
+      "present": true,
+      "sha256": "029887a063c945a08202e0075313f9f47b7251e5ae649bbe1bc16f90441a5798",
+      "bytes": 6147,
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs"
+    },
+    {
+      "bytes": 13129,
+      "path": "packages/ingenium-extension/extension-binding.ts",
+      "sha256": "3e0d19c01c4a41aec7857f65e0d4b6216ea0db47c30197ac1d1af2b630d1056e",
+      "present": true
+    },
+    {
+      "bytes": 14963,
+      "path": "packages/ingenium-extension/api-auth.ts",
+      "sha256": "b89616dbd01135d2987d07d0121d8713c8f16d4c2d0198572914a5cd7d2571e6",
+      "present": true
+    }
+  ],
+  "observedAt": "2026-10-30T08:44:45.7343298Z",
+  "classification": "read-only live source observation; not frozen Source or image qualification",
+  "closedBrokerMissing": true,
+  "rootGitHead": "8092aabb98969541bdbd18d0f7a878c5c5b4b743"
+}
