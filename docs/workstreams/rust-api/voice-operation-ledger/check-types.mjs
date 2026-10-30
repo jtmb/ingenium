@@ -5,7 +5,7 @@ const integration=process.argv[2];
 if(!integration?.startsWith('/'))throw new Error('Explicit existing dependency owner required');
 const require=createRequire(resolve(integration,'package.json')),ts=require('typescript');
 const root=dirname(fileURLToPath(import.meta.url)),dbPath=resolve(root,'../db.ts');
-const dbTypes='export declare function getDb(): unknown; export declare function execTransaction<T>(work:()=>T,retries:number,mode:"deferred"|"immediate"):T; export declare function checkpointAfterWrite():void;';
+const dbTypes='import type {VoiceSqlDb} from "./voice-operation-ledger/voice-operation-ledger.js"; export declare function getDb(): VoiceSqlDb; export declare function execTransaction<T>(work:()=>T,retries:number,mode:"deferred"|"immediate"):T; export declare function checkpointAfterWrite():void;';
 const options={strict:true,noUncheckedIndexedAccess:true,noEmit:true,incremental:false,skipLibCheck:true,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,moduleResolution:ts.ModuleResolutionKind.NodeNext,types:['node'],typeRoots:[resolve(integration,'node_modules/@types')]};
 const host=ts.createCompilerHost(options),read=host.readFile.bind(host),exists=host.fileExists.bind(host);
 host.readFile=path=>resolve(path)===dbPath?dbTypes:read(path);

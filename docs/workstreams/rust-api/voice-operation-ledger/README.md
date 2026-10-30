@@ -10,6 +10,8 @@ The source tests use real SQLite and this exact proposed implementation. The fin
 
 The file-backed case closes every SQLite connection and opens a fresh Core ledger over the same database. A reservation committed before its checkpoint response was lost remains spent, and a lost CPU transaction ACK returns the identical retained UUID/revision after cold reopen. The fixture's authority callbacks remain explicit stand-ins; this proves persisted ledger semantics without claiming a real process crash or physical-owner recovery.
 
+The supervisor retirement follow-on uses one transaction for the control and up to 1024 exact unretired CPU leaves. Tests cover the same positive proof per leaf, public/producer-state preservation, failed proof, a later SQL failure rolling back earlier updates, foreign owner/boot/generation/lease exclusion, contradictory scope refusal, parent-only legacy receipt reconciliation, and the 1024/1025 boundary. `retirement-cascade.patch` is the minimal follow-on for the already imported foundation; it also adds the indexed control-resource lookup to proposed SQL128. Root's direct getDb structural assignment is preserved without a cast or unused import.
+
 Strict/noUncheckedIndexedAccess checks use the existing installed TypeScript library entirely in memory, with declared original Core DB signatures. No compiler outputs, cache or dependencies are generated. Root must still typecheck and test the installed full Core/API and original Node supervisor composition.
 
 Regenerate from the owned checkout with the SAME declared C-backed WSL coordination output root:
@@ -21,6 +23,7 @@ export VOICE_LEDGER_INTEGRATION_ROOT="$EXISTING_INTEGRATION_CHECKOUT"
 export VOICE_LEDGER_TEST_ROOT="$OWNED_COORDINATION_ROOT/voice-ledger-fixtures"
 node docs/workstreams/rust-api/voice-operation-ledger/prepare-proposal.mjs "$VOICE_LEDGER_INTEGRATION_ROOT"
 node docs/workstreams/rust-api/voice-operation-ledger/verify-proposal.mjs "$VOICE_LEDGER_INTEGRATION_ROOT"
+node docs/workstreams/rust-api/voice-operation-ledger/prepare-retirement-cascade.mjs "$VOICE_LEDGER_INTEGRATION_ROOT" "$EXISTING_WORKER_CHECKOUT"
 node docs/workstreams/rust-api/voice-operation-ledger/check-types.mjs "$VOICE_LEDGER_INTEGRATION_ROOT"
 node --experimental-vm-modules --test docs/workstreams/rust-api/voice-operation-ledger/voice-operation-ledger.test.mjs
 ```

@@ -1,7 +1,7 @@
 {
   "baseCommit": "f86aec9e37df71aae0f3368561669982884c3b15",
   "scope": "PROPOSAL ONLY; Root owns SQL128 registration/apply/actual authority bindings",
-  "patchSha256": "79ddb26ab282d91b40b2aa9d01ec486ff26e528e5e9e8972ab00726b6865e5af",
+  "patchSha256": "b07e7ce648d7cc9798d48aaa5f271991b7ebd37c2f516bc22a8efdbfac1f2ba4",
   "changes": [
     {
       "path": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
@@ -13,13 +13,13 @@
       "path": "packages/ingenium-core/lib/tools/voice-operation-cpu.ts",
       "expectedAbsent": true,
       "preimageSha256": null,
-      "proposedSha256": "5542cc0178d231465c762be046105155d6f60e40111856fe4c015f95180b66f2"
+      "proposedSha256": "af2ba23aa5f520c3870a80346d7af0fb41aab92fa380134c1b0de279389f1022"
     },
     {
       "path": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
       "expectedAbsent": true,
       "preimageSha256": null,
-      "proposedSha256": "fe2847e794c109a9d74c2c86b1d10851283a4dc1db7de2f94d136557e44f8d43"
+      "proposedSha256": "ab4bf2954113c8878b854476941fad999d0cdf4c7b01f542d0a6f4e016e462c1"
     },
     {
       "path": "packages/ingenium-core/lib/tools/voice-operation-contract.ts",
@@ -31,7 +31,7 @@
       "path": "packages/ingenium-core/data/migrations/128_voice_operations.sql",
       "expectedAbsent": true,
       "preimageSha256": null,
-      "proposedSha256": "660e02b6039f1dbc0825b28cf8e2100250adbb65dbb20a27c32c1178786395bc"
+      "proposedSha256": "30c03fb765ebf0af2feae9665176a9509065a724a3177f953065b6b1ce1cadde"
     },
     {
       "path": "packages/ingenium-core/lib/index.ts",

@@ -1,0 +1,24 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const original='f9e45333855f64f2baf1ae218c0323ee5d2bd370';
+const sha=value=>createHash('sha256').update(value).digest('hex');
+const integration=process.argv[2],worker=process.argv[3];
+if(!integration?.startsWith('/')||!worker?.startsWith('/'))throw new Error('Explicit existing owners required');
+const prior=file=>execFileSync('git',['-C',worker,'show',original+':docs/workstreams/rust-api/voice-operation-ledger/'+file],{encoding:'utf8'});
+const cpuPath='packages/ingenium-core/lib/tools/voice-operation-cpu.ts',ddlPath='packages/ingenium-core/data/migrations/128_voice_operations.sql';
+const cpuBefore=prior('voice-operation-cpu.ts').replaceAll('"./contract-v1.js"','"./voice-operation-contract.js"');
+const ddlBefore=prior('128_voice_operations.sql').replace('-- PROPOSAL ONLY: Root owns SQL128 registration/application on the original Core DB.','-- Node SQL128 source migration; original Core is the sole Voice operation metadata writer.\n-- Production runtime and physical owner qualification remain separate release gates.');
+if(sha(ddlBefore)!=='f2cf28536fd6c25363e4268dc1fdef6750fa0f57fbb67cfc48a001919da0ff23')throw new Error('Frozen Root SQL128 comment preimage mismatch');
+const anchor='CREATE INDEX veyra_voice_operations_recovery ON veyra_voice_operations(actor_id,runtime_id,state,operation_id);';
+const ddlAfter=ddlBefore.replace(anchor,anchor+'\nCREATE INDEX veyra_voice_control_resources ON veyra_voice_operations(control_operation_id,resource_retired,owner_json,operation_id);');
+const changes=[{path:cpuPath,before:cpuBefore,after:readFileSync(new URL('voice-operation-cpu.ts',import.meta.url),'utf8').replaceAll('"./contract-v1.js"','"./voice-operation-contract.js"')},{path:ddlPath,before:ddlBefore,after:ddlAfter}];
+for(const c of changes){const actual=sha(readFileSync(integration+'/'+c.path));if(actual!==sha(c.before)&&actual!==sha(c.after))throw new Error('Root preimage drift: '+c.path);}
+const py="import json,sys,difflib\nfor c in json.load(sys.stdin):\n sys.stdout.writelines(difflib.unified_diff(c['before'].splitlines(True),c['after'].splitlines(True),fromfile='a/'+c['path'],tofile='b/'+c['path'],n=3))\n";
+const result=spawnSync('python3',['-c',py],{input:JSON.stringify(changes),encoding:'utf8',maxBuffer:2*1024*1024});
+if(result.status!==0)throw new Error('Cascade patch rendering failed');
+writeFileSync(new URL('retirement-cascade.patch',import.meta.url),result.stdout);
+const ownerPath='packages/ingenium-core/lib/tools/voice-operation-owner.ts';
+const manifest={foundationCommit:original,scope:'PROPOSAL ONLY; Root owns canonical apply and SQL128 registration/runtime',patchSha256:sha(result.stdout),changes:changes.map(c=>({path:c.path,preimageSha256:sha(c.before),proposedSha256:sha(c.after)})),preservedRootSource:{path:ownerPath,sha256:sha(readFileSync(integration+'/'+ownerPath)),note:'Root direct getDb structural assignment, no cast or unused VoiceSqlDb import; mirrored in owned source'}};
+writeFileSync(new URL('retirement-cascade-preimages.json',import.meta.url),JSON.stringify(manifest,null,2)+'\n');
+console.log(JSON.stringify(manifest));

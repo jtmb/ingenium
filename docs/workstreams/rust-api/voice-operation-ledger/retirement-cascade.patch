@@ -1,0 +1,51 @@
+--- a/packages/ingenium-core/lib/tools/voice-operation-cpu.ts
++++ b/packages/ingenium-core/lib/tools/voice-operation-cpu.ts
+@@ -158,13 +158,31 @@
+      i.exact(request,["operationId","owner","physicalProof"]);
+      return i.write(()=>{
+        const row=owned(context,request,"retireOriginal");
+-       if(row.resource_retired)return privateMetadata(row);
+-       const operation=privateMetadata(row),proof=ports.verifyRetirement(context,structuredClone(operation),request.physicalProof);
+-       if(!proof||proof.operationId!==row.operation_id||!i.equal(proof.owner,operation.owner)||proof.drained!==true||!i.uuid(proof.retentionId)||!i.equal(proof.identity,operation.original.cpuIdentity))return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);
+-       if(row.cpu_json){const cpu:Cpu=JSON.parse(row.cpu_json);if(cpu.phase==="terminal"&&cpu.retentionId!==proof.retentionId)return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);}
+-       // Physical retirement may prove an original tree is gone while the public outcome remains unknown.
+-       const receipt={operationId:row.operation_id,owner:operation.owner,identity:operation.original.cpuIdentity,retentionId:proof.retentionId,drained:true,verifiedAt:ports.now()};
+-       ports.db().prepare("UPDATE veyra_voice_operations SET resource_retired=1,resource_retirement_json=?,private_revision=private_revision+1 WHERE operation_id=? AND private_revision=?").run(i.canonical(receipt),row.operation_id,row.private_revision);
++       const leaves:Row[]=row.kind==="voice-cpu-supervisor"
++         ?ports.db().prepare("SELECT * FROM veyra_voice_operations WHERE control_operation_id=? AND owner_json=? AND cpu_identity_json IS NOT NULL AND resource_retired=0 ORDER BY operation_id LIMIT 1025").all(row.operation_id,row.owner_json):[];
++       if(leaves.length>1024)return i.fail("VOICE_CONTROL_RETIREMENT_LIMIT",503);
++       if(row.resource_retired&&leaves.length===0)return privateMetadata(row);
++       const control=row.control_json?JSON.parse(row.control_json):null;
++       for(const leaf of leaves){
++         const original:VoiceOriginal=JSON.parse(leaf.original_json);
++         if(leaf.scope_hash!==row.scope_hash||i.digest(original.scope)!==row.scope_hash||original.controlOperationId!==row.operation_id
++           ||!leaf.cpu_json||!original.cpuIdentity||original.cpuIdentity.bootId!==control?.workerBootId
++           ||!i.equal(original.cpuIdentity,JSON.parse(leaf.cpu_identity_json))||!i.equal(JSON.parse(leaf.owner_json),JSON.parse(row.owner_json)))return i.fail("VOICE_CONTROL_LEAF_SCOPE_CHANGED",403);
++       }
++       // Validate the original physical scope for the parent and every exact leaf BEFORE writes.
++       // The same opaque proof is reused; callbacks must validate it without consuming it.
++       const receipts=[row,...leaves].map(originalRow=>{
++         const operation=privateMetadata(originalRow),proof=ports.verifyRetirement(context,structuredClone(operation),request.physicalProof);
++         if(!proof||proof.operationId!==originalRow.operation_id||!i.equal(proof.owner,operation.owner)||proof.drained!==true||!i.uuid(proof.retentionId)||!i.equal(proof.identity,operation.original.cpuIdentity))return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);
++         if(originalRow.cpu_json){const cpu:Cpu=JSON.parse(originalRow.cpu_json);if(cpu.phase==="terminal"&&cpu.retentionId!==proof.retentionId)return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);}
++         return {row:originalRow,receipt:{operationId:originalRow.operation_id,owner:operation.owner,identity:operation.original.cpuIdentity,retentionId:proof.retentionId,drained:true,verifiedAt:ports.now()}};
++       });
++       // One Core transaction commits all bookkeeping or none; public and CPU producer fields stay untouched.
++       for(const retained of receipts){
++         if(retained.row.resource_retired)continue;
++         const changed=ports.db().prepare("UPDATE veyra_voice_operations SET resource_retired=1,resource_retirement_json=?,private_revision=private_revision+1 WHERE operation_id=? AND private_revision=? AND resource_retired=0").run(i.canonical(retained.receipt),retained.row.operation_id,retained.row.private_revision);
++         if(Number(changed.changes)!==1)return i.fail("VOICE_PRIVATE_REVISION_CONFLICT");
++       }
+        const stored=i.get(row.operation_id);if(!stored)throw new Error("Voice resource vanished");return privateMetadata(stored);
+      });
+    },
+--- a/packages/ingenium-core/data/migrations/128_voice_operations.sql
++++ b/packages/ingenium-core/data/migrations/128_voice_operations.sql
+@@ -37,6 +37,7 @@
+   OR (state<>'terminal' AND outcome IS NULL AND retention_id IS NULL AND retired=0 AND result_fingerprint IS NULL))
+ );
+ CREATE INDEX veyra_voice_operations_recovery ON veyra_voice_operations(actor_id,runtime_id,state,operation_id);
++CREATE INDEX veyra_voice_control_resources ON veyra_voice_operations(control_operation_id,resource_retired,owner_json,operation_id);
+ CREATE UNIQUE INDEX veyra_voice_one_live_cpu_control ON veyra_voice_operations(instance_id) WHERE kind='voice-cpu-supervisor' AND resource_retired=0;
+ CREATE TRIGGER veyra_voice_control_generation BEFORE INSERT ON veyra_voice_operations
+ WHEN NEW.kind='voice-cpu-supervisor' AND EXISTS(SELECT 1 FROM veyra_voice_operations WHERE kind='voice-cpu-supervisor' AND instance_id=NEW.instance_id AND owner_generation>=NEW.owner_generation)

@@ -1,0 +1,22 @@
+{
+  "foundationCommit": "f9e45333855f64f2baf1ae218c0323ee5d2bd370",
+  "scope": "PROPOSAL ONLY; Root owns canonical apply and SQL128 registration/runtime",
+  "patchSha256": "20e57ee65737661bc7eb4cd56ab79ac94711a704c955f884c564c31446ca66a4",
+  "changes": [
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-cpu.ts",
+      "preimageSha256": "5542cc0178d231465c762be046105155d6f60e40111856fe4c015f95180b66f2",
+      "proposedSha256": "af2ba23aa5f520c3870a80346d7af0fb41aab92fa380134c1b0de279389f1022"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/128_voice_operations.sql",
+      "preimageSha256": "f2cf28536fd6c25363e4268dc1fdef6750fa0f57fbb67cfc48a001919da0ff23",
+      "proposedSha256": "e9056961e84020a797165babb189e8ba1469a1f630561ae793b2884c395be55e"
+    }
+  ],
+  "preservedRootSource": {
+    "path": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
+    "sha256": "ab4bf2954113c8878b854476941fad999d0cdf4c7b01f542d0a6f4e016e462c1",
+    "note": "Root direct getDb structural assignment, no cast or unused VoiceSqlDb import; mirrored in owned source"
+  }
+}

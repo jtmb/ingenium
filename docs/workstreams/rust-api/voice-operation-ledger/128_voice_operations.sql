@@ -36,6 +36,7 @@ CREATE TABLE veyra_voice_operations (
   OR (state<>'terminal' AND outcome IS NULL AND retention_id IS NULL AND retired=0 AND result_fingerprint IS NULL))
 );
 CREATE INDEX veyra_voice_operations_recovery ON veyra_voice_operations(actor_id,runtime_id,state,operation_id);
+CREATE INDEX veyra_voice_control_resources ON veyra_voice_operations(control_operation_id,resource_retired,owner_json,operation_id);
 CREATE UNIQUE INDEX veyra_voice_one_live_cpu_control ON veyra_voice_operations(instance_id) WHERE kind='voice-cpu-supervisor' AND resource_retired=0;
 CREATE TRIGGER veyra_voice_control_generation BEFORE INSERT ON veyra_voice_operations
 WHEN NEW.kind='voice-cpu-supervisor' AND EXISTS(SELECT 1 FROM veyra_voice_operations WHERE kind='voice-cpu-supervisor' AND instance_id=NEW.instance_id AND owner_generation>=NEW.owner_generation)

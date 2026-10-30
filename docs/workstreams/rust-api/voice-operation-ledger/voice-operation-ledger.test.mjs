@@ -54,7 +54,7 @@ function fixture({databasePath=':memory:'}={}) {
    state.authorizations++;state.contextInputs.push(context);
    if(context!==privateContext&&!privateOwners.has(context)||!state.authenticated||state.denyAction===action)throw new Error('actual request authority refused');
    return {scope:structuredClone(state.scope),authSessionId:'auth-a',workspaceId:'workspace-a',userSecurityEpoch:state.userEpoch,workspaceSecurityEpoch:state.workspaceEpoch,runtimeSecurityEpoch:state.runtimeEpoch,deadlineAt:state.contextDeadline,owner:structuredClone(state.owner),mode:'hosted',selectedConversationVerified:state.selected};
- },verifyRetirement:()=>{state.retirementCalls++;return state.proof;},requireOriginalResource:(context,operation,action,request)=>{
+ },verifyRetirement:(...args)=>{state.retirementCalls++;return state.retirementHook?state.retirementHook(...args):state.proof;},requireOriginalResource:(context,operation,action,request)=>{
    const heldOwner=privateOwners.get(context);if(!heldOwner)throw new Error('actual original capability required');
    return {operationId:request.operationId??null,owner:structuredClone(heldOwner),instanceId:heldOwner.instanceId};
  }};
@@ -297,6 +297,112 @@ test('one hot fixed-instance control blocks scope replacement until positive old
  f.state.owner=nextOwner;
  const nextRetained=f.ledger.reserveControl(nextContext,{original:next,owner:nextOwner,control:spec});assert.equal(nextRetained.accepted,true);
  assert.equal(f.ledger.privateRead(f.nodeContext,{operationId:control.operation.original.operationId,owner:f.owner}).outcome,'unknown');
+}));
+
+function positiveControlProof(f,control,physicalProof) {
+ const calls=[];
+ f.state.retirementHook=(_context,operation,proof)=>{
+   assert.equal(proof,physicalProof);calls.push(operation.original.operationId);
+   if(operation.original.operationId!==control.operation.original.operationId){
+     assert.equal(operation.original.controlOperationId,control.operation.original.operationId);
+     assert.deepEqual(operation.owner,f.owner);
+   }
+   const receipt=f.proof(operation,'unknown',null);
+   if(operation.cpu?.phase==='terminal')receipt.retentionId=operation.cpu.retentionId;
+   return receipt;
+ };
+ return calls;
+}
+function cloneCpuFixture(f,template,patch={}) {
+ const original=structuredClone(template.original),operationId=randomUUID();
+ original.operationId=operationId;original.requestId='voice:fixture-clone:'+operationId;
+ original.cpuIdentity.operationId=operationId;original.cpuIdentity.requestId=operationId;
+ const source=f.db.prepare('SELECT * FROM veyra_voice_operations WHERE operation_id=?').get(template.original.operationId);
+ const cpu=JSON.parse(source.cpu_json);cpu.identity=original.cpuIdentity;
+ Object.assign(source,{operation_id:operationId,request_id:original.requestId,original_json:JSON.stringify(original),cpu_identity_json:JSON.stringify(original.cpuIdentity),cpu_json:JSON.stringify(cpu),...patch});
+ const keys=Object.keys(source);f.db.prepare('INSERT INTO veyra_voice_operations('+keys.join(',')+') VALUES('+keys.map(()=>'?').join(',')+')').run(...keys.map(k=>source[k]));
+ return operationId;
+}
+
+test('control retirement verifies the SAME physical proof per exact leaf and atomically seals private resources only',()=>run(f=>{
+ const control=f.createControl(),first=f.cpuOperation(control),second=f.cpuOperation(control);
+ const unknown=f.ledger.quarantineCpu(f.nodeContext,cpuRequest(f,first.operation,first.identity,{reason:'WORKER_LOST'}));
+ f.ledger.claimCpuDispatch(f.nodeContext,cpuRequest(f,second.operation,second.identity));
+ retain(f,readCpu(f,second.operation),second.identity,'reserved');retain(f,readCpu(f,second.operation),second.identity,'running');retain(f,readCpu(f,second.operation),second.identity,'terminal','completed',true);
+ const terminal=readCpu(f,second.operation);
+ f.ledger.recordCpuResult(f.nodeContext,cpuRequest(f,terminal,second.identity,{resultFingerprint:{status:200,contentType:'application/json',sha256:sha('actual retained response'),bytes:64}}));
+ f.ledger.quarantine(f.context,second.operation.original.operationId,terminal.revision,'BODY_UNAVAILABLE');
+ const before=[readCpu(f,first.operation),readCpu(f,second.operation)];
+ const physicalProof=Object.freeze({fixtureJoinedExactOriginalGroup:true});const calls=positiveControlProof(f,control,physicalProof);
+ f.state.scope={...f.scope,conversationId:'new-selected-conversation'};
+ const retired=f.ledger.retireOriginal(f.nodeContext,{operationId:control.operation.original.operationId,owner:f.owner,physicalProof});
+ assert.equal(retired.resourceRetired,true);assert.equal(calls.length,3);
+ for(const previous of before){const after=readCpu(f,previous);assert.equal(after.resourceRetired,true);assert.equal(after.outcome,'unknown');assert.equal(after.revision,previous.revision);assert.deepEqual(after.cpu,previous.cpu);}
+ assert.equal(unknown.cpu.drained,false);assert.equal(readCpu(f,first.operation).cpu.drained,false);
+ const count=calls.length;f.ledger.retireOriginal(f.nodeContext,{operationId:control.operation.original.operationId,owner:f.owner,physicalProof});assert.equal(calls.length,count);
+}));
+
+test('a failed leaf proof or later SQL retirement failure rolls the entire control cascade back',()=>run(f=>{
+ const control=f.createControl(),a=f.cpuOperation(control),b=f.cpuOperation(control),physicalProof={fixtureJoinedOriginalGroup:true};
+ const calls=positiveControlProof(f,control,physicalProof),positive=f.state.retirementHook;
+ f.state.retirementHook=(...args)=>{const receipt=positive(...args);if(args[1].original.operationId===b.operation.original.operationId)throw new Error('original leaf proof unavailable');return receipt;};
+ const request={operationId:control.operation.original.operationId,owner:f.owner,physicalProof};
+ assert.throws(()=>f.ledger.retireOriginal(f.nodeContext,request),/leaf proof unavailable/);
+ assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,0);
+ f.state.retirementHook=positive;
+ const last=[a.operation.original.operationId,b.operation.original.operationId].sort().at(-1);
+ f.db.exec("CREATE TRIGGER fixture_later_leaf_failure BEFORE UPDATE ON veyra_voice_operations WHEN NEW.operation_id='"+last+"' AND NEW.resource_retired=1 BEGIN SELECT RAISE(ABORT,'later leaf write failure'); END");
+ assert.throws(()=>f.ledger.retireOriginal(f.nodeContext,request),/later leaf write failure/);
+ assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,0);
+ assert.equal(f.db.prepare('SELECT count(*) AS n FROM veyra_voice_operations WHERE resource_retirement_json IS NOT NULL').get().n,0);
+ f.db.exec('DROP TRIGGER fixture_later_leaf_failure');assert.equal(f.ledger.retireOriginal(f.nodeContext,request).resourceRetired,true);
+ assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,3);
+}));
+
+test('cascade excludes foreign Node owner/boot/generation/lease even when a legacy row references this control',()=>run(f=>{
+ const control=f.createControl(),leaf=f.cpuOperation(control);
+ const originalOwner=JSON.parse(f.db.prepare('SELECT owner_json FROM veyra_voice_operations WHERE operation_id=?').get(leaf.operation.original.operationId).owner_json);
+ const foreignIds=[{ownerId:randomUUID()},{bootId:randomUUID()},{ownerGeneration:2},{leaseId:'foreign-original-lease'}].map(change=>cloneCpuFixture(f,leaf.operation,{owner_json:JSON.stringify({...originalOwner,...change}),owner_generation:change.ownerGeneration??1}));
+ const physicalProof={fixtureJoinedOriginalGroup:true};const calls=positiveControlProof(f,control,physicalProof);
+ f.ledger.retireOriginal(f.nodeContext,{operationId:control.operation.original.operationId,owner:f.owner,physicalProof});
+ assert.equal(readCpu(f,leaf.operation).resourceRetired,true);
+ for(const foreign of foreignIds){assert.equal(calls.includes(foreign),false);assert.equal(f.db.prepare('SELECT resource_retired FROM veyra_voice_operations WHERE operation_id=?').get(foreign).resource_retired,0);}
+}));
+
+test('a matching owner/control with contradictory scope fails closed without partial resource retirement',()=>run(f=>{
+ const control=f.createControl(),leaf=f.cpuOperation(control);
+ cloneCpuFixture(f,leaf.operation,{scope_hash:sha('foreign-scope')});
+ const physicalProof={fixtureJoinedOriginalGroup:true};positiveControlProof(f,control,physicalProof);
+ assert.throws(()=>f.ledger.retireOriginal(f.nodeContext,{operationId:control.operation.original.operationId,owner:f.owner,physicalProof}),/LEAF_SCOPE_CHANGED/);
+ assert.equal(f.state.retirementCalls,0);assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,0);
+}));
+
+test('a previously retired parent still requires positive scope proof to reconcile its unretired original leaves',()=>run(f=>{
+ const control=f.createControl(),leaf=f.cpuOperation(control);
+ const receipt={operationId:control.operation.original.operationId,owner:f.owner,identity:null,retentionId:randomUUID(),drained:true,verifiedAt:f.state.now};
+ // Simulate the valid parent-only receipt written by the prior implementation.
+ f.db.prepare('UPDATE veyra_voice_operations SET resource_retired=1,resource_retirement_json=?,private_revision=private_revision+1 WHERE operation_id=?').run(JSON.stringify(receipt),control.operation.original.operationId);
+ const physicalProof={fixtureRetainedPositiveOriginalGroupProof:true},request={operationId:control.operation.original.operationId,owner:f.owner,physicalProof};
+ assert.throws(()=>f.ledger.retireOriginal(f.nodeContext,request),/RETIREMENT_UNCONFIRMED/);
+ assert.equal(readCpu(f,leaf.operation).resourceRetired,false);
+ const calls=positiveControlProof(f,control,physicalProof);assert.equal(f.ledger.retireOriginal(f.nodeContext,request).resourceRetired,true);
+ assert.equal(calls.length,2);assert.equal(readCpu(f,leaf.operation).resourceRetired,true);
+ assert.equal(f.db.prepare('SELECT resource_retirement_json FROM veyra_voice_operations WHERE operation_id=?').get(control.operation.original.operationId).resource_retirement_json,JSON.stringify(receipt));
+}));
+
+test('cascade accepts 1024 unretired exact leaves and refuses 1025 before callbacks or mutations',()=>run(f=>{
+ const control=f.createControl(),leaf=f.cpuOperation(control);
+ for(let n=1;n<1025;n++)f.cpuOperation(control);
+ const physicalProof={fixtureJoinedOriginalGroup:true};positiveControlProof(f,control,physicalProof);
+ const request={operationId:control.operation.original.operationId,owner:f.owner,physicalProof};
+ assert.throws(()=>f.ledger.retireOriginal(f.nodeContext,request),/RETIREMENT_LIMIT/);
+ assert.equal(f.state.retirementCalls,0);assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,0);
+ // One independently proven retired leaf is no longer work for this bounded cascade.
+ f.state.proof=f.proof(leaf.operation,'unknown',null);f.state.retirementHook=null;
+ f.ledger.retireOriginal(f.nodeContext,{operationId:leaf.operation.original.operationId,owner:f.owner,physicalProof});
+ const calls=positiveControlProof(f,control,physicalProof);
+ assert.equal(f.ledger.retireOriginal(f.nodeContext,request).resourceRetired,true);assert.equal(calls.length,1025);
+ assert.equal(f.db.prepare('SELECT sum(resource_retired) AS n FROM veyra_voice_operations').get().n,1026);
 }));
 
 test('source validation matches the actual portable scope and CPUv2 identity implementations',async()=>run(async f=>{
