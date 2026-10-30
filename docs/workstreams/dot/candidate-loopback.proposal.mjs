@@ -1,0 +1,37 @@
+import {createServer} from "node:http";
+import {createHash,timingSafeEqual} from "node:crypto";
+import {openSync,closeSync,readFileSync,fstatSync,realpathSync,constants} from "node:fs";
+import {candidateDenied,operationRoute,CANDIDATE_BODY_LIMIT} from "./candidate-carrier.mjs";
+export const CANDIDATE_CATALOG="/usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json";
+export const CANDIDATE_CORE_ORIGIN="http://127.0.0.1:39262/api/v1";
+const sha=bytes=>createHash("sha256").update(bytes).digest("hex");
+/** Fixed immutable catalog only: never reads workspace/provider/model/user files. */
+export function readCandidateCatalog(expectedHash){let fd;try{if(realpathSync(CANDIDATE_CATALOG)!==CANDIDATE_CATALOG)candidateDenied();fd=openSync(CANDIDATE_CATALOG,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);const first=fstatSync(fd);if(!first.isFile()||first.nlink!==1||first.uid!==0||first.gid!==0||(first.mode&0o777)!==0o444||first.size<2||first.size>16384)candidateDenied();const bytes=readFileSync(fd),last=fstatSync(fd);if(first.dev!==last.dev||first.ino!==last.ino||first.size!==last.size||first.mtimeMs!==last.mtimeMs||first.ctimeMs!==last.ctimeMs||first.mode!==last.mode||last.nlink!==1||bytes.length!==first.size||sha(bytes)!==expectedHash)candidateDenied();return Object.freeze({sha256:sha(bytes),bytes:bytes.length});}finally{if(fd!==undefined)closeSync(fd);}}
+export async function candidateRequestBody(request,limit=CANDIDATE_BODY_LIMIT){let size=0;const chunks=[];for await(const chunk of request){const bytes=Buffer.from(chunk);size+=bytes.length;if(size>limit)candidateDenied();chunks.push(bytes);}return Buffer.concat(chunks,size);}
+const unavailable=response=>{if(response.headersSent){response.destroy();return;}response.writeHead(503,{"Content-Type":"application/json","Connection":"close","Cache-Control":"no-store"});response.end('{"error":{"code":"ORIGINAL_CANDIDATE_LOCAL_UNAVAILABLE"}}');};
+/** Inert model sink, never a model service: every complete request returns503.
+ * Bounded hashes/counts describe actual arrivals; no expected trace/content retained. */
+export function candidateTrapHandler({now=Date.now,stage=()=>"waiting"}={}){const records=[];let total=0;
+ const handler=async(request,response)=>{try{if(records.length>=64)candidateDenied();const index=records.length,record={sequence:index+1,method:request.method,path:request.url,stage:stage(),startedAt:now(),bodyBytes:0,complete:false};if(typeof record.path!=="string"||record.path.length>256||!/^\/[A-Za-z0-9/_-]*$/.test(record.path))candidateDenied();records.push(record);const body=await candidateRequestBody(request,256*1024);total+=body.length;if(total>1024*1024)candidateDenied();record.bodyBytes=body.length;record.bodySha256=sha(body);record.complete=true;response.writeHead(503,{"Content-Type":"application/json","Connection":"close","Cache-Control":"no-store"});response.end('{"error":{"code":"CORE126_INERT_PROVIDER_TRAP","message":"No model backend exists"}}');}catch{unavailable(response);}};
+ return Object.freeze({handler,observations:()=>structuredClone(records)});
+}
+/** Candidate local hop only. Root manager inserts the retained original candidate
+ * credential at its original HTTP owner; capability bytes never enter RPC frames. */
+export function candidateProxyHandler(carrier){let capability=null;const bound=carrier.binding;
+ const handler=async(request,response)=>{try{
+  if(!capability||carrier.closed())candidateDenied();if(request.headers.host!=="127.0.0.1:39262"||request.headers.origin||request.headers.cookie||request.headers.upgrade||request.headers["transfer-encoding"])candidateDenied();
+  const allowed=new Set(["host","authorization","x-ingenium-audience","x-ingenium-job-attempt","accept","content-type","content-length","connection","accept-language","sec-fetch-mode","user-agent","accept-encoding"]),seen=new Set();
+  for(let i=0;i<request.rawHeaders.length;i+=2){const name=request.rawHeaders[i].toLowerCase();if(!allowed.has(name)||seen.has(name))candidateDenied();seen.add(name);}
+  const supplied=Buffer.from(request.headers.authorization??""),expected=Buffer.from("Bearer "+capability);if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)||request.headers["x-ingenium-audience"]!=="job-run"||request.headers["x-ingenium-job-attempt"]!==bound.attemptId||request.headers.accept!=="application/json")candidateDenied();
+  operationRoute(request.method,request.url,bound.runId);if(request.method==="POST"&&request.headers["content-type"]!=="application/json")candidateDenied();const body=await candidateRequestBody(request);if(request.method==="GET"&&body.length)candidateDenied();
+  const result=await carrier.request(request.method,request.url,body);response.writeHead(result.status,{"Content-Type":"application/json","Connection":"close","Cache-Control":"no-store"});response.end(result.body);
+ }catch{unavailable(response);}};
+ return Object.freeze({handler,activate(value){if(capability!==null||typeof value!=="string"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(value))candidateDenied();capability=value;},clear(){capability=null;}});
+}
+const listen=(server,port)=>new Promise((resolve,reject)=>{server.once("error",reject);server.listen({host:"127.0.0.1",port,exclusive:true},()=>{server.removeListener("error",reject);const address=server.address();if(!address||typeof address==="string"||address.address!=="127.0.0.1"||address.port!==port){reject(Error("Original candidate loopback unavailable"));return;}resolve();});});
+const close=server=>new Promise(resolve=>{server.closeAllConnections();server.close(()=>resolve());});
+/** Called only INSIDE the actual waiting child. No external interface/URL/port option. */
+export async function openCandidateLoopback(carrier){const catalog=readCandidateCatalog(carrier.binding.catalogSha256),proxy=candidateProxyHandler(carrier);let stage="waiting";const trap=candidateTrapHandler({stage:()=>stage}),trapServer=createServer(trap.handler),proxyServer=createServer(proxy.handler);
+ for(const server of [trapServer,proxyServer]){server.maxConnections=8;server.requestTimeout=15000;server.headersTimeout=5000;server.keepAliveTimeout=1;server.maxHeadersCount=16;server.on("clientError",(_error,socket)=>socket.destroy());}
+ try{await listen(trapServer,39261);await listen(proxyServer,39262);return Object.freeze({observation:Object.freeze({catalogSha256:catalog.sha256,trapAddress:"127.0.0.1:39261",proxyAddress:"127.0.0.1:39262",pid:process.pid}),activate(capability){proxy.activate(capability);stage="executing";},observations:trap.observations,async close(){stage="closed";proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);}});}catch(error){proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);throw error;}
+}
