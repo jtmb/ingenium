@@ -1,0 +1,45 @@
+{
+  "nativeBase": "61c99f8e649da85b600fccec93236b5d6b07f78b",
+  "nativeBranch": "codex/veyra-parallel-native-packaging",
+  "sequence": "Apply after reviewed native speech HTTP proposal; exact frontend preimages remain mandatory",
+  "preimages": {
+    "apps/web/src/features/workbench/VoiceWorkspace.tsx": "3165a60fe8fcc771ddf8d134ad5ef40e018c38b43fb917772ea5b9c91c33c752",
+    "apps/web/src/features/workbench/VoiceChat.tsx": "4c65c2a405848b9fc86a7160d754baae1c23c269c38b5262cd1d6f9d7782fd17",
+    "apps/web/src/features/workbench/SpeechControls.tsx": "11f72fa24e406f636ec7993467b579b9bc85c6e6138c6054d66d4ed992a1908d",
+    "apps/web/src/features/voice-ui/AttentionDetails.tsx": null,
+    "apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx": null,
+    "apps/web/src/features/voice-ui/capabilities.test.ts": null,
+    "apps/web/src/features/voice-ui/capabilities.ts": null
+  },
+  "postimages": {
+    "apps/web/src/features/workbench/VoiceWorkspace.tsx": "bfc2be0cf849849f0c47221b82173af007c6dc9a2188c90219c42dd1d02d039c",
+    "apps/web/src/features/workbench/VoiceChat.tsx": "8b5444ca9962e59ee4c528a9b0d2fcbe17aa42e8a9660c185f2b68e1d56b0a85",
+    "apps/web/src/features/workbench/SpeechControls.tsx": "5196821fa7487eb6f78556ff898cbc3018c3abade7ef8120a4c1630840c461a6",
+    "apps/web/src/features/voice-ui/AttentionDetails.tsx": "2698adb067a861e58547b0cb70e1b3e64df8621f84de034375ccdfbd059a8382",
+    "apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx": "391a90056d45c9e8aa16ad622a3515efca1eb2c0085a6d1e9731d2ca79855ae8",
+    "apps/web/src/features/voice-ui/capabilities.test.ts": "999c54bd38b521fee1ef083fcf1a11c589933d6c8097cf86f7aa3a236011b26c",
+    "apps/web/src/features/voice-ui/capabilities.ts": "cde966a79e0274295363b9d5d503b5cea5bd4ebe0580b53ec725a2c6f838bdbb"
+  },
+  "patchSha256": "6c52eba057ac5e26ee6ea81034b56d99c4963e632412e014e55baf68675b5616",
+  "protectedIndexSha256": "7590eb5d25a7a757cd91ec080a02f1b49f2aee3e30b5ffd45cfb4815873b76cd",
+  "protectedPackagingFiles": [
+    {
+      "sha256": "7da2d874abe933b6facd83c0166f886bca255b49a4faaa8254093db9a74b51e4",
+      "path": "docs/workstreams/packaging/README.md"
+    },
+    {
+      "sha256": "8821b5355255a2cf406df3eca8f0ab498e01c2f206bba40c3e0f0ad233f38c82",
+      "path": "tools/veyra-release/tauri-inputs.mjs"
+    },
+    {
+      "sha256": "1894ea08fa4aeb9e221b09f3aeb6b5e4d06ff4e074317b1664b8ac785c30b1f6",
+      "path": "tools/veyra-release/tauri-inputs.test.mjs"
+    }
+  ],
+  "nativeIndexMutated": false,
+  "nativeStagedOrCommitted": false,
+  "tests": "Helper/React test source only; coordinator schedules execution",
+  "dependency": "Additive native SessionView.voice from original Record.voice; null/missing is never inferred for retained CPU read-replies",
+  "sharedComposition": "Coordinator opts shared Workbench into optional compact=true; default=false retains legacy presentation",
+  "activation": "No builds/dependencies/services/devices/audio/CU/downloads; native/runtime/browser/release acceptance open"
+}

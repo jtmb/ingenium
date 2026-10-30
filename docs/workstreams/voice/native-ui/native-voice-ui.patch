@@ -1,0 +1,637 @@
+--- a/apps/web/src/features/workbench/VoiceWorkspace.tsx
++++ b/apps/web/src/features/workbench/VoiceWorkspace.tsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useMemo, useRef, useState } from "react";
++import { useEffect, useId, useMemo, useRef, useState } from "react";
+ import type { VoiceSessionOwner } from "@veyra/contracts";
+ import { SpeechControls } from "./SpeechControls";
+ import { VoiceChat } from "./VoiceChat";
+@@ -10,14 +10,18 @@
+ /** A single audio owner per mounted composer. Requests carry the original view
+  * fence through transport dispatch as well as completion. Retained receipts
+  * survive remounts, while microphone and playback consent never do. */
+-export function VoiceWorkspace({ request, scope, projectId, sessionId, connected, disabled, continuousDisabledReason, reply, ownerMatches, isCurrent, onInsert }: {
++export function VoiceWorkspace({ request, scope, projectId, sessionId, connected, disabled, continuousDisabledReason, reply, ownerMatches, isCurrent, onInsert, compact = false }: {
+   request: SpeechRequest; scope: string; projectId: string; sessionId: string;
+   connected: boolean; disabled: boolean; reply: string;
+   continuousDisabledReason: string;
+   ownerMatches(owner: VoiceSessionOwner): boolean; isCurrent(): boolean; onInsert: TranscriptInsert;
++  compact?: boolean;
+ }) {
+   const live = useRef(true), holder = useRef<object | null>(null);
+   const [occupied, setOccupied] = useState(false);
++  const [optionsOpen, setOptionsOpen] = useState(false), [speechNeeded, setSpeechNeeded] = useState(false), [voiceNeeded, setVoiceNeeded] = useState(false);
++  const optionsId = useId(), needed = occupied || speechNeeded || voiceNeeded;
++  const expanded = !compact || optionsOpen || needed;
+   useEffect(() => { live.current = true; return () => { live.current = false; holder.current = null; }; }, []);
+   const lease = useMemo<AudioLease>(() => ({
+     claim(token) {
+@@ -29,8 +33,12 @@
+   const guarded = useMemo<SpeechRequest>(() => (method, path, body, current) =>
+     request(method, path, body, () => live.current && isCurrent() && current?.() !== false), [request, isCurrent]);
+   return <section aria-label="Voice controls" data-audio-active={occupied || undefined}>
+-    <SpeechControls request={guarded} scope={scope} connected={connected} disabled={disabled} reply={reply} onInsert={onInsert} lease={lease} isCurrent={isCurrent}/>
++    {compact && <button type="button" aria-controls={optionsId} aria-expanded={expanded} aria-disabled={needed || undefined}
++      onClick={() => { if (!needed) setOptionsOpen(value => !value); }}>Voice options{needed ? " · Activity or recovery needs attention" : ""}</button>}
++    <div id={optionsId} hidden={!expanded}>
++    <SpeechControls request={guarded} scope={scope} connected={connected} disabled={disabled} reply={reply} onInsert={onInsert} lease={lease} isCurrent={isCurrent} onPresentationNeeded={setSpeechNeeded}/>
+     {continuousDisabledReason && <p className="wb-voice-note">{continuousDisabledReason}</p>}
+-    <VoiceChat request={guarded} projectId={projectId} sessionId={sessionId} connected={connected} disabled={disabled || !!continuousDisabledReason} lease={lease} ownerMatches={ownerMatches} isCurrent={isCurrent}/>
++    <VoiceChat request={guarded} projectId={projectId} sessionId={sessionId} connected={connected} disabled={disabled || !!continuousDisabledReason} lease={lease} ownerMatches={ownerMatches} isCurrent={isCurrent} onPresentationNeeded={setVoiceNeeded}/>
++    </div>
+   </section>;
+ }
+--- a/apps/web/src/features/workbench/VoiceChat.tsx
++++ b/apps/web/src/features/workbench/VoiceChat.tsx
+@@ -1,5 +1,7 @@
+-import { useEffect, useRef, useState } from "react";
++import { useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { Mic, Square, Volume2 } from "lucide-react";
++import { AttentionDetails } from "../voice-ui/AttentionDetails";
++import { captureFrame, recordingFrames, selectedVoice, speechCapabilities, type SpeechCapabilities } from "../voice-ui/capabilities";
+ 
+ type Obj = Record<string, unknown>;
+ import type { VoiceSessionOwner } from "@veyra/contracts";
+@@ -22,12 +24,12 @@
+     return value as Tracking;
+   } catch { return { sessionId: "", issue: "The saved original voice receipt is malformed. Preserve and recover it before starting another voice session; it was not replaced." }; }
+ }
+-function wav(samples: Samples): string {
++function wav(samples: Samples, capabilities: SpeechCapabilities): string {
+   const length = samples.frames.reduce((count, frame) => count + frame.length, 0);
+-  if (!length || length > samples.rate * 20.05) throw new Error("Voice turns must contain at most 20 seconds of audio.");
++  const boundedCount = recordingFrames(length * 1000 / samples.rate, capabilities, true);
+   const source = new Float32Array(length); let position = 0;
+   for (const frame of samples.frames) { source.set(frame, position); position += frame.length; }
+-  const count = Math.min(320000, Math.floor(length * 16000 / samples.rate));
++  const count = capabilities.backend === "owned-http-cpu" ? boundedCount : Math.min(320000, Math.floor(length * 16000 / samples.rate));
+   const bytes = new Uint8Array(44 + count * 2), view = new DataView(bytes.buffer);
+   const label = (offset: number, value: string) => { for (let index = 0; index < value.length; index++) bytes[offset + index] = value.charCodeAt(index); };
+   label(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); label(8, "WAVE"); label(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); label(36, "data"); view.setUint32(40, count * 2, true);
+@@ -36,7 +38,7 @@
+   return btoa(binary);
+ }
+ 
+-export function VoiceChat({ request, projectId, sessionId, connected, disabled, lease, isCurrent, ownerMatches }: { request: SpeechRequest; projectId: string; sessionId: string; connected: boolean; disabled: boolean; lease: AudioLease; isCurrent(): boolean; ownerMatches(owner: VoiceSessionOwner): boolean }) {
++export function VoiceChat({ request, projectId, sessionId, connected, disabled, lease, isCurrent, ownerMatches, onPresentationNeeded }: { request: SpeechRequest; projectId: string; sessionId: string; connected: boolean; disabled: boolean; lease: AudioLease; isCurrent(): boolean; ownerMatches(owner: VoiceSessionOwner): boolean; onPresentationNeeded?(needed: boolean): void }) {
+   const key = `veyra.voice-chat.v1:${projectId}:${sessionId}`;
+   const [initial] = useState(() => {
+     try { const raw = localStorage.getItem(key); return { raw, tracking: readTracking(raw) }; }
+@@ -47,6 +49,10 @@
+   const [session, setSession] = useState<Obj | null>(null), [speech, setSpeech] = useState<Obj>({}), [readReplies, setReadReplies] = useState(true), [voice, setVoice] = useState("");
+   const [replyAudio, setReplyAudio] = useState<{ id: string; data: string } | null>(null);
+   const [monitoring, setMonitoring] = useState(false), [recording, setRecording] = useState(false), [playing, setPlaying] = useState(false), [seconds, setSeconds] = useState(0), [busy, setBusy] = useState(false), [paused, setPaused] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
++  const capabilities = speechCapabilities(speech);
++  const presentationNeeded = monitoring || recording || playing || busy || paused || !!tracking || !!error || session?.state === "uncertain";
++  useLayoutEffect(() => { onPresentationNeeded?.(presentationNeeded); }, [onPresentationNeeded, presentationNeeded]);
++  useLayoutEffect(() => () => onPresentationNeeded?.(false), [onPresentationNeeded]);
+   const viewCurrent = () => live.current && isCurrent();
+   const micToken = useRef({}), admittedOwner = useRef<VoiceSessionOwner | null>(null), starting = useRef(false);
+   const controlRef = useRef<(kind: "barge" | "stop") => Promise<void>>(async () => {});
+@@ -73,6 +79,10 @@
+     if (live.current) { setMonitoring(false); setRecording(false); setSeconds(0); }
+   };
+   const uncertain = (message: string) => { releaseMic(); stopPlayback(); pausedRef.current = true; if (viewCurrent()) { setPaused(true); setError(message); } };
++  const refuseUnsubmittedAudio = (message: string) => {
++    releaseMic(); stopPlayback();
++    if (viewCurrent()) { setError(message); setNotice("No utterance was submitted. Existing session and control receipts remain unchanged; stop or resume explicitly when compatible."); }
++  };
+   const playReply = (utterance: Obj) => {
+     if (!viewCurrent() || admissionBlocked.current || !admittedOwner.current || !ownerMatches(admittedOwner.current) || !lease.claim(micToken.current)) return;
+     const data = text(utterance.wav_base64); if (!data || data.length > 12 * 1024 * 1024) { if (!watching.current) lease.release(micToken.current); return; }
+@@ -202,9 +212,13 @@
+     if (!viewCurrent() || admissionBlocked.current) { queued.current = null; capture.current = null; return; }
+     const current = tracked.current, state = observed.current;
+     if (!queued.current || !current || !watching.current || pausedRef.current || writeLock.current || current.utteranceId || current.bargeId || current.stopRequested || current.stopId || state?.state !== "listening" || state.active_utterance_id != null) return;
+-    const samples = queued.current; queued.current = null; const id = crypto.randomUUID(); writeLock.current = true;
+-    try {
+-      const data = wav(samples); save({ ...current, utteranceId: id });
++    const samples = queued.current; queued.current = null;
++    let data: string;
++    try { data = wav(samples, capabilities); }
++    catch (cause) { if (viewCurrent()) refuseUnsubmittedAudio(cause instanceof Error ? cause.message : "The complete recording could not be prepared. No audio was submitted."); return; }
++    const id = crypto.randomUUID(); writeLock.current = true;
++    try {
++      save({ ...current, utteranceId: id });
+       const result = obj(await request("POST", `/v1/voice/sessions/${current.sessionId}/utterances`, { request_id: id, wav_base64: data }, viewCurrent));
+       if (viewCurrent() && tracked.current?.sessionId === current.sessionId) { if (result.id === id && result.state === "uncertain") uncertain(text(result.message) || "The voice utterance admission is uncertain."); else await checkRef.current(); }
+     } catch (cause) { if (viewCurrent()) uncertain(`${cause instanceof Error ? cause.message : "The voice utterance outcome is unknown."} Its original request must be checked before another turn.`); }
+@@ -220,7 +234,10 @@
+     let energy = 0; for (const sample of frame) energy += sample * sample;
+     const loud = Math.sqrt(energy / frame.length) >= 0.018, duration = frame.length / rate;
+     if (!active) { if (!loud) return; active = { frames: [], count: 0, speech: 0, quiet: 0, confirmed: false }; capture.current = active; }
+-    const remaining = Math.max(0, Math.floor(rate * 20) - active.count); const part = frame.subarray(0, remaining);
++    const maximum = capabilities.maxTurnMs / 1000;
++    const allowed = captureFrame(active.count, frame.length, rate, capabilities);
++    if (!allowed.ok) { refuseUnsubmittedAudio(allowed.message); return; }
++    const part = allowed.length === frame.length ? frame : frame.subarray(0, allowed.length);
+     if (part.length) { active.frames.push(new Float32Array(part)); active.count += part.length; }
+     active.speech = loud ? active.speech + duration : active.confirmed ? active.speech : 0;
+     active.quiet = loud ? 0 : active.quiet + duration;
+@@ -228,8 +245,11 @@
+       active.confirmed = true; setRecording(true);
+       if (player.current || state.state !== "listening" || state.active_utterance_id != null || current.utteranceId) { if (current.utteranceId) suppressed.current.add(current.utteranceId); rows(state.utterances).forEach(item => suppressed.current.add(text(item.id))); stopPlayback(); void control("barge"); }
+     }
+-    if (active.confirmed) setSeconds(Math.min(20, Math.floor(active.count / rate)));
+-    if ((!active.confirmed && !loud) || active.quiet >= .7 || active.count >= rate * 20) {
++    if (active.confirmed) setSeconds(Math.min(maximum, Math.floor(active.count / rate)));
++    if (capabilities.backend === "owned-http-cpu" && active.count >= rate * maximum && active.quiet < .7) {
++      refuseUnsubmittedAudio(`The spoken turn reached the ${maximum}-second CPU limit before its silence boundary. The complete turn was discarded, not split or submitted.`); return;
++    }
++    if ((!active.confirmed && !loud) || active.quiet >= .7 || active.count >= rate * maximum) {
+       capture.current = null; setRecording(false); setSeconds(0); refractory.current = Date.now() + 150;
+       if (active.confirmed) { queued.current = { frames: active.frames, rate }; flushHandler.current(); }
+     }
+@@ -251,9 +271,16 @@
+     } catch (cause) { stream.getTracks().forEach(track => track.stop()); if (context) void context.close().catch(() => {}); throw cause; }
+   };
+   const start = async () => {
+-    if (!viewCurrent() || !connected || disabled || busy || starting.current || watching.current || !sessionId || speech.transcription_configured !== true || (readReplies && speech.synthesis_configured !== true)) return;
+-    if (voice.trim() && !/^[A-Za-z0-9_]{1,64}$/.test(voice.trim())) { setError("Use a configured speech voice ID containing letters, numbers or underscores."); return; }
+     const existing = tracked.current;
++    const resumingCpu = capabilities.backend === "owned-http-cpu" && !!existing && observed.current?.state !== "stopped";
++    const wantsReplies = resumingCpu ? observed.current?.read_replies === true : readReplies;
++    if (!viewCurrent() || !connected || disabled || busy || starting.current || watching.current || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis)) return;
++    const selected = selectedVoice(resumingCpu ? text(observed.current?.voice) : voice, capabilities);
++    if (!selected.ok) { setError(selected.message); return; }
++    if (capabilities.backend === "owned-http-cpu" && existing && observed.current?.state !== "stopped" && observed.current?.read_replies === true
++      && (!text(observed.current.voice) || !capabilities.voices.includes(text(observed.current.voice)))) {
++      setError("The original session's speech voice cannot be verified against the CPU catalog in this view. Check and stop that original session before explicitly starting a compatible one; its voice was not replaced."); return;
++    }
+     if (existing && (existing.stopId || existing.bargeId || existing.utteranceId || (observed.current?.state !== "stopped" && (existing.stopRequested || pausedRef.current || !observed.current || observed.current.state !== "listening" || observed.current.active_utterance_id != null)))) { setError("Check the retained voice session and wait for its original turn/control to finish before resuming the microphone."); return; }
+     starting.current = true; setBusy(true); setError(""); setNotice("");
+     const stamp = generation.current;
+@@ -269,7 +296,7 @@
+       if (!existing || observed.current?.state === "stopped") {
+         const id = crypto.randomUUID(); save({ sessionId: id }); observed.current = null; setSession(null); played.current.clear(); suppressed.current.clear(); setReplyAudio(null); hydrated.current = true;
+         let result: Obj;
+-        try { result = obj(await request("POST", "/v1/voice/sessions", { request_id: id, project_id: projectId, session_id: sessionId, send_transcripts: true, read_replies: readReplies, owner: admittedOwner.current, ...(voice.trim() ? { voice: voice.trim() } : {}) }, viewCurrent)); }
++        try { result = obj(await request("POST", "/v1/voice/sessions", { request_id: id, project_id: projectId, session_id: sessionId, send_transcripts: true, read_replies: readReplies, owner: admittedOwner.current, ...(selected.voice && (capabilities.backend !== "owned-http-cpu" || readReplies || voice.trim()) ? { voice: selected.voice } : {}) }, viewCurrent)); }
+         catch (cause) {
+           // These service refusals precede session persistence. Storage/transport
+           // failures remain unknown and must retain the original request.
+@@ -283,6 +310,9 @@
+           throw cause;
+         }
+         if (!viewCurrent()) return; accept(result);
++        if (capabilities.backend === "owned-http-cpu" && readReplies && result.voice !== selected.voice) {
++          uncertain("The original voice session did not confirm its explicit speech voice. Check that original; no spoken turn was sent and its voice was not replaced."); return;
++        }
+         if (generation.current !== micStamp || tracked.current?.stopRequested) { releaseMic(); if (tracked.current?.stopRequested) await controlRef.current("stop"); return; }
+       }
+       if (!viewCurrent() || admissionBlocked.current) { releaseMic(); setNotice("Voice session retained while workspace admission is paused. No audio was sent; check the original session before resuming the microphone."); return; }
+@@ -304,16 +334,29 @@
+     catch (cause) { if (viewCurrent()) setError(cause instanceof Error ? cause.message : "The original reply audio could not be read."); }
+   };
+   const utterances = rows(session?.utterances).slice(-8), retained = !!tracking && session?.state !== "stopped";
+-  return <details className="wb-voice-chat"><summary><Mic size={13}/>Continuous voice chat{monitoring && <span role="status"> · Microphone on{recording ? ` · ${seconds}/20s` : ""}</span>}{playing && <span role="status"> · Reply playing</span>}</summary><div className="wb-voice-panel">
+-    <p>Spoken turns are sent automatically to this existing chat through configured local speech tools. The microphone uses a 150 ms speech onset and 700 ms silence boundary, with at most 20 seconds per turn. Local speech detection has not been qualified.</p>
++  const retainedCpu = capabilities.backend === "owned-http-cpu" && retained;
++  const displayVoice = retainedCpu ? text(session?.voice) : voice;
++  const wantsReplies = retainedCpu && session ? session.read_replies === true : readReplies;
++  const plannedVoice = selectedVoice(displayVoice, capabilities), maxSeconds = capabilities.maxTurnMs / 1000;
++  const retainedVoiceIssue = capabilities.backend === "owned-http-cpu" && retained && session?.read_replies === true
++    && (!text(session.voice) || !capabilities.voices.includes(text(session.voice)))
++    ? "The original session's speech voice is missing or unsupported by this CPU catalog. Check and stop the original before explicitly starting a compatible session. No default is inferred for it." : "";
++  return <AttentionDetails className="wb-voice-chat" needed={presentationNeeded} summary={<><Mic size={13}/>Continuous voice chat{monitoring && <span role="status"> · Microphone on{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span>}{playing && <span role="status"> · Reply playing</span>}</>}><div className="wb-voice-panel">
++    <p>Spoken turns are sent automatically to this existing chat through configured speech tools. The microphone uses a 150 ms speech onset and 700 ms silence boundary, with at most {maxSeconds} seconds per turn. Local speech detection has not been qualified.</p>
+     {!sessionId && <p>Create or select a chat first.</p>}
+-    <label className="wb-voice-check"><input type="checkbox" checked={readReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label><label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>
+-    <div className="wb-voice-actions"><button type="button" disabled={!connected || disabled || busy || monitoring || !sessionId || speech.transcription_configured !== true || (readReplies && speech.synthesis_configured !== true) || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={13}/>{retained ? "Resume microphone" : "Start voice chat and send spoken turns"}</button><button type="button" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><Square size={13}/>Stop voice chat</button><button type="button" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}>Interrupt voice turn for spoken steering</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" disabled={!connected} onClick={() => void checkRef.current()}>Check original voice session and controls</button>}</div>
+-    {(speech.transcription_configured !== true || (readReplies && speech.synthesis_configured !== true)) && <p>Configure local transcription{readReplies ? " and speech output" : ""} before starting.</p>}
+-    <p role="status">{monitoring ? disabled || !connected ? "New voice admission paused · incoming audio is discarded" : recording ? `Recording spoken turn · ${seconds}/20 seconds` : playing ? "Listening during reply playback; speaking interrupts this voice turn" : "Microphone listening" : "Microphone off"}{session ? ` · Service: ${text(session.state)}` : ""}{paused ? " · Automatic checks paused for original-request recovery" : ""}</p>
++    <label className="wb-voice-check"><input type="checkbox" checked={wantsReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label>
++    {capabilities.backend === "owned-http-cpu" ? <label>Configured speech voice<select value={displayVoice} disabled={busy || retained} onChange={event => setVoice(event.target.value)}>
++      <option value="">{retainedCpu ? "Original voice unavailable" : `Configured default${capabilities.defaultVoice ? ` (${capabilities.defaultVoice})` : " unavailable"}`}</option>
++      {displayVoice && !capabilities.voices.includes(displayVoice) && <option value={displayVoice}>{displayVoice} (unavailable)</option>}
++      {capabilities.voices.map(id => <option key={id} value={id}>{id}</option>)}
++    </select></label> : <label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>}
++    <div className="wb-voice-actions"><button type="button" disabled={!connected || disabled || busy || monitoring || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={13}/>{retained ? "Resume microphone" : "Start voice chat and send spoken turns"}</button><button type="button" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><Square size={13}/>Stop voice chat</button><button type="button" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}>Interrupt voice turn for spoken steering</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" disabled={!connected} onClick={() => void checkRef.current()}>Check original voice session and controls</button>}</div>
++    {(!capabilities.transcription || (wantsReplies && !capabilities.synthesis)) && <p>Configure transcription{wantsReplies ? " and speech output" : ""} before starting.</p>}
++    {capabilities.reason && <p role="status">{capabilities.reason}</p>}{!plannedVoice.ok && <p>{plannedVoice.message}</p>}{retainedVoiceIssue && <p role="alert">{retainedVoiceIssue}</p>}
++    <p role="status">{monitoring ? disabled || !connected ? "New voice admission paused · incoming audio is discarded" : recording ? `Recording spoken turn · ${seconds}/${maxSeconds} seconds` : playing ? "Listening during reply playback; speaking interrupts this voice turn" : "Microphone listening" : "Microphone off"}{session ? ` · Service: ${text(session.state)}` : ""}{paused ? " · Automatic checks paused for original-request recovery" : ""}</p>
+     {tracking && <p className="wb-voice-note">Original voice session: {tracking.sessionId}{tracking.utteranceId ? " · Original utterance retained" : ""}{tracking.bargeId ? " · Original interruption retained" : ""}{tracking.stopId ? " · Original stop retained" : ""}. Audio is never automatically submitted again.</p>}
+     {notice && <p role="status">{notice}</p>}{tracking?.issue && <p role="alert">{tracking.issue}</p>}{error && <p role="alert">{error}</p>}{text(session?.message) && <p>{text(session?.message)}</p>}
+     {utterances.length > 0 && <ol className="wb-voice-turns">{utterances.map(item => <li key={text(item.id)}><strong>{text(item.state)}</strong>{text(item.transcript) && <p>You: {text(item.transcript)}</p>}{text(item.reply_text) && <p>Reply: {text(item.reply_text)}</p>}{text(item.message) && <p>{text(item.message)}</p>}{replyAudio?.id === item.id ? <button type="button" onClick={() => { if (replyAudio && replyAudio.id === item.id) void playOriginalReply({ ...item, wav_base64: replyAudio.data }); }}><Volume2 size={13}/>Play reply</button> : item.state === "completed" && text(item.speech_operation_id) && <button type="button" disabled={!connected} onClick={() => void loadReply(text(item.id))}>Load original reply audio</button>}</li>)}</ol>}
+     <p className="wb-voice-note">Speaking during this view’s reply playback stops that playback immediately and requests interruption of the exact voice-owned turn. Steering audio waits for the original safe-interruption receipt. Switching away releases local devices; use Stop voice chat to stop service-owned work.</p>
+-  </div></details>;
++  </div></AttentionDetails>;
+ }
+--- a/apps/web/src/features/workbench/SpeechControls.tsx
++++ b/apps/web/src/features/workbench/SpeechControls.tsx
+@@ -1,5 +1,7 @@
+-import { useEffect, useRef, useState } from "react";
++import { useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { Mic, Square, Volume2 } from "lucide-react";
++import { AttentionDetails } from "../voice-ui/AttentionDetails";
++import { recordingFrames, speechCapabilities, speechPlan, type SpeechCapabilities } from "../voice-ui/capabilities";
+ 
+ type Obj = Record<string, unknown>;
+ import type { AudioLease, SpeechRequest, TranscriptInsert } from "./VoiceWorkspace";
+@@ -10,12 +12,11 @@
+   for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+   return btoa(binary);
+ }
+-async function canonicalWav(blob: Blob): Promise<Uint8Array> {
++async function canonicalWav(blob: Blob, capabilities: SpeechCapabilities): Promise<Uint8Array> {
+   const context = new AudioContext();
+   try {
+     const input = await context.decodeAudioData(await blob.arrayBuffer());
+-    if (!input.duration || input.duration > 60.5) throw new Error("Voice recordings are limited to 60 seconds.");
+-    const count = Math.min(60 * 16000, Math.ceil(input.duration * 16000));
++    const count = recordingFrames(input.length * 1000 / input.sampleRate, capabilities);
+     const offline = new OfflineAudioContext(1, Math.max(1, count), 16000);
+     const source = offline.createBufferSource(); source.buffer = input; source.connect(offline.destination); source.start();
+     const mono = (await offline.startRendering()).getChannelData(0);
+@@ -27,9 +28,10 @@
+   } finally { await context.close(); }
+ }
+ 
+-export function SpeechControls({ request, scope, connected, disabled, reply, onInsert, lease, isCurrent }: {
++export function SpeechControls({ request, scope, connected, disabled, reply, onInsert, lease, isCurrent, onPresentationNeeded }: {
+   request: SpeechRequest; scope: string; connected: boolean; disabled: boolean; reply: string;
+   onInsert: TranscriptInsert; lease: AudioLease; isCurrent(): boolean;
++  onPresentationNeeded?(needed: boolean): void;
+ }) {
+   const key = `veyra.speech-operation.v1:${scope}`;
+   const [status, setStatus] = useState<Obj>({});
+@@ -38,6 +40,11 @@
+   const [operation, setOperation] = useState<Obj | null>(null), [transcript, setTranscript] = useState("");
+   const [pendingId, setPendingId] = useState(() => { try { return localStorage.getItem(key) || ""; } catch { return "storage-unavailable"; } });
+   const [error, setError] = useState(""), [notice, setNotice] = useState("");
++  const [voice, setVoice] = useState("");
++  const capabilities = speechCapabilities(status);
++  const presentationNeeded = recording || busy || playing || !!pendingId || !!transcript || !!error || operation?.state === "uncertain";
++  useLayoutEffect(() => { onPresentationNeeded?.(presentationNeeded); }, [onPresentationNeeded, presentationNeeded]);
++  useLayoutEffect(() => () => onPresentationNeeded?.(false), [onPresentationNeeded]);
+   const live = useRef(true), token = useRef({}), epoch = useRef(0), locked = useRef(false), reading = useRef(false);
+   const pending = useRef(pendingId); pending.current = pendingId;
+   const available = useRef({ connected, disabled }); available.current = { connected, disabled };
+@@ -124,7 +131,7 @@
+     }
+   };
+   const startRecording = async () => {
+-    if (!canStart() || locked.current || pending.current || status.transcription_configured !== true) return;
++    if (!canStart() || locked.current || pending.current || !capabilities.transcription) return;
+     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") { setError("Microphone recording is unavailable in this browser."); return; }
+     if (!lease.claim(token.current)) { setError("Stop continuous voice or playback before dictating."); return; }
+     const stamp = ++epoch.current; locked.current = true; setBusy(true); setError(""); setNotice(""); stopPlayback();
+@@ -145,7 +152,7 @@
+         if (!valid()) return;
+         setRecording(false); setBusy(true);
+         const blob = new Blob(parts, { type: recordingDevice.mimeType }); parts.length = 0;
+-        void canonicalWav(blob).then(bytes => {
++        void canonicalWav(blob, capabilities).then(bytes => {
+           if (!valid()) return;
+           locked.current = false; void startOperation("transcribe", { wav_base64: encoded(bytes) });
+         }).catch(cause => {
+@@ -158,7 +165,10 @@
+       timer.current = window.setInterval(() => {
+         if (!valid()) { discard(); return; }
+         const elapsed = (Date.now() - started) / 1000; setSeconds(Math.floor(elapsed));
+-        if (elapsed >= 60 && recordingDevice.state === "recording") recordingDevice.stop();
++        if (elapsed >= capabilities.maxRecordingMs / 1000 && recordingDevice.state === "recording") {
++          if (capabilities.backend === "owned-http-cpu") { discard(); setError(`Recording reached the ${capabilities.maxRecordingMs / 1000}-second CPU limit. The complete recording was discarded; no audio was submitted. Stop a shorter recording explicitly to transcribe it.`); }
++          else recordingDevice.stop();
++        }
+       }, 250);
+     } catch (cause) { if (valid()) { discard(); setError(cause instanceof Error ? cause.message : "Microphone permission was not granted."); } }
+   };
+@@ -184,16 +194,23 @@
+     try { acceptOperation(obj(await request("POST", `/v1/speech/operations/${encodeURIComponent(id)}/cancel`, {}, current)), id); if (current()) setNotice("Cancellation requested. Check the original speech state before another request."); }
+     catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : "Speech cancellation was not confirmed."); }
+   };
+-  const speechText = reply.trim().slice(0, 2000);
+-  return <details className="wb-speech"><summary><Mic size={13}/>Voice and dictation{recording && <span role="status"> · Microphone on · {seconds}/60s</span>}{playing && <span role="status"> · Reply playing</span>}</summary><div className="wb-speech-controls">
++  const prepared = speechPlan(reply, voice, capabilities), maxSeconds = capabilities.maxRecordingMs / 1000;
++  return <AttentionDetails className="wb-speech" needed={presentationNeeded} summary={<><Mic size={13}/>Voice and dictation{recording && <span role="status"> · Microphone on · {seconds}/{maxSeconds}s</span>}{playing && <span role="status"> · Reply playing</span>}</>}><div className="wb-speech-controls">
+     <p>Local CPU speech tools process audio. Dictation stays in this original composer until you review and send it. For spoken steering, insert the transcript, interrupt the active task, then send or queue your instruction.</p>
+-    <span role="status">{recording ? `Microphone recording · ${seconds}/60 seconds` : busy ? "Preparing local speech" : playing ? "Playing reply · microphone off" : "Dictation microphone off"}</span>
++    <span role="status">{recording ? `Microphone recording · ${seconds}/${maxSeconds} seconds` : busy ? "Preparing local speech" : playing ? "Playing reply · microphone off" : "Dictation microphone off"}</span>
+     {recording ? <><button type="button" onClick={() => { if (recorder.current?.state === "recording") recorder.current.stop(); }}><Square size={12}/>Stop and transcribe</button><button type="button" onClick={discard}>Discard recording</button></>
+-      : <button type="button" disabled={disabled || !connected || busy || !!pendingId || status.transcription_configured !== true} onClick={() => void startRecording()}><Mic size={13}/>Dictate a message or steering instruction</button>}
++      : <button type="button" disabled={disabled || !connected || busy || !!pendingId || !capabilities.transcription} onClick={() => void startRecording()}><Mic size={13}/>Dictate a message or steering instruction</button>}
+     {busy && !pendingId && <button type="button" onClick={discard}>Cancel microphone preparation</button>}
+-    {status.transcription_configured !== true && <span>Local transcription is not configured.</span>}
+-    <button type="button" disabled={disabled || !connected || busy || recording || !!pendingId || !speechText || status.synthesis_configured !== true} onClick={() => { if (!locked.current) { stopPlayback(); void startOperation("synthesize", { text: speechText }); } }}><Volume2 size={13}/>Prepare spoken reply{reply.trim().length > 2000 ? " (first 2,000 characters)" : ""}</button>
+-    {status.synthesis_configured !== true && <span>Local speech output is not configured.</span>}
++    {!capabilities.transcription && <span>Transcription is not configured or available.</span>}
++    {capabilities.backend === "owned-http-cpu" && <label>Speech reply voice<select value={voice} disabled={busy || recording || !!pendingId} onChange={event => setVoice(event.target.value)}>
++      <option value="">Configured default{capabilities.defaultVoice ? ` (${capabilities.defaultVoice})` : " unavailable"}</option>
++      {voice && !capabilities.voices.includes(voice) && <option value={voice}>{voice} (unavailable)</option>}
++      {capabilities.voices.map(id => <option key={id} value={id}>{id}</option>)}
++    </select></label>}
++    <button type="button" disabled={disabled || !connected || busy || recording || !!pendingId || !prepared.ok || !capabilities.synthesis} onClick={() => { if (!locked.current && prepared.ok) { stopPlayback(); void startOperation("synthesize", { text: prepared.text, ...(prepared.voice ? { voice: prepared.voice } : {}) }); } }}><Volume2 size={13}/>Prepare spoken reply{capabilities.backend === "local-process" && reply.trim().length > 2000 ? " (first 2,000 characters)" : ""}</button>
++    {!capabilities.synthesis && <span>Speech output is not configured or available.</span>}
++    {capabilities.reason && <p role="status">{capabilities.reason}</p>}
++    {reply.trim() && !prepared.ok && <p>{prepared.message}</p>}
+     {operation?.state === "completed" && text(operation.wav_base64) && <button type="button" disabled={!playing && (!connected || disabled)} onClick={playing ? stopPlayback : play}>{playing ? "Stop playback" : "Play reply audio"}</button>}
+     {pendingId && <><span role="status">Original speech request retained{operation?.state ? ` · ${text(operation.state)}` : ""}{operation?.state === "uncertain" ? " · Background checks paused" : ""}</span><button type="button" disabled={!connected} onClick={() => void checkOperation(pendingId)}>Check original speech request</button><button type="button" disabled={!connected} onClick={() => void cancel()}>Cancel processing</button></>}
+     {transcript && <div className="wb-speech-transcript"><p>{transcript}</p><button type="button" disabled={disabled || !connected || !!pendingId} onClick={() => {
+@@ -203,5 +220,5 @@
+     }}>Insert transcript into original message</button><button type="button" onClick={() => setTranscript("")}>Discard transcript</button></div>}
+     <button type="button" disabled={!connected || recording || busy} onClick={() => void refreshStatus()}>Refresh speech configuration</button>
+     {notice && <p role="status">{notice}</p>}{error && <p role="alert">{error}</p>}
+-  </div></details>;
++  </div></AttentionDetails>;
+ }
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/AttentionDetails.tsx
+@@ -0,0 +1,13 @@
++import { useState, type ReactNode } from "react";
++
++/** Presentation only. The child supplies attention from its original owner state;
++ * user collapse cannot hide live stop or original-request recovery controls. */
++export function AttentionDetails({ needed, className, summary, children }: {
++  needed: boolean; className: string; summary: ReactNode; children: ReactNode;
++}) {
++  const [expanded, setExpanded] = useState(false);
++  return <details className={className} open={needed || expanded} onToggle={event => {
++    if (needed && !event.currentTarget.open) event.currentTarget.open = true;
++    else setExpanded(event.currentTarget.open);
++  }}><summary>{summary}</summary>{children}</details>;
++}
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx
+@@ -0,0 +1,114 @@
++// @vitest-environment jsdom
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import userEvent from "@testing-library/user-event";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { VoiceWorkspace, type SpeechRequest } from "../workbench/VoiceWorkspace";
++import { AttentionDetails } from "./AttentionDetails";
++
++const original = "21af783b-b665-43b4-8482-c68606c1c166";
++const cpu = { backend: "owned-http-cpu", available: true, transcription_configured: true, synthesis_configured: true,
++  limits: { min_recording_ms: 250, max_recording_ms: 15000, max_text_chars: 600, max_text_utf8_bytes: 2400, max_output_ms: 15000 },
++  voices: ["af_heart", "af_sky"], configured_default_voice: "af_heart", qualified: false };
++const common = { scope: "fixture", projectId: "project", sessionId: "working-chat", connected: true, disabled: false,
++  continuousDisabledReason: "", reply: "", ownerMatches: () => true, isCurrent: () => true,
++  onInsert: () => ({ ok: true, message: "inserted" }) };
++
++function gateway(sessionVoice?: string | null) {
++  return vi.fn<SpeechRequest>(async (method, path) => {
++    if (method === "GET" && path === "/v1/speech/status") return cpu;
++    if (method === "GET" && path === `/v1/speech/operations/${original}`)
++      return { id: original, kind: "transcribe", state: "uncertain", message: "Original outcome unconfirmed" };
++    if (method === "GET" && path === `/v1/voice/sessions/${original}`)
++      return { id: original, project_id: common.projectId, session_id: common.sessionId, state: "listening",
++        voice: sessionVoice, read_replies: true, utterances: [], active_utterance_id: null };
++    throw new Error(`Unexpected test request ${method} ${path}`);
++  });
++}
++beforeEach(() => localStorage.clear());
++afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
++
++describe("compact native voice presentation", () => {
++  it("defaults to legacy presentation without an outer options collapse", async () => {
++    const request = gateway();
++    const view = render(<VoiceWorkspace {...common} request={request}/>);
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    expect(screen.queryByRole("button", { name: /Voice options/ })).toBeNull();
++    expect(view.container.querySelector("[hidden]")).toBeNull();
++  });
++  it("collapses idle options explicitly while keeping the two real children mounted", async () => {
++    const request = gateway(), user = userEvent.setup();
++    const view = render(<VoiceWorkspace {...common} request={request} compact/>);
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    const button = screen.getByRole("button", { name: /Voice options/ });
++    const details = [...view.container.querySelectorAll("details")];
++    expect(button.getAttribute("aria-expanded")).toBe("false");
++    expect(details).toHaveLength(2);
++    await user.click(button); expect(button.getAttribute("aria-expanded")).toBe("true");
++    await user.click(button); expect(button.getAttribute("aria-expanded")).toBe("false");
++    expect([...view.container.querySelectorAll("details")]).toEqual(details);
++    expect(request).toHaveBeenCalledTimes(2);
++  });
++  it("exposes the actual uncertain speech original and cannot hide its recovery controls", async () => {
++    localStorage.setItem("veyra.speech-operation.v1:fixture", original);
++    const request = gateway(), user = userEvent.setup();
++    render(<VoiceWorkspace {...common} request={request} compact/>);
++    const recovery = await screen.findByRole("button", { name: "Check original speech request" });
++    const options = screen.getByRole("button", { name: /Voice options/ });
++    expect(options.getAttribute("aria-expanded")).toBe("true");
++    await user.click(options);
++    expect(options.getAttribute("aria-expanded")).toBe("true");
++    const details = recovery.closest("details")!;
++    details.open = false; fireEvent(details, new Event("toggle"));
++    expect(details.open).toBe(true);
++    expect(screen.getByRole("button", { name: "Cancel processing" })).toBeTruthy();
++    expect(localStorage.getItem("veyra.speech-operation.v1:fixture")).toBe(original);
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++  it("refuses an oversized CPU spoken reply before storage or any POST", async () => {
++    const request = gateway(), user = userEvent.setup();
++    render(<VoiceWorkspace {...common} request={request} reply={"x".repeat(601)} compact/>);
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    await user.click(screen.getByRole("button", { name: /Voice options/ }));
++    await user.click(screen.getByText("Voice and dictation"));
++    const prepare = screen.getByRole<HTMLButtonElement>("button", { name: "Prepare spoken reply" });
++    expect(prepare.disabled).toBe(true);
++    expect(screen.getByText(/complete reply exceeds the CPU limit/)).toBeTruthy();
++    expect(localStorage.getItem("veyra.speech-operation.v1:fixture")).toBeNull();
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++  it.each([null, "af_sarah"])("retains a CPU session with unverifiable voice %s and exposes Stop/Check", async voice => {
++    localStorage.setItem("veyra.voice-chat.v1:project:working-chat", JSON.stringify({ sessionId: original }));
++    const request = gateway(voice);
++    render(<VoiceWorkspace {...common} request={request} compact/>);
++    await screen.findByText(/original session's speech voice is missing or unsupported/);
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Resume microphone" }).disabled).toBe(true);
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Stop voice chat" }).disabled).toBe(false);
++    expect(screen.getByRole("button", { name: "Check original voice session and controls" })).toBeTruthy();
++    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Configured speech voice" }).value).toBe(voice || "");
++    expect(JSON.parse(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")!).sessionId).toBe(original);
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++  it("shows the retained advertised voice instead of replacing it with the current default", async () => {
++    localStorage.setItem("veyra.voice-chat.v1:project:working-chat", JSON.stringify({ sessionId: original }));
++    const request = gateway("af_sky");
++    render(<VoiceWorkspace {...common} request={request} compact/>);
++    await waitFor(() => expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Configured speech voice" }).value).toBe("af_sky"));
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Resume microphone" }).disabled).toBe(false);
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++  it("keeps malformed original storage visible without replacement", async () => {
++    const raw = '{"sessionId":"broken"}';
++    localStorage.setItem("veyra.voice-chat.v1:project:working-chat", raw);
++    render(<VoiceWorkspace {...common} request={gateway()} compact/>);
++    await screen.findAllByText(/saved original voice receipt is malformed/);
++    expect(screen.getByRole("button", { name: /Voice options/ }).getAttribute("aria-expanded")).toBe("true");
++    expect(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")).toBe(raw);
++  });
++  it("cannot collapse active stop controls even through a native details toggle", () => {
++    render(<AttentionDetails needed className="fixture" summary="Voice activity"><button>Stop owned playback</button></AttentionDetails>);
++    const button = screen.getByRole("button", { name: "Stop owned playback" }), details = button.closest("details")!;
++    details.open = false; fireEvent(details, new Event("toggle"));
++    expect(details.open).toBe(true);
++    expect(screen.getByRole("button", { name: "Stop owned playback" })).toBe(button);
++  });
++});
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/capabilities.test.ts
+@@ -0,0 +1,61 @@
++import { describe, expect, it } from "vitest";
++import { captureFrame, recordingFrames, selectedVoice, speechCapabilities, speechPlan } from "./capabilities";
++
++export const cpuStatus = {
++  backend: "owned-http-cpu", available: true, transcription_configured: true, synthesis_configured: true,
++  limits: { min_recording_ms: 250, max_recording_ms: 15000, max_text_chars: 600, max_text_utf8_bytes: 2400, max_output_ms: 15000 },
++  voices: ["af_heart", "af_sky"], configured_default_voice: "af_heart", qualified: false,
++};
++
++describe("native speech capability consumer", () => {
++  it("uses explicit CPU limits/catalog/default without claiming native qualification", () => {
++    const caps = speechCapabilities(cpuStatus);
++    expect(caps).toMatchObject({ backend: "owned-http-cpu", available: true, maxRecordingMs: 15000, maxTurnMs: 15000, maxTextChars: 600, maxTextBytes: 2400 });
++    expect(selectedVoice("", caps)).toEqual({ ok: true, voice: "af_heart" });
++    expect(selectedVoice("af_sarah", caps).ok).toBe(false);
++    expect(selectedVoice("af_sky", caps)).toEqual({ ok: true, voice: "af_sky" });
++  });
++  it("refuses missing/malformed CPU capabilities and an unknown backend without a local fallback", () => {
++    for (const status of [ { ...cpuStatus, limits: {} }, { ...cpuStatus, voices: [] },
++      { ...cpuStatus, configured_default_voice: "af_sarah" }, { ...cpuStatus, available: false },
++      { ...cpuStatus, limits: { ...cpuStatus.limits, max_recording_ms: 16000 } }, { ...cpuStatus, backend: "unknown" } ]) {
++      const caps = speechCapabilities(status);
++      expect(caps.transcription).toBe(false); expect(caps.synthesis).toBe(false);
++      expect(() => recordingFrames(1000, caps)).toThrow();
++    }
++  });
++  it("counts Unicode scalars and UTF-8 bytes without shortening or chunking text", () => {
++    const caps = speechCapabilities(cpuStatus), emoji = "😀".repeat(600);
++    expect(speechPlan(emoji, "", caps)).toEqual({ ok: true, voice: "af_heart", text: emoji });
++    expect(speechPlan("😀".repeat(601), "", caps).ok).toBe(false);
++    expect(speechPlan("x".repeat(601), "", caps).ok).toBe(false);
++    expect(speechPlan("\ud800", "", caps).ok).toBe(false);
++    expect(speechPlan("a\u0000b", "", caps).ok).toBe(false);
++    const strict = speechCapabilities({ ...cpuStatus, limits: { ...cpuStatus.limits, max_text_utf8_bytes: 100 } });
++    expect(speechPlan("😀".repeat(26), "", strict).ok).toBe(false);
++  });
++  it("locally refuses CPU audio outside250ms–15s before any caller reserves an original", () => {
++    const caps = speechCapabilities(cpuStatus);
++    expect(recordingFrames(250, caps)).toBe(4000);
++    expect(recordingFrames(15000, caps)).toBe(240000);
++    for (const ms of [0, 249, 15000.1, NaN, Infinity]) {
++      expect(() => recordingFrames(ms, caps)).toThrow(/No audio was submitted/);
++      expect(() => recordingFrames(ms, caps, true)).toThrow(/No audio was submitted/);
++    }
++  });
++  it("refuses a whole overflowing CPU VAD frame instead of returning a clipped prefix", () => {
++    const caps = speechCapabilities(cpuStatus);
++    expect(captureFrame(239000, 1000, 16000, caps)).toEqual({ ok: true, length: 1000 });
++    expect(captureFrame(239000, 1001, 16000, caps).ok).toBe(false);
++    expect(captureFrame(0, 1000, 16000, { ...caps, transcription: false }).ok).toBe(false);
++  });
++  it("preserves legacy local limits, text preview and frame-boundary behavior", () => {
++    const caps = speechCapabilities({ transcription_configured: true, synthesis_configured: true });
++    expect(caps.backend).toBe("local-process");
++    expect(recordingFrames(60200, caps)).toBe(960000);
++    expect(recordingFrames(20010, caps, true)).toBe(320000);
++    expect(captureFrame(319000, 2000, 16000, caps)).toEqual({ ok: true, length: 1000 });
++    expect(speechPlan("x".repeat(2001), "", caps)).toEqual({ ok: true, text: "x".repeat(2000) });
++    expect(selectedVoice("af_sarah", caps)).toEqual({ ok: true, voice: "af_sarah" });
++  });
++});
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/capabilities.ts
+@@ -0,0 +1,100 @@
++/** Read-only presentation/admission limits from the existing native speech owner.
++ * This module owns no request, device, transcript or operation receipt. */
++export type SpeechCapabilities = {
++  backend: "local-process" | "owned-http-cpu" | "unavailable";
++  available: boolean; transcription: boolean; synthesis: boolean;
++  minRecordingMs: number; maxRecordingMs: number; maxTurnMs: number;
++  maxTextChars: number; maxTextBytes: number;
++  voices: readonly string[]; defaultVoice?: string; reason: string;
++};
++type Obj = Record<string, unknown>;
++const object = (value: unknown): Obj => value && typeof value === "object" && !Array.isArray(value) ? value as Obj : {};
++const integer = (value: unknown, floor: number, ceiling: number): value is number =>
++  typeof value === "number" && Number.isInteger(value) && value >= floor && value <= ceiling;
++const voiceId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_]{1,64}$/.test(value);
++
++export function speechCapabilities(value: unknown): SpeechCapabilities {
++  const status = object(value);
++  const local: SpeechCapabilities = { backend: "local-process", available: true,
++    transcription: status.transcription_configured === true, synthesis: status.synthesis_configured === true,
++    minRecordingMs: 0, maxRecordingMs: 60000, maxTurnMs: 20000,
++    maxTextChars: 2000, maxTextBytes: Infinity, voices: [], defaultVoice: "af_sarah", reason: "" };
++  // Older native local-process status omitted backend; its existing behavior is retained.
++  if (status.backend === undefined || status.backend === "local-process") return local;
++  const unavailable: SpeechCapabilities = { ...local, backend: "unavailable", available: false,
++    transcription: false, synthesis: false, reason: "The selected speech backend is unavailable. Refresh its existing configuration before starting." };
++  if (status.backend !== "owned-http-cpu") return unavailable;
++  const limits = object(status.limits), voices = status.voices;
++  if (!integer(limits.min_recording_ms, 250, 15000) || !integer(limits.max_recording_ms, 250, 15000)
++    || limits.min_recording_ms > limits.max_recording_ms || !integer(limits.max_text_chars, 1, 600)
++    || !integer(limits.max_text_utf8_bytes, 1, 2400) || !integer(limits.max_output_ms, 1, 15000)
++    || !Array.isArray(voices) || !voices.length || voices.length > 256 || !voices.every(voiceId)
++    || new Set(voices).size !== voices.length || !voiceId(status.configured_default_voice)
++    || !voices.includes(status.configured_default_voice)) {
++    return { ...unavailable, backend: "owned-http-cpu", reason: "CPU speech limits or advertised voices are missing or invalid. No audio or text will be submitted." };
++  }
++  const available = status.available === true;
++  return { backend: "owned-http-cpu", available,
++    transcription: available && status.transcription_configured === true,
++    synthesis: available && status.synthesis_configured === true,
++    minRecordingMs: limits.min_recording_ms, maxRecordingMs: limits.max_recording_ms,
++    maxTurnMs: limits.max_recording_ms, maxTextChars: limits.max_text_chars,
++    maxTextBytes: limits.max_text_utf8_bytes, voices, defaultVoice: status.configured_default_voice,
++    reason: available ? "" : "The selected CPU speech worker is unavailable. Original requests remain retained." };
++}
++
++export type SpeechPlan = { ok: true; text: string; voice?: string } | { ok: false; message: string };
++export function selectedVoice(selection: string, caps: SpeechCapabilities): { ok: true; voice?: string } | { ok: false; message: string } {
++  const voice = selection.trim();
++  if (caps.backend === "unavailable" || !caps.available) return { ok: false, message: caps.reason };
++  if (caps.backend === "local-process") return !voice || voiceId(voice)
++    ? { ok: true, ...(voice ? { voice } : {}) } : { ok: false, message: "Use a configured voice ID containing letters, numbers or underscores." };
++  const original = voice || caps.defaultVoice;
++  return original && caps.voices.includes(original) ? { ok: true, voice: original }
++    : { ok: false, message: `The selected voice ${voice || "(no configured default)"} is not advertised by the CPU backend. It was not replaced.` };
++}
++
++export function speechPlan(reply: string, selection: string, caps: SpeechCapabilities): SpeechPlan {
++  const voice = selectedVoice(selection, caps);
++  if (!voice.ok) return voice;
++  const text = reply.trim();
++  if (!text) return { ok: false, message: "There is no reply text to speak." };
++  if (caps.backend === "local-process") return { ...voice, text: text.slice(0, 2000) };
++  let count = 0;
++  for (const character of text) {
++    if (++count > caps.maxTextChars) return { ok: false, message: `The complete reply exceeds the CPU limit of ${caps.maxTextChars} characters. It was not shortened or submitted.` };
++    const code = character.charCodeAt(0);
++    if ((character.length === 1 && code >= 0xd800 && code <= 0xdfff) || (code < 32 && character !== "\n" && character !== "\t"))
++      return { ok: false, message: "The reply contains unsupported speech text. No text was submitted." };
++  }
++  if (new TextEncoder().encode(text).length > caps.maxTextBytes)
++    return { ok: false, message: `The complete reply exceeds the CPU limit of ${caps.maxTextBytes} UTF-8 bytes. It was not shortened or submitted.` };
++  return { ...voice, text };
++}
++
++/** A failed preparation is a known local refusal, before reserving an original. */
++export function recordingFrames(durationMs: number, caps: SpeechCapabilities, continuous = false): number {
++  const maximum = continuous ? caps.maxTurnMs : caps.maxRecordingMs;
++  if (!caps.available || !caps.transcription) throw new Error(caps.reason || "Transcription is not configured. No audio was submitted.");
++  if (!Number.isFinite(durationMs) || durationMs <= 0 || (caps.backend === "owned-http-cpu"
++    ? durationMs < caps.minRecordingMs || durationMs > maximum : durationMs > maximum + (continuous ? 50 : 500)))
++    throw new Error(`The recording must contain ${caps.minRecordingMs ? `${caps.minRecordingMs / 1000}–` : "at most "}${maximum / 1000} seconds. No audio was submitted.`);
++  // Only the existing local-process path retains its historical boundary tolerance.
++  const frames = continuous ? Math.floor(durationMs * 16) : Math.ceil(durationMs * 16);
++  if (caps.backend === "owned-http-cpu") {
++    if (frames < caps.minRecordingMs * 16 || frames > maximum * 16) throw new Error("The complete recording exceeds CPU audio limits. No audio was submitted.");
++    return frames;
++  }
++  return Math.min(maximum * 16, frames);
++}
++
++/** Bound the next whole VAD frame. CPU admission never retains a prefix of an
++ * oversized turn; the local-process path keeps its existing frame clipping. */
++export function captureFrame(count: number, length: number, rate: number, caps: SpeechCapabilities):
++  { ok: true; length: number } | { ok: false; message: string } {
++  const maximum = Math.floor(rate * caps.maxTurnMs / 1000);
++  if (caps.backend === "unavailable") return { ok: false, message: caps.reason };
++  if (caps.backend === "owned-http-cpu" && (!caps.transcription || !Number.isFinite(rate) || rate <= 0 || count + length > maximum))
++    return { ok: false, message: `The complete spoken turn exceeds the ${caps.maxTurnMs / 1000}-second CPU limit or its backend is unavailable. No audio was submitted.` };
++  return { ok: true, length: caps.backend === "owned-http-cpu" ? length : Math.max(0, Math.min(length, maximum - count)) };
++}
