@@ -7,7 +7,7 @@ BEGIN SELECT RAISE(ABORT,'Archived plugins cannot activate'); END;
 CREATE TRIGGER plugins_revision AFTER UPDATE ON plugins WHEN NEW.revision=OLD.revision
 BEGIN UPDATE plugins SET revision=OLD.revision+1 WHERE id=OLD.id; END;
 CREATE TABLE plugin_lifecycle_events(
- id TEXT PRIMARY KEY DEFAULT(lower(hex(randomblob(16)))),plugin_id TEXT NOT NULL REFERENCES plugins(id),
+ id TEXT NOT NULL PRIMARY KEY DEFAULT(lower(hex(randomblob(16)))),plugin_id TEXT NOT NULL REFERENCES plugins(id),
  project_id TEXT NOT NULL REFERENCES projects(id),previous_revision INTEGER NOT NULL,next_revision INTEGER NOT NULL,
  action TEXT NOT NULL CHECK(action IN('archive','restore')),created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')));
 CREATE TRIGGER plugins_lifecycle_event AFTER UPDATE OF archived_at ON plugins WHEN OLD.archived_at IS NOT NEW.archived_at
@@ -16,7 +16,7 @@ BEGIN INSERT INTO plugin_lifecycle_events(plugin_id,project_id,previous_revision
 CREATE TRIGGER plugin_lifecycle_event_no_update BEFORE UPDATE ON plugin_lifecycle_events BEGIN SELECT RAISE(ABORT,'Immutable plugin lifecycle event'); END;
 CREATE TRIGGER plugin_lifecycle_event_no_delete BEFORE DELETE ON plugin_lifecycle_events BEGIN SELECT RAISE(ABORT,'Immutable plugin lifecycle event'); END;
 CREATE TABLE customize_catalog_sources(
- id TEXT PRIMARY KEY,parent_source_id TEXT REFERENCES customize_catalog_sources(id),installation_id TEXT NOT NULL,organization_id TEXT NOT NULL REFERENCES organizations(id),
+ id TEXT NOT NULL PRIMARY KEY,parent_source_id TEXT REFERENCES customize_catalog_sources(id),installation_id TEXT NOT NULL,organization_id TEXT NOT NULL REFERENCES organizations(id),
  owner_user_id TEXT REFERENCES users(id),visibility TEXT NOT NULL CHECK(visibility IN('personal','public','system')),
  kind TEXT NOT NULL CHECK(kind IN('plugin','skill')),name TEXT NOT NULL,description TEXT NOT NULL,
  source_project_id TEXT NOT NULL REFERENCES projects(id),source_resource_id TEXT NOT NULL,source_revision INTEGER NOT NULL,
@@ -33,7 +33,7 @@ WHEN NEW.id<>OLD.id OR NEW.parent_source_id IS NOT OLD.parent_source_id OR NEW.i
 BEGIN SELECT RAISE(ABORT,'Immutable catalog snapshot'); END;
 CREATE TRIGGER customize_catalog_no_delete BEFORE DELETE ON customize_catalog_sources BEGIN SELECT RAISE(ABORT,'Retain catalog snapshot'); END;
 CREATE TABLE customize_commands(
- id TEXT PRIMARY KEY,installation_id TEXT NOT NULL,actor_id TEXT NOT NULL REFERENCES users(id),
+ id TEXT NOT NULL PRIMARY KEY,installation_id TEXT NOT NULL,actor_id TEXT NOT NULL REFERENCES users(id),
  project_id TEXT REFERENCES projects(id),kind TEXT NOT NULL CHECK(kind IN('plugin','skill')),resource_key TEXT NOT NULL,
  original_json TEXT NOT NULL CHECK(json_valid(original_json)),payload_sha256 TEXT NOT NULL CHECK(length(payload_sha256)=64),
  result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),created_at TEXT NOT NULL);
@@ -45,7 +45,7 @@ WHEN NEW.id<>OLD.id OR NEW.installation_id<>OLD.installation_id OR NEW.actor_id<
 BEGIN SELECT RAISE(ABORT,'Immutable original or first receipt'); END;
 CREATE TRIGGER customize_command_no_delete BEFORE DELETE ON customize_commands BEGIN SELECT RAISE(ABORT,'Retain Customize original'); END;
 CREATE TABLE customize_installations(
- id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES customize_catalog_sources(id),source_sha256 TEXT NOT NULL,
+ id TEXT NOT NULL PRIMARY KEY,source_id TEXT NOT NULL REFERENCES customize_catalog_sources(id),source_sha256 TEXT NOT NULL,
  project_id TEXT NOT NULL REFERENCES projects(id),kind TEXT NOT NULL CHECK(kind IN('plugin','skill')),target_name TEXT NOT NULL,
  resource_id TEXT,proposal_id TEXT REFERENCES skill_proposals(id),command_id TEXT NOT NULL UNIQUE REFERENCES customize_commands(id),
  created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,
@@ -54,13 +54,13 @@ CREATE TRIGGER customize_installation_no_update BEFORE UPDATE ON customize_insta
 CREATE TRIGGER customize_installation_no_delete BEFORE DELETE ON customize_installations BEGIN SELECT RAISE(ABORT,'Retain installation provenance'); END;-- Server-observed private metadata witness, committed with the actual original claim.
 -- No auth/session/credential/vault rows or Native remote-result interpretation.
 CREATE TABLE customize_projection_preimages(
- command_id TEXT PRIMARY KEY REFERENCES customize_commands(id),snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json)),
+ command_id TEXT NOT NULL PRIMARY KEY REFERENCES customize_commands(id),snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json)),
  snapshot_sha256 TEXT NOT NULL CHECK(length(snapshot_sha256)=64));
 CREATE TRIGGER customize_preimage_no_update BEFORE UPDATE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Immutable server projection preimage'); END;
 CREATE TRIGGER customize_preimage_no_delete BEFORE DELETE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Retain original server projection preimage'); END;
 -- Explicit separately versioned consent metadata, proved by original Native custody.
 CREATE TABLE customize_native_consents(
- id TEXT PRIMARY KEY,owner_user_id TEXT NOT NULL REFERENCES users(id),installation_id TEXT NOT NULL,
+ id TEXT NOT NULL PRIMARY KEY,owner_user_id TEXT NOT NULL REFERENCES users(id),installation_id TEXT NOT NULL,
  parent_grant_id TEXT NOT NULL REFERENCES native_hosted_governance_grants(id),enrollment_request_id TEXT NOT NULL,
  organization_id TEXT NOT NULL REFERENCES organizations(id),hosted_project_id TEXT NOT NULL REFERENCES projects(id),
  native_custodian_grant_id TEXT NOT NULL,original_json TEXT NOT NULL CHECK(json_valid(original_json)),
@@ -83,3 +83,30 @@ BEGIN SELECT RAISE(ABORT,'Scoped original context required'); END;
 CREATE TRIGGER customize_native_request_immutable BEFORE UPDATE ON customize_commands
 WHEN NEW.native_consent_id IS NOT OLD.native_consent_id OR NEW.native_request_sha256 IS NOT OLD.native_request_sha256
 BEGIN SELECT RAISE(ABORT,'Immutable scoped original context'); END;
+-- Explicit ABORT guards run before SQLite conflict resolution, including OR REPLACE/IGNORE.
+-- They do not depend on DELETE trigger recursion or foreign-key enforcement.
+CREATE TRIGGER plugin_lifecycle_events_original_insert BEFORE INSERT ON plugin_lifecycle_events
+WHEN NEW.id IS NULL OR typeof(NEW.id)<>'text' OR length(NEW.id)=0 OR EXISTS(SELECT 1 FROM plugin_lifecycle_events WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+CREATE TRIGGER customize_catalog_sources_original_insert BEFORE INSERT ON customize_catalog_sources
+WHEN NEW.id IS NULL OR typeof(NEW.id)<>'text' OR length(NEW.id)=0 OR EXISTS(SELECT 1 FROM customize_catalog_sources WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+CREATE TRIGGER customize_commands_original_insert BEFORE INSERT ON customize_commands
+WHEN NEW.id IS NULL OR typeof(NEW.id)<>'text' OR length(NEW.id)=0 OR EXISTS(SELECT 1 FROM customize_commands WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+CREATE TRIGGER customize_installations_original_insert BEFORE INSERT ON customize_installations
+WHEN NEW.id IS NULL OR typeof(NEW.id)<>'text' OR length(NEW.id)=0 OR EXISTS(SELECT 1 FROM customize_installations WHERE id=NEW.id) OR NEW.command_id IS NULL OR typeof(NEW.command_id)<>'text' OR length(NEW.command_id)=0 OR EXISTS(SELECT 1 FROM customize_installations WHERE command_id=NEW.command_id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+CREATE TRIGGER customize_projection_preimages_original_insert BEFORE INSERT ON customize_projection_preimages
+WHEN NEW.command_id IS NULL OR typeof(NEW.command_id)<>'text' OR length(NEW.command_id)=0 OR EXISTS(SELECT 1 FROM customize_projection_preimages WHERE command_id=NEW.command_id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+CREATE TRIGGER customize_native_consents_original_insert BEFORE INSERT ON customize_native_consents
+WHEN NEW.id IS NULL OR typeof(NEW.id)<>'text' OR length(NEW.id)=0 OR EXISTS(SELECT 1 FROM customize_native_consents WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'Original identity collision or missing identity'); END;
+-- A nonterminal or unrelated JSON value must never release pending custody.
+CREATE TRIGGER customize_command_terminal_insert BEFORE INSERT ON customize_commands
+WHEN NEW.result_json IS NOT NULL AND (json_valid(NEW.result_json)=0 OR json_type(NEW.result_json) IS NOT 'object' OR json_extract(NEW.result_json,'$.operationId') IS NOT NEW.id OR json_extract(NEW.result_json,'$.payloadSha256') IS NOT NEW.payload_sha256 OR COALESCE(json_extract(NEW.result_json,'$.outcome'),'') NOT IN ('succeeded','refused'))
+BEGIN SELECT RAISE(ABORT,'Only the exact original terminal receipt releases custody'); END;
+CREATE TRIGGER customize_command_terminal_update BEFORE UPDATE ON customize_commands
+WHEN NEW.result_json IS NOT NULL AND (json_valid(NEW.result_json)=0 OR json_type(NEW.result_json) IS NOT 'object' OR json_extract(NEW.result_json,'$.operationId') IS NOT NEW.id OR json_extract(NEW.result_json,'$.payloadSha256') IS NOT NEW.payload_sha256 OR COALESCE(json_extract(NEW.result_json,'$.outcome'),'') NOT IN ('succeeded','refused'))
+BEGIN SELECT RAISE(ABORT,'Only the exact original terminal receipt releases custody'); END;

@@ -1,0 +1,37 @@
+{
+  "sqlSha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09",
+  "matrix": [
+    {
+      "foreignKeys": 0,
+      "recursiveTriggers": 0,
+      "rejectedMutationsPreservedExactDump": 324,
+      "legitimateFirstReceiptAndRevocation": "passed",
+      "pluginArchiveRestoreEvents": "passed"
+    },
+    {
+      "foreignKeys": 0,
+      "recursiveTriggers": 1,
+      "rejectedMutationsPreservedExactDump": 324,
+      "legitimateFirstReceiptAndRevocation": "passed",
+      "pluginArchiveRestoreEvents": "passed"
+    },
+    {
+      "foreignKeys": 1,
+      "recursiveTriggers": 0,
+      "rejectedMutationsPreservedExactDump": 324,
+      "legitimateFirstReceiptAndRevocation": "passed",
+      "pluginArchiveRestoreEvents": "passed"
+    },
+    {
+      "foreignKeys": 1,
+      "recursiveTriggers": 1,
+      "rejectedMutationsPreservedExactDump": 324,
+      "legitimateFirstReceiptAndRevocation": "passed",
+      "pluginArchiveRestoreEvents": "passed"
+    }
+  ],
+  "totalRejectedMutations": 1296,
+  "actualAuthSessionsOrPrincipalsCreated": 0,
+  "structuralReferenceIdentifiersOnly": true,
+  "actualCoreMigrationNativeOrRuntimeAcceptance": false
+}

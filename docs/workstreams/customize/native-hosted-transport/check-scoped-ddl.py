@@ -15,6 +15,8 @@ columns={row[1] for row in connection.execute('PRAGMA table_info(plugins)')}
 assert {'revision','archived_at'}<=columns
 names={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
 assert {'plugins_archived_inactive','plugins_revision','plugins_lifecycle_event','customize_catalog_immutable','customize_command_no_update','customize_command_no_delete','customize_installation_no_update','customize_preimage_no_update','customize_preimage_no_delete'}<=names
+assert {table+'_original_insert' for table in ['plugin_lifecycle_events','customize_catalog_sources','customize_commands','customize_installations','customize_projection_preimages','customize_native_consents']}<=names
+assert {'customize_command_terminal_insert','customize_command_terminal_update'}<=names
 assert connection.execute('SELECT count(*) FROM users').fetchone()[0]==0
 assert connection.execute('SELECT count(*) FROM customize_commands').fetchone()[0]==0
 print(json.dumps({'ddlSyntax':'passed','triggers':len(names),'authOrSessionRowsCreated':0,'liveMigrationOrOwnerAcceptance':False}))

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "baseCheckpoint": "9a8976ab559a0528c19c688b6fdb5b6708d7507c",
+  "sourceOnly": true,
+  "sources": [
+    {
+      "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+      "preimageSha256": "41e9c624fb2a65ad90d4d9068cb43133154f2c683ddd1f091942041e068e67bb",
+      "postimageSha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09"
+    }
+  ],
+  "rootOwnsActualRegistration": true,
+  "forbiddenSharedChanges": [
+    "lib/db.ts",
+    "SQL132",
+    "auth schema",
+    "vault schema",
+    "SQL101",
+    "SQL102"
+  ],
+  "behaviorReceipt": "sql133-hardening-verification.json"
+}
