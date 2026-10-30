@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 1,
+  "owner": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "at": "2026-10-30T21:22:03.203Z",
+  "scope": "Bounded read-only APP optional/platform/source-map provenance; own docs/status writes only",
+  "app": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "platform": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "arch": "x64",
+    "glibc": "2.43"
+  },
+  "lock": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/package-lock.json",
+    "sha256": "07e954e2af4bad758da89ffe94d08cc1309568a9d990c321aba7cdf2dd87e179"
+  },
+  "candidates": [
+    {
+      "name": "lightningcss-linux-x64-musl",
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/lightningcss-linux-x64-musl",
+      "version": "1.32.0",
+      "lockEntry": {
+        "version": "1.32.0",
+        "resolved": "https://registry.npmjs.org/lightningcss-linux-x64-musl/-/lightningcss-linux-x64-musl-1.32.0.tgz",
+        "integrity": "sha512-bYcLp+Vb0awsiXg/80uCRezCYHNg1/l3mt0gzHnWV9XP1W5sKa5/TCdGWaR/zBM2PeF/HbsQv/j2URNOiVuxWg==",
+        "cpu": [
+          "x64"
+        ],
+        "dev": true,
+        "license": "MPL-2.0",
+        "optional": true,
+        "os": [
+          "linux"
+        ],
+        "engines": {
+          "node": ">= 12.0.0"
+        },
+        "funding": {
+          "type": "opencollective",
+          "url": "https://opencollective.com/parcel"
+        }
+      },
+      "installedPackageManifest": {
+        "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/lightningcss-linux-x64-musl/package.json",
+        "bytes": 747,
+        "sha256": "6d7a4bcc5fef739dae30dbf9852578f2d31b69a174f7b9333eb0dbdf03a959c9"
+      },
+      "libc": [
+        "musl"
+      ],
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "parents": [
+        {
+          "path": "node_modules/lightningcss",
+          "optionalDependency": "1.32.0"
+        }
+      ],
+      "inode": 2057047,
+      "device": 2096,
+      "nlink": 2,
+      "symlink": false,
+      "realpath": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/lightningcss-linux-x64-musl",
+      "linuxAllocatedBytes": 10067968,
+      "logicalFileBytes": 10052671,
+      "entries": [
+        {
+          "path": "LICENSE",
+          "inode": 2424741,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 15648,
+          "allocatedBytes": 16384,
+          "type": "file",
+          "sha256": "5eba353fe5076ac3432177f8ab1cf75e3afcd0584251e37c3bfead5f447d040e"
+        },
+        {
+          "path": "README.md",
+          "inode": 2424870,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 124,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "92bdef8edfb887ee9a14bce8d8f081d332c5f2578248253ff7a176f0571844b1"
+        },
+        {
+          "path": "lightningcss.linux-x64-musl.node",
+          "inode": 2424927,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 10036152,
+          "allocatedBytes": 10039296,
+          "type": "file",
+          "sha256": "e2c30fdc3868240af5ad6c8ec0a034848bad9a78f4b0fd32f3a41cd890814b19"
+        },
+        {
+          "path": "package.json",
+          "inode": 2424827,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 747,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "6d7a4bcc5fef739dae30dbf9852578f2d31b69a174f7b9333eb0dbdf03a959c9"
+        }
+      ],
+      "inventorySha256": "72de8f2a657ac24780bee0e9f4970f4b0b3805b655695c0a7ab5198a8e55355a",
+      "consumerConclusion": "No current consumer found in reviewed glibc APP/Next/Sharp/LightningCSS/Docker graph; source-supported candidate only, Root final deletion safety checks outstanding."
+    },
+    {
+      "name": "@img/sharp-linuxmusl-x64",
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-linuxmusl-x64",
+      "version": "0.35.5",
+      "lockEntry": {
+        "version": "0.35.5",
+        "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.5.tgz",
+        "integrity": "sha512-4KOphqB035HrVdqLZfCgMzzERrQkkzOwRhl4OAkRO1YCldbaFjySXMaK534Mo0V+LndnlJk+sbUyLeU0ULyD1A==",
+        "cpu": [
+          "x64"
+        ],
+        "license": "Apache-2.0",
+        "optional": true,
+        "os": [
+          "linux"
+        ],
+        "engines": {
+          "node": ">=20.9.0"
+        },
+        "funding": {
+          "url": "https://opencollective.com/libvips"
+        },
+        "optionalDependencies": {
+          "@img/sharp-libvips-linuxmusl-x64": "1.3.4"
+        }
+      },
+      "installedPackageManifest": {
+        "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-linuxmusl-x64/package.json",
+        "bytes": 931,
+        "sha256": "1d41eb946e8c574f27606680c8a674adce6936ef3fc05b754be38a3e3fd3857e"
+      },
+      "libc": [
+        "musl"
+      ],
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "parents": [
+        {
+          "path": "node_modules/sharp",
+          "optionalDependency": "0.35.5"
+        }
+      ],
+      "inode": 2420258,
+      "device": 2096,
+      "nlink": 3,
+      "symlink": false,
+      "realpath": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-linuxmusl-x64",
+      "linuxAllocatedBytes": 335872,
+      "logicalFileBytes": 313375,
+      "entries": [
+        {
+          "path": "LICENSE",
+          "inode": 2439985,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 10273,
+          "allocatedBytes": 12288,
+          "type": "file",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "inode": 2440424,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 700,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "711a113a4feee4312861aaa9d0bacb8693a37ff1614861f21302a1e500e63744"
+        },
+        {
+          "path": "index.cjs",
+          "inode": 2440236,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 143,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "5e1b7be0f83e850ad2bd2504aaa0ec9195fe18d4795475e53854103b5b43838c"
+        },
+        {
+          "path": "lib",
+          "inode": 2440425,
+          "device": 2096,
+          "nlink": 2,
+          "bytes": 4096,
+          "allocatedBytes": 4096,
+          "type": "directory"
+        },
+        {
+          "path": "lib/sharp-linuxmusl-x64-0.35.5.node",
+          "inode": 2440706,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 301328,
+          "allocatedBytes": 303104,
+          "type": "file",
+          "sha256": "14ce8ddd283c101f225089152da805632568bfa372d336ccbfdd811f4f1dca02"
+        },
+        {
+          "path": "package.json",
+          "inode": 2440314,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 931,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "1d41eb946e8c574f27606680c8a674adce6936ef3fc05b754be38a3e3fd3857e"
+        }
+      ],
+      "inventorySha256": "4f4370cd12c84ea622669d6e6ce0f664b0e0ce4e9f82fe64fe5e0d48cc56aac8",
+      "consumerConclusion": "No current consumer found in reviewed glibc APP/Next/Sharp/LightningCSS/Docker graph; source-supported candidate only, Root final deletion safety checks outstanding."
+    },
+    {
+      "name": "@img/sharp-libvips-linuxmusl-x64",
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-libvips-linuxmusl-x64",
+      "version": "1.3.4",
+      "lockEntry": {
+        "version": "1.3.4",
+        "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.4.tgz",
+        "integrity": "sha512-6zXKeE/p39I1AmA3cJG35eyBGNqNddLnUXjhwBnsGjFPWqf5VKkDBEqaEkPDoTEtkxwi2vv8Tcr2mDyP4So7Fg==",
+        "cpu": [
+          "x64"
+        ],
+        "license": "LGPL-3.0-or-later",
+        "optional": true,
+        "os": [
+          "linux"
+        ],
+        "funding": {
+          "url": "https://opencollective.com/libvips"
+        }
+      },
+      "installedPackageManifest": {
+        "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-libvips-linuxmusl-x64/package.json",
+        "bytes": 941,
+        "sha256": "9d93c5ff1a47f5c79286f6c832e0ab9001feff6db50b9085f578b20a663b580e"
+      },
+      "libc": [
+        "musl"
+      ],
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "parents": [
+        {
+          "path": "node_modules/@img/sharp-linuxmusl-x64",
+          "optionalDependency": "1.3.4"
+        },
+        {
+          "path": "node_modules/sharp",
+          "optionalDependency": "1.3.4"
+        }
+      ],
+      "inode": 2420250,
+      "device": 2096,
+      "nlink": 3,
+      "symlink": false,
+      "realpath": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-libvips-linuxmusl-x64",
+      "linuxAllocatedBytes": 18956288,
+      "logicalFileBytes": 18922966,
+      "entries": [
+        {
+          "path": "README.md",
+          "inode": 2559328,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 4334,
+          "allocatedBytes": 8192,
+          "type": "file",
+          "sha256": "df733be80a44f45878f212d7f0859ffd18fbdd8ed988b5226663487732aa1c1c"
+        },
+        {
+          "path": "lib",
+          "inode": 2439913,
+          "device": 2096,
+          "nlink": 3,
+          "bytes": 4096,
+          "allocatedBytes": 4096,
+          "type": "directory"
+        },
+        {
+          "path": "lib/glib-2.0",
+          "inode": 2559061,
+          "device": 2096,
+          "nlink": 3,
+          "bytes": 4096,
+          "allocatedBytes": 4096,
+          "type": "directory"
+        },
+        {
+          "path": "lib/glib-2.0/include",
+          "inode": 2559094,
+          "device": 2096,
+          "nlink": 2,
+          "bytes": 4096,
+          "allocatedBytes": 4096,
+          "type": "directory"
+        },
+        {
+          "path": "lib/glib-2.0/include/glibconfig.h",
+          "inode": 2559142,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 5923,
+          "allocatedBytes": 8192,
+          "type": "file",
+          "sha256": "07baaf7ef57ac20fa5e0220ab88b9cf2f23d6a433b5305360ef285b36633d9ca"
+        },
+        {
+          "path": "lib/index.js",
+          "inode": 2559224,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 28,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "516a08c06660cddb50d5f30ccac29a0514b05724956a11e8a7e6b799f2e1ab72"
+        },
+        {
+          "path": "lib/libvips-cpp.so.8.18.7",
+          "inode": 2440072,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 18911144,
+          "allocatedBytes": 18911232,
+          "type": "file",
+          "sha256": "979b625437190a1970b835164e0e30d47dc60159ce6a394ce78cc40cb9d59ab8"
+        },
+        {
+          "path": "package.json",
+          "inode": 2559278,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 941,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "9d93c5ff1a47f5c79286f6c832e0ab9001feff6db50b9085f578b20a663b580e"
+        },
+        {
+          "path": "versions.json",
+          "inode": 2559305,
+          "device": 2096,
+          "nlink": 1,
+          "bytes": 596,
+          "allocatedBytes": 4096,
+          "type": "file",
+          "sha256": "e2611d5d854815a8b33c8a3d2ec649511a9596ccf16844e8eae7cf81e79881c4"
+        }
+      ],
+      "inventorySha256": "6af6b79fb632c2eb8056985653cf1dc29cf072c8827496ad367c8e435166ca4b",
+      "consumerConclusion": "No current consumer found in reviewed glibc APP/Next/Sharp/LightningCSS/Docker graph; source-supported candidate only, Root final deletion safety checks outstanding."
+    }
+  ],
+  "candidateLinuxAllocatedBytes": 29360128,
+  "sourceEvidence": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/Dockerfile",
+      "bytes": 31667,
+      "sha256": "f2066463924b032301cc6fc90159b2df376f4fd416780681187210d196f8ec99"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/.dockerignore",
+      "bytes": 2642,
+      "sha256": "3783326743b83d0de21958a574184be8b823342b14e617c75ecce6f0b3c73676"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/lightningcss/node/index.js",
+      "bytes": 1665,
+      "sha256": "8b7f10ff14d65a382bd7041a747df4a0d4b7c4e22b2842bcaca2588cd86bb045"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/sharp/dist/sharp.cjs",
+      "bytes": 6262,
+      "sha256": "76120d3971051fcc469c0bfa36e7b23d3c388b6a2f5785bf1491bbdb90ff0176"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/sharp/dist/libvips.cjs",
+      "bytes": 5833,
+      "sha256": "3419f6cb4303feaf4a76abe122ce1caf5dc755f9f17fa013afd5561827b61062"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/next/dist/build/swc/index.js",
+      "bytes": 59654,
+      "sha256": "8d6b5d74f39bb8c7e5945a7c191347498654e9fe560acc5a2d76907d97ad6851"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/next/dist/server/patch-error-inspect.js",
+      "bytes": 25443,
+      "sha256": "b436b5fe7e61dbe08d17f417058e1ea5e7d6fdcff600a273cec35f32492bfb93"
+    }
+  ],
+  "regenerationEvidence": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/evidence/consumed-host-dependency-retirement-plan.json",
+      "bytes": 21765,
+      "sha256": "c1a73a8a647e4fbbbb43ddefd5da38494e2414b256a344d6e77ea2b7cb8d78a8"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/evidence/linux-image-build-c680.json",
+      "bytes": 3369,
+      "sha256": "93262e2cc20970ebdc9185abd3083754192bc920e9f69cf5e75ffc44ebfa68fe"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+      "bytes": 1354,
+      "sha256": "5181f2018348a47cdf0f9d6692bd1b6f74914711806b47d5d309f347ba68af2f"
+    }
+  ],
+  "regeneration": {
+    "recipe": "Historical receipt with identical current lock: run-scoped.sh npm ci --include=dev --no-audit --no-fund using pinned Node22; source lock remains unchanged. Current run-chat-plus-scoped.sh proves existing task-scoped npm cache/logs/TEMP/build AppData and pinned Node22.23.1/npm path. Foreign optional package identities are lock-resolved tar URLs + SHA512 integrity recorded per candidate; any selective restoration must verify this integrity, version and platform contents before reuse.",
+    "coldEvidence": "consumed-host-dependency-retirement-plan.json records cold Dockerfile npm ci/build success for c680 with identical lock SHA; historical evidence, not a fresh package restore test.",
+    "performed": false,
+    "noInstallOrDownload": true
+  },
+  "consumerGraph": {
+    "lightningcss": "node/index.js1-18: detect-libc MUSL -> musl; otherwise x64 -> gnu. Current runtime glibc2.43 cannot select musl in this loader.",
+    "sharp": "dist/libvips.cjs39-41 derives actual runtime libc, platform, arch. dist/sharp.cjs38-83 switches linux-x64 to @img/sharp-linux-x64, linuxmusl-x64 to musl package. Musl libvips is parented only by musl sharp or corresponding platform-specific diagnostic path; native-failure wasm fallback preserved.",
+    "docker": "Dockerfile builder and runtime-base use node:22-slim. Dockerfile executes npm ci from lock; .dockerignore83-85 excludes host node_modules. Source search finds only validation rejecting old alpine stage, no current musl runtime stage.",
+    "directReferenceSearch": {
+      "tool": "git",
+      "args": [
+        "-C",
+        "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+        "grep",
+        "-n",
+        "-I",
+        "-E",
+        "sharp-linuxmusl|sharp-libvips-linuxmusl|lightningcss-linux-x64-musl|npm_config_libc|npm_config_platform|npm_config_arch|--libc[= ]musl",
+        "--",
+        ":(exclude)package-lock.json",
+        ":(exclude)docs/**",
+        ":(exclude).agents/**",
+        ":(exclude).opencode/**"
+      ],
+      "exitCode": 1,
+      "matches": 0
+    }
+  },
+  "retained": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@next/swc-linux-x64-musl",
+      "linuxAllocatedBytes": 98463744,
+      "reason": "Next SWC loader1132-1149 deliberately iterates both Linux x64 triples; static host-libc mismatch alone does not prove no fallback consumer. No native load invoked."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@img/sharp-wasm32",
+      "linuxAllocatedBytes": 9351168,
+      "reason": "Sharp native load failure fallback dist/sharp.cjs104; preserve."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/next/**/*.map",
+      "files": 2743,
+      "linuxAllocatedBytes": 105725952,
+      "logicalBytes": 99138522,
+      "reason": "No per-file proof of consumer closure. Next patch-error-inspect.js imports source-map and source-maps with bundler source-map resolution. Preserve diagnostics; no blanket map removal."
+    }
+  ],
+  "limits": [
+    "Root must independently check current protection/refusal inventory, ownership, tracked-source preservation, regeneration, process/container/mount/Windows-handle inactivity before any deletion.",
+    "No Native target/refusal aliases or children inspected or modified; retained pre133 Core/dist and actual APP runtime dependencies preserved.",
+    "No build/install/download/module-native-load/deletion/process stop; no credentials/private captures.",
+    "Candidate bytes are Linux allocated estimates, not Windows recovery or paired-cap headroom.",
+    "Only three exact package subtrees proposed. No blanket optional pruning, no lock/manifest edits, no permission/cap/drive/root changes."
+  ],
+  "removed": [],
+  "removedBytes": 0,
+  "cleanup": "Durable source script/report only; no disposable scratch or dependency/build output created."
+}
