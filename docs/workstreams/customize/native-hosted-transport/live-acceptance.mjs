@@ -90,6 +90,12 @@ class Client{
     return this.request(method,route,body,{...extra,headers});
   }
   async user(method,route,body){const r=await this.browser(method,route,body);requireFact(r.status>=200&&r.status<300,'HTTP_'+r.status+':'+(r.body?.error?.code??'REFUSED'));return r.body;}
+  async stepUp(password){
+    const r=await this.browser('POST','/api/v1/auth/step-up',{credential:password});
+    requireFact(r.status===200&&r.body?.data?.recentStepUp===true,'ACTUAL_STEP_UP_REQUIRED');
+    this.cookies.set('session',secureCookie(r.headers['set-cookie'],'__Host-ingenium_session'));this.csrf=r.body.data.csrfToken;
+    const current=data(await this.user('GET','/api/v1/auth/session'));requireFact(current.session.recentStepUp===true,'STEP_UP_SESSION_NOT_RETAINED');
+  }
   async login(email,password){
     const pre=await this.request('GET','/api/v1/auth/csrf');requireFact(pre.status===200,'PREAUTH_UNAVAILABLE');
     this.cookies.set('pre',secureCookie(pre.headers['set-cookie'],'__Host-ingenium_pre_auth'));
@@ -157,6 +163,7 @@ export async function run(config){
     const claim=await step('actual-Core-bootstrap-claim',async()=>data(await core.ok('POST','/api/v1/bootstrap/claim',{email,displayName:'Customize acceptance '+id,password},{headers:{authorization:'Bearer '+token}})));
     const session=await step('actual-HTTPS-password-cookie-CSRF-session',()=>core.login(email,password));
     same(session.user.id,claim.userId,'CLAIM_SESSION_MISMATCH');report.actorId=claim.userId;
+    await step('actual-password-step-up-cookie-rotation',()=>core.stepUp(password));
     const project=await step('actual-project-create',async()=>data(await core.user('POST','/api/v1/projects',{name:'accept-'+id,organization_id:claim.organizationId})));
     report.project={id:project.id,name:project.name};const query='?project='+encodeURIComponent(project.name);
     const browser=(m,r,b)=>core.user(m,r+query,b),base='/v1/remote-control/node-hosted';
