@@ -1,0 +1,279 @@
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-broker.mjs
+@@ -0,0 +1,33 @@
++// Uses only original Core catalog/state/project owners. No HTTP bearer, principal or dispatcher fallback.
++const TOOL="ingenium_project_detail";
++const deny=()=>{throw Object.assign(Error("JobRun tool denied"),{status:403});};
++export const projectDetailSchema=Object.freeze({type:"object",properties:{name:{type:"string"}},required:["name"],additionalProperties:false});
++export function createCore126Broker({owner,authorizeTool,toolStates,projects}){
++ const toolCatalog={getTool(name){return toolStates.getAllTools().get(name);}};
++ function permitted(credential,name,input){
++  owner.assignment(credential.runId,credential);
++  if(name!==TOOL||!toolStates.getToolState(credential.projectId,name))deny();
++  const authorized=authorizeTool(credential,name,input);
++  const project=projects.getProjectById(credential.projectId);
++  if(!project||project.archived_at||project.organization_id!==credential.organizationId)deny();
++  return {authorized,project};
++ }
++ return {toolCatalog,
++  list(credential){
++   // Even an empty catalog must validate the current run/attempt/capability.
++   owner.assignment(credential.runId,credential);
++   try{permitted(credential,TOOL,{});const entry=toolCatalog.getTool(TOOL);return [{name:TOOL,description:entry.description,inputSchema:projectDetailSchema}];}
++   catch(error){if(error?.status===403)return [];throw error;}
++  },
++  async dispatch(authorized,input,credential){
++   if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join("|")!=="name"||typeof input.name!=="string")deny();
++   const {authorized:current,project}=permitted(credential,authorized.toolName,input);
++   if(input.name!==project.name||current.credentialId!==authorized.credentialId||current.attemptId!==authorized.attemptId||current.jobRunId!==authorized.jobRunId)deny();
++   // Same synchronous original Core handler as projectsRouter GET /:name/detail.
++   // No asynchronous gap or generic Auth context exists before this read.
++   const data=projects.getProjectDetail(project.name);
++   if(!data)throw Object.assign(Error("Resource not found"),{status:404});
++   return {content:[{type:"text",text:JSON.stringify(data)}]};
++  },
++ };
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-broker.d.mts
+@@ -0,0 +1,9 @@
++import type {mcpToolStates,projects} from "ingenium-core";
++import type {Core126Owner,ClosedToolAuthorizer,ManagedJobCredential,ClosedJobToolAuthorization} from "./managed-job-contracts.mjs";
++export interface ManagedJobToolDescription {name:string;description:string;inputSchema:{type:"object";properties:{name:{type:"string"}};required:readonly string[];additionalProperties:false};}
++export declare const projectDetailSchema:ManagedJobToolDescription["inputSchema"];
++export declare function createCore126Broker(ports:{owner:Core126Owner;authorizeTool:ClosedToolAuthorizer;toolStates:Pick<typeof mcpToolStates,"getAllTools"|"getToolState">;projects:Pick<typeof projects,"getProjectById"|"getProjectDetail">}):{
++ toolCatalog:{getTool(name:string):mcpToolStates.McpToolCatalogEntry|undefined};
++ list(credential:ManagedJobCredential):ManagedJobToolDescription[];
++ dispatch(authorized:ClosedJobToolAuthorization,input:unknown,credential:ManagedJobCredential):Promise<{content:[{type:"text";text:string}]}>;
++};
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-broker.ts
+@@ -0,0 +1,8 @@
++import {mcpToolStates,projects} from "ingenium-core";
++import {createCore126Broker} from "./core126-broker.mjs";
++import type {Core126Owner,ClosedToolAuthorizer} from "./managed-job-contracts.mjs";
++/** Concrete original catalog and operation composition; callers cannot supply a substitute principal. */
++export function createActualCore126Broker(owner:Core126Owner,authorizeTool:ClosedToolAuthorizer){
++ return createCore126Broker({owner,authorizeTool,toolStates:mcpToolStates,projects});
++}
++export const actualManagedJobToolCatalog={getTool(name:string){return mcpToolStates.getAllTools().get(name);}};
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-ingress.ts
+@@ -0,0 +1,22 @@
++import type {RequestHandler} from "express";
++import type {Core126Handlers} from "./managed-job-contracts.mjs";
++/** Mount after JSON parser and preauth limiter, BEFORE generic auth/CSRF/authorization.
++ * Does not set req.principal and never calls next() after matching a private audience path.
++ */
++export function createCore126Ingress(handlers:Core126Handlers):RequestHandler{
++ return (req,res,next)=>{
++  const internal=req.path.startsWith("/api/v1/internal/managed-job-runs/");
++  const runtime=req.path.startsWith("/api/v1/runtime/job-runs/");
++  if(!internal&&!runtime){next();return;}
++  if(req.headers.cookie!==undefined||req.headers.origin!==undefined||req.headers["x-ingenium-internal-service"]!==undefined){res.status(404).json({error:{code:"NOT_FOUND",message:"Resource not found"}});return;}
++  const request={path:req.path.slice("/api/v1".length),method:req.method,headers:req.headers,query:{action:req.query.action},body:req.body};
++  Promise.resolve().then(()=>internal?handlers.internal(request):handlers.runtime(request)).then(result=>{
++   if(!result){res.status(404).json({error:{code:"NOT_FOUND",message:"Resource not found"}});return;}
++   res.json(result);
++  }).catch((error:unknown)=>{
++   const candidate=error&&typeof error==="object"&&"status" in error?error.status:500;
++   const status=typeof candidate==="number"&&[401,403,404,405,409,422,503].includes(candidate)?candidate:500;
++   res.status(status).json({error:{code:status===503?"MANAGED_JOB_UNAVAILABLE":status===500?"INTERNAL_ERROR":"MANAGED_JOB_DENIED",message:"Managed JobRun request unavailable"}});
++  });
++ };
++}
+--- a/services/ingenium-api/lib/dot-v2/core126-http.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -7,7 +7,7 @@
+ /** Mount these closed handlers before generic user/runtime auth; they authenticate their OWN exact audience.
+  * No handler creates a browser/service/compatibility principal from a job-run credential.
+  */
+-export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool}){
++export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool,listAuthorizedTools}){
+  return {
+   async internal(request){
+    const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$/.exec(request.path);
+@@ -21,17 +21,25 @@
+    if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
+   },
+   async runtime(request){
+-   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
++   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
+    if(!match)return null;
+    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
+    const credential=credentials.inspectManagedJobCredential(token,"job-run");
+    if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
+    if(match[2]==="assignment"&&request.method==="GET")return {data:owner.assignment(match[1],credential)};
+    if(match[2]==="result"&&request.method==="POST")return {data:owner.result(match[1],request.body,credential)};
++   if(match[2]==="mcp-tools"||match[3]){
++    if(request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.["x-ingenium-job-attempt"]!==credential.attemptId||request.headers?.cookie!==undefined||request.headers?.origin!==undefined)throw Object.assign(Error("JobRun MCP audience denied"),{status:401});
++    owner.assignment(match[1],credential);
++    if(match[2]==="mcp-tools"&&request.method==="GET"){
++     if(!listAuthorizedTools)throw Object.assign(Error("JobRun catalog unavailable"),{status:503});
++     return {data:await listAuthorizedTools(credential)};
++    }
++   }
+    if(match[3]&&request.method==="POST"){
+     if(!authorizeTool||!dispatchExistingTool)throw Object.assign(Error("JobRun broker route unavailable"),{status:503});
+     owner.assignment(match[1],credential); // Recheck current run/profile/parent capability at each broker entry.
+-    const authorized=authorizeTool(credential,match[3],request.body);return {data:await dispatchExistingTool(authorized,request.body)};
++    const authorized=authorizeTool(credential,match[3],request.body);return {data:await dispatchExistingTool(authorized,request.body,credential)};
+    }
+    throw Object.assign(Error("Method unavailable"),{status:405});
+   },
+--- a/services/ingenium-api/lib/dot-v2/core126-http.d.mts
++++ b/services/ingenium-api/lib/dot-v2/core126-http.d.mts
+@@ -1,5 +1,5 @@
+-import type {Core126ManagerGuard,Core126Owner,ManagedCredentialPorts,ClosedToolAuthorizer,ExistingToolDispatcher,ExistingToolCatalog,Core126Handlers,Core126OwnerPorts} from "./managed-job-contracts.mjs";
++import type {Core126ManagerGuard,Core126Owner,ManagedCredentialPorts,ClosedToolAuthorizer,ExistingToolDispatcher,ExistingToolCatalog,Core126Handlers,Core126OwnerPorts,ManagedJobCredential} from "./managed-job-contracts.mjs";
+ import type {mcpAuthorizationPolicy} from "ingenium-core";
+ export declare function createCore126ManagerGuard(ports:{loadToken():string}):Core126ManagerGuard;
+-export declare function createCore126Handlers(ports:{owner:Core126Owner;managerGuard:Core126ManagerGuard;credentials:ManagedCredentialPorts;authorizeTool?:ClosedToolAuthorizer;dispatchExistingTool?:ExistingToolDispatcher}):Core126Handlers;
++export declare function createCore126Handlers(ports:{owner:Core126Owner;managerGuard:Core126ManagerGuard;credentials:ManagedCredentialPorts;authorizeTool?:ClosedToolAuthorizer;dispatchExistingTool?:ExistingToolDispatcher;listAuthorizedTools?:(credential:ManagedJobCredential)=>unknown|Promise<unknown>}):Core126Handlers;
+ export declare function createCore126ToolAuthorizer(ports:{credentials:ManagedCredentialPorts;mcpAuthorizationPolicy:Pick<typeof mcpAuthorizationPolicy,"explicitMcpAuthorizationPolicy">;authorization:Core126OwnerPorts["authorization"];jobs:Core126OwnerPorts["jobs"];toolCatalog?:ExistingToolCatalog}):ClosedToolAuthorizer;
+--- a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
++++ b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+@@ -124,7 +124,7 @@
+ }
+ export interface ExistingToolCatalog {getTool(name:string):{name:string;category:string}|undefined}
+ export type ClosedToolAuthorizer=(credential:ManagedJobCredential,toolName:string,body:unknown)=>ClosedJobToolAuthorization;
+-export type ExistingToolDispatcher=(authorization:ClosedJobToolAuthorization,body:unknown)=>unknown|Promise<unknown>;
++export type ExistingToolDispatcher=(authorization:ClosedJobToolAuthorization,body:unknown,credential:ManagedJobCredential)=>unknown|Promise<unknown>;
+ export interface Core126HttpRequest {path:string;method:string;headers:IncomingHttpHeaders;query?:{action?:unknown};body?:unknown}
+ export interface Core126ManagerGuard {requireManager(context:ManagerContext):void;context(request:{headers:IncomingHttpHeaders}):ManagerContext}
+ export interface Core126Handlers {
+--- a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -5,11 +5,14 @@
+ import {loadManagerToken} from "../runtime-manager-auth.js";
+ import {JobResponseVerification} from "../job-response-verification.js";
+ import {resolveJobProviderModel} from "../job-native-provider.js";
++import {createActualCore126Broker,actualManagedJobToolCatalog} from "./core126-broker.js";
+ const hash=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
+ /** imageOwner is Root's qualified immutable image/placement/profile owner, not labels or caller JSON.
+  * Missing qualification returns unavailable; there is no image/profile/model/capability fallback.
+  */
+-export function createActualCore126Owner({imageOwner,dispatchExistingTool,toolCatalog}:any){
++export function createActualCore126Owner({imageOwner}:any){
++ const toolCatalog=actualManagedJobToolCatalog;
++ let dispatchExistingTool:ReturnType<typeof createActualCore126Broker>["dispatch"];
+  const managerGuard=createCore126ManagerGuard({loadToken:loadManagerToken});
+  const binding=(provider:any)=>hash([provider.connectionId,provider.providerKey,provider.authentication,provider.config]);
+  const requireCurrentParentScopes=(runtimeId:string,approvedScopes:string[])=>{
+@@ -54,11 +57,13 @@
+  };
+  const owner=createCore126Owner({getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
+  const authorizeTool=createCore126ToolAuthorizer({credentials:mcpCredentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog});
++ const broker=createActualCore126Broker(owner,authorizeTool);
++ dispatchExistingTool=broker.dispatch;
+  return {owner,managerGuard,executionPorts(context:any,selection:any){return {
+    inTransaction:()=>getDb().inTransaction,
+    prepareManagedExecution(runId:string,job:any,prompt:string){if(job.prompt_template!==prompt)throw Error("Original JobRun prompt changed");return owner.prepare({runId,projectId:job.project_id,runtimeId:selection.runtimeId,workspaceId:selection.workspaceId},context);},
+    requireOriginalRun:(scope:any,runId:string)=>owner.readOriginalRun(runId,scope,context),
+    requireCancellationIntent:(_scope:any,runId:string)=>owner.requireCancellationIntent(runId),
+    requireOriginalRetirementProof:(runId:string,proof:any)=>owner.requireOriginalRetirementProof(runId,proof),
+-  };},handlers:createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool})};
++  };},handlers:createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list})};
+ }
+--- /dev/null
++++ b/packages/ingenium-extension/scripts/job-run-mcp-client.ts
+@@ -0,0 +1,50 @@
++import {openSync,fstatSync,readFileSync,closeSync,constants,realpathSync} from "node:fs";
++const CAPABILITY="/run/ingenium-runtime/capability";
++const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const denied=()=>{throw Error("Original JobRun MCP transport denied");};
++export function readJobRunCredential():string{
++ let fd:number|undefined;
++ try{
++  if(realpathSync(CAPABILITY)!==CAPABILITY)denied();
++  fd=openSync(CAPABILITY,constants.O_RDONLY|constants.O_NOFOLLOW);
++  const s=fstatSync(fd);
++  if(!s.isFile()||s.nlink!==1||(s.mode&0o777)!==0o600||s.uid!==process.getuid?.()||s.size>256)denied();
++  const token=readFileSync(fd,"utf8").trim();
++  if(!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token))denied();
++  return token;
++ }finally{if(fd!==undefined)closeSync(fd);}
++}
++export interface JobRunTool {name:string;description?:string;inputSchema:Record<string,unknown>;}
++function record(v:unknown):v is Record<string,unknown>{return !!v&&typeof v==="object"&&!Array.isArray(v);}
++export function createJobRunMcpClient({environment=process.env,readCredential=readJobRunCredential,fetchImpl=fetch}:{environment?:NodeJS.ProcessEnv;readCredential?:()=>string;fetchImpl?:typeof fetch}={}){
++ const runId=environment.INGENIUM_JOB_RUN_ID??"",attemptId=environment.INGENIUM_JOB_ATTEMPT_ID??"";
++ if(environment.INGENIUM_MCP_AUDIENCE!=="job-run"||!UUID.test(runId)||!UUID.test(attemptId)||environment.INGENIUM_MCP_CREDENTIAL_FILE!==CAPABILITY)denied();
++ const base=new URL(environment.INGENIUM_API_URL??"");
++ if(!["http:","https:"].includes(base.protocol)||base.username||base.password||base.search||base.hash||base.pathname!=="/api/v1")denied();
++ async function request(operation:string,body?:unknown):Promise<unknown>{
++  const url=new URL(base);url.pathname+=`/runtime/job-runs/${runId}/${operation}`;
++  const serialized=body===undefined?undefined:JSON.stringify(body);
++  if(serialized!==undefined&&Buffer.byteLength(serialized)>65536)denied();
++  const response=await fetchImpl(url,{method:body===undefined?"GET":"POST",redirect:"error",signal:AbortSignal.timeout(15_000),headers:{Authorization:`Bearer ${readCredential()}`,"X-Ingenium-Audience":"job-run","X-Ingenium-Job-Attempt":attemptId,Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:serialized});
++  if(!response.ok){await response.body?.cancel();denied();}
++  const reader=response.body?.getReader();if(!reader)denied();
++  let size=0;const chunks:Uint8Array[]=[];
++  try{while(true){const part=await reader!.read();if(part.done)break;size+=part.value.byteLength;if(size>1048576){await reader!.cancel();denied();}chunks.push(part.value);}}
++  finally{reader!.releaseLock();}
++  const parsed:unknown=JSON.parse(Buffer.concat(chunks).toString("utf8"));
++  if(!record(parsed)||!("data" in parsed))denied();return (parsed as Record<string,unknown>).data;
++ }
++ return {
++  async listTools():Promise<JobRunTool[]>{
++   const data=await request("mcp-tools");
++   if(!Array.isArray(data)||data.length>512||data.some(t=>!record(t)||typeof t.name!=="string"||!/^ingenium_[A-Za-z0-9_]+$/.test(t.name)||!record(t.inputSchema)))denied();
++   return data as JobRunTool[];
++  },
++  async callTool(name:string,args:unknown){
++   if(!/^ingenium_[A-Za-z0-9_]+$/.test(name)||!record(args))denied();
++   const data=await request(`mcp/${name}`,args);
++   if(!record(data)||!Array.isArray(data.content)||data.content.some(c=>!record(c)||c.type!=="text"||typeof c.text!=="string"))denied();
++   return data as {content:Array<{type:"text";text:string}>};
++  },
++ };
++}
+--- /dev/null
++++ b/packages/ingenium-extension/scripts/job-run-mcp-transport.ts
+@@ -0,0 +1,15 @@
++import {Server} from "@modelcontextprotocol/sdk/server/index.js";
++import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js";
++import {ListToolsRequestSchema,CallToolRequestSchema} from "@modelcontextprotocol/sdk/types.js";
++import {createJobRunMcpClient} from "./job-run-mcp-client.js";
++/** Dedicated SDK transport. Never imports generic binding, global HTTP client or browser/service Auth. */
++export async function runJobRunMcpTransport():Promise<void>{
++ const client=createJobRunMcpClient();
++ await client.listTools(); // current-run authentication before exposing a transport
++ const server=new Server({name:"ingenium-job-run",version:"1.0.0"},{capabilities:{tools:{}}});
++ server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:await client.listTools()}));
++ server.setRequestHandler(CallToolRequestSchema,async request=>client.callTool(request.params.name,request.params.arguments??{}));
++ await server.connect(new StdioServerTransport());
++ const close=()=>{void server.close().catch(()=>{process.exitCode=1;});};
++ process.once("SIGTERM",close);process.once("SIGINT",close);
++}
+--- a/packages/ingenium-extension/scripts/mcp-server.ts
++++ b/packages/ingenium-extension/scripts/mcp-server.ts
+@@ -94,6 +94,17 @@
+   worktree = process.env.INGENIUM_WORKTREE ?? process.cwd(),
+   options: McpLauncherOptions = {},
+ ): Promise<number> {
++  // Select the private job transport BEFORE generic binding, project provisioning or credential loading.
++  if (process.env.INGENIUM_MCP_AUDIENCE === "job-run") {
++    try {
++      const {runJobRunMcpTransport} = await import("./job-run-mcp-transport.js");
++      await runJobRunMcpTransport();
++      return 0;
++    } catch {
++      writeLauncherFailure("authentication", "Original JobRun MCP transport unavailable.");
++      return 2;
++    }
++  }
+   const preflight = preflightMcpLauncher(worktree);
+   if (!preflight.ok) {
+     writeLauncherFailure(preflight.stage, preflight.message);
+--- a/packages/ingenium-extension/scripts/build-distributions.mjs
++++ b/packages/ingenium-extension/scripts/build-distributions.mjs
+@@ -10,7 +10,7 @@
+   "repository-command", "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner",
+ ].map((name) => `scripts/${name}.js`);
+ const EXTENSION_REQUIRED = [
+-  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
++  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
+   ...[
+     "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
+   ].flatMap((name) => [

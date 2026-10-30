@@ -1,0 +1,53 @@
+{
+  "state": "unapplied source proposal; Root integration/live qualification open",
+  "supportedTool": "ingenium_project_detail",
+  "patchSha256": "f1a3f9181b3af391f8489fdf932fc83242fad579904dc474fcd5e86bb88abd3b",
+  "preimages": {
+    "services/ingenium-api/lib/dot-v2/core126-broker.mjs": null,
+    "services/ingenium-api/lib/dot-v2/core126-broker.d.mts": null,
+    "services/ingenium-api/lib/dot-v2/core126-broker.ts": null,
+    "services/ingenium-api/lib/dot-v2/core126-ingress.ts": null,
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "06e94e2bdaa4cb4a6c99042698f9f1d014279ad15718f0e8c9cdf75e0c36fc1b",
+    "services/ingenium-api/lib/dot-v2/core126-http.d.mts": "d9e06c0dd4417a6291636f9ef2f0dbcce58c2d0e34f3ef2eacca60748dec7ba2",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "0f0bb5424cb02c0f450193c3a241b47a2aacf08f6e421c7baa20127d5c2eec11",
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": "5e8a4e59ca3ad94005c3a5ca08de8c55cbd966cca6e423c70e087d64f9be9f78",
+    "packages/ingenium-extension/scripts/job-run-mcp-client.ts": null,
+    "packages/ingenium-extension/scripts/job-run-mcp-transport.ts": null,
+    "packages/ingenium-extension/scripts/mcp-server.ts": "4266d74edcfd160e94834c19097d315896130cb129b67a20cf4a2026f2f9bad8",
+    "packages/ingenium-extension/scripts/build-distributions.mjs": "0dbf789df05b9b55133a5e6a2081bd90cb35255b4420b4bbc9df54c525fd452d"
+  },
+  "postimages": {
+    "services/ingenium-api/lib/dot-v2/core126-broker.mjs": "9459006f6964abbadba314e17a700e89896a6ccc7b25aff291de9899884088c1",
+    "services/ingenium-api/lib/dot-v2/core126-broker.d.mts": "ca4b6bd0211d53cfeb75cd6fe683d998b9e26a90c41d1ffbd283c7f04a7e8cdd",
+    "services/ingenium-api/lib/dot-v2/core126-broker.ts": "a95183d3535b6da6ba62c1af3358bc724195d9c1dbdbc3174948e0c3177ecdb4",
+    "services/ingenium-api/lib/dot-v2/core126-ingress.ts": "e6aebaebed631de73eb4ef66efe00506fa986920a909849371c38910bc93a3df",
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "66c9c4b0bd5498fa9c446f5c6aa8b9e334112fd690cb417bb3246e959f4ee638",
+    "services/ingenium-api/lib/dot-v2/core126-http.d.mts": "f64f67fceffc64217c0bf0da87e5d9e9fd4ceb8aa072975864fac26763b811d0",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "7185a9ab702ac16ea51a81935736b62e563947c88e6dc4eba9bd76070fe8cbdc",
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": "9fbfa7016051205d213fff4b3dad91cd66d2ac776aa16f4370eb0bb3cfe3778d",
+    "packages/ingenium-extension/scripts/job-run-mcp-client.ts": "145fd796bce00a0b680aba0b80b293a9bca1058f5476a2d6cb6321020646552a",
+    "packages/ingenium-extension/scripts/job-run-mcp-transport.ts": "80ceed6afcc494a862da68c7954925b4bf439b6615d0fe8066190ad542783d9d",
+    "packages/ingenium-extension/scripts/mcp-server.ts": "be8681f5057ae42912e95339f8a87182f6ea8cfda49094b74e85a053d0e3650a",
+    "packages/ingenium-extension/scripts/build-distributions.mjs": "bd6d600cde4c6301241c12a22261f7cdf10d68665a11d36c6be022d0044ff865"
+  },
+  "requiresPriorNoCreatePostimages": [],
+  "applyCheck": {
+    "exit": 0,
+    "stderr": ""
+  },
+  "checks": "22/22 dependency-free fixtures including exact original Core project detail/toggle functions against :memory: SQLite; no actual SDK, full noEmit, distribution or live acceptance",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "runtimeObjects": false,
+    "sharedWrites": false
+  },
+  "testCommand": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --experimental-strip-types --test docs/workstreams/dot/core126-broker.cpu.mjs",
+  "combinedRegression": {
+    "tests": 73,
+    "pass": 73,
+    "fail": 0,
+    "outputSha256": "e5f0f2505061f3c69b4f48bc82a70025ba87fcef4b2ff2a63b336a67a7864fde"
+  }
+}
