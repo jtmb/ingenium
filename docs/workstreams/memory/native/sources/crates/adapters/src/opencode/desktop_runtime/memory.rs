@@ -24,6 +24,11 @@ impl LiveRuntime {
   let engine=self.lock_engine_for_directory(owner.directory())?;
   let session=engine.client()?.session_in_project(chat,&SessionQuery{directory:owner.directory().into(),..SessionQuery::default()})?;
   let stamp=self.memory_stamp_locked(&engine,owner,&session)?;
+  // ROOT RECONCILIATION GATE: this provisional call names the superseded
+  // memory-specific client proposal. Replace with Projects' actual frozen ONE
+  // scoped bounded-recent export before Native apply/build. Preserve <=32,
+  // latest-desc first page only, canonical conversion and chronological output.
+  // No duplicate OpenCodeClient implementation is supplied by memory.
   let messages=engine.client()?.memory_recent(chat)?;
   let selected=self.memory_pairs(owner,&stamp,chat,&messages)?;
   owner.verify(store).map_err(|_|RuntimeError::Binding)?;

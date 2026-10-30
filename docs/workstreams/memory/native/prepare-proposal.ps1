@@ -30,18 +30,8 @@ ReplaceOnce 'crates/adapters/src/goal_store.rs' '    uncertain: bool,' ('    lea
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, uncertain: false })' ('        let learned = learned::load(directory)?;'+[char]10+'        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, learned, uncertain: false })')
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '        value["retained_task_goals"]' ('        value["learned_memory_v1"] = serde_json::to_value(&self.learned).map_err(|_|"Learned memory export failed")?;'+[char]10+'        value["retained_task_goals"]')
 ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' 'mod prompt_original;' ('mod prompt_original;'+[char]10+'mod memory;')
-$recent=@'
-    /// One bounded latest page, canonical conversion, no cursor traversal.
-    pub fn memory_recent(&self,session:&str)->Result<Vec<super::EngineMessage>,EngineError>{
-        validate_session(session)?;
-        let page:WireMessagePage=decode(self.request_query(Method::GET,&["api","session",session,"message"],
-            &[("limit","32".into()),("order","desc".into())],None)?)?;
-        if page.data.len()>32{return Err(EngineError::Malformed)}
-        let mut messages=page.data.into_iter().map(|m|m.normalize(session)).collect::<Result<Vec<_>,_>>()?;
-        messages.reverse();Ok(messages)
-    }
-'@
-ReplaceOnce 'crates/adapters/src/opencode/workflows.rs' '    pub fn history_page(' ($recent+[char]10+'    pub fn history_page(')
+# Projects owns the ONE canonical scoped bounded-recent client extension.
+# Do not add a memory-specific OpenCodeClient implementation here.
 ReplaceOnce 'apps/service/src/routes/goal_runtime.rs' 'mod controls;' ('mod controls;'+[char]10+'mod learned;')
 ReplaceOnce 'apps/service/src/routes/goal_runtime.rs' '    entries: Vec<SavedMemory>,' '    pub(in crate::routes) entries: Vec<SavedMemory>,'
 ReplaceOnce 'apps/service/src/routes/goal_runtime.rs' '    goal_memory_ids: Option<Vec<String>>,' ('    pub(in crate::routes) goal_memory_ids: Option<Vec<String>>,'+[char]10+'    #[serde(default, skip_serializing_if = "Option::is_none")]'+[char]10+'    learned: Option<learned::LearnedAdmission>,')
@@ -109,7 +99,13 @@ $custody=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'prompt-custody.appen
 ReplaceOnce 'apps/web/src/features/workbench/promptOriginal.ts' 'export function exportPromptOriginals(' ($custody+[char]10+'export function exportPromptOriginals(')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' 'import { MemoryPanel } from "./MemoryPanel";' ('import { MemoryPanel } from "./MemoryPanel";'+[char]10+'import { LearnedMemoryControls } from "./native-memory/LearnedMemoryControls";')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' '            <MemoryPanel ' ('            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>' +[char]10+'            <MemoryPanel ')
-$manifest=[ordered]@{native_revision=$revision;projects_proposal='7250f55f92e6554c47b945a529fbbbe7de114c06';status='unapplied-uncompiled-source-proposal';operations=$ops}
+$manifest=[ordered]@{native_revision=$revision;projects_proposal='7250f55f92e6554c47b945a529fbbbe7de114c06';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
+ owner='Root/Projects';status='pending-frozen-shared-contract';actual_export=$null;
+ consumer='crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent';
+ superseded='eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply';
+ contract='ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output';
+ apply_gate='Root must replace provisional client call with actual frozen Projects export and verify scope/order/bounds before Native apply/build';
+};operations=$ops}
 foreach($path in ($ops.path|Select-Object -Unique)){
  $post=ReadPinned $path
  foreach($op in ($ops|Where-Object path -eq $path)){

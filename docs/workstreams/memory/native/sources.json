@@ -75,8 +75,8 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "required_preimage": "absent",
-    "sha256": "fe5545fabbf977a568906bb07fb2686c371b61b2fe52288c5b0abec0576975e9",
-    "bytes": 5829,
+    "sha256": "c704c59501cd7f6b1e2a1ebfc2c64ff327adb33eb4512781c25f657c4a8c7b44",
+    "bytes": 6210,
     "transform": null
   },
   {
@@ -94,8 +94,8 @@
     "sha256": "e43c847385614225977bb5c30581f0535e1ee4943ef744a666b1a4db5a5023fc",
     "bytes": 5481,
     "transform": {
-      "replacement": "../memoryController.mjs",
-      "find": "../controller.mjs"
+      "find": "../controller.mjs",
+      "replacement": "../memoryController.mjs"
     }
   },
   {

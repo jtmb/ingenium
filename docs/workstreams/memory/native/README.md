@@ -5,7 +5,7 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 7250f55f92e6554c47b945a529fbbbe7de114c06.
 
-proposal.json contains 25 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 24 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
@@ -34,6 +34,15 @@ declared import transformation. Preparation never changes a Native checkout.
 
 ## Bounded source behavior
 
+Root reconciliation required: Projects now owns the ONE scoped bounded-recent
+OpenCode client extension. The memory-specific client insertion from eddbd5f2
+is superseded and removed from this proposal. The existing LiveRuntime wrapper
+is its consumer. Root must bind its annotated provisional call to the actual
+frozen Projects export and verify scope, latest-desc first-page ordering,
+overfill refusal and chronological conversion before Native apply/build.
+No guessed replacement API or second client method is introduced. The exact-ID
+refresh implementation remains in the memory adapter.
+
 Canonical OpenCode requests one latest page of at most 32 messages, never
 follows a cursor and never uses unbounded context/history. Capture requires
 complete adjacent user/terminal-assistant pairs, original prompt provenance and
@@ -56,7 +65,8 @@ checks and durable prompt capture; no new whole-chat fence exists.
 
 Executed: four Node tests of the actual JS adapter (policy/idle preservation,
 lost-policy response, lost-forget response, failed custody before send), one
-source-manifest test (5/5 pass), plus 25 pinned exact-preimage checks.
+source-manifest test (5/5 pass). Original eddbd5f2 verified 25 preimages;
+the reconciled proposal has 24 because the duplicate client insertion is removed.
 Five Rust tests authored, **not executed**.
 No Cargo/rustc/npm/install/build, model, service, desktop control or inference.
 
@@ -64,7 +74,8 @@ Remaining integration gates, not claimed:
 
 1. Review/apply combined Projects and memory proposals in the owned Native
    integration checkout. The authorized Native owner updates the lockfile,
-   compiles Rust, typechecks and renders React.
+   binds the actual frozen shared bounded-recent export, compiles Rust,
+   typechecks and renders React.
 2. Connect concrete Goals.capture_learning/accept_learning methods to the
    existing generation/model owner. No model dispatcher or scheduler is added.
 3. Mount projectless prompt originals only when their original owner supports
@@ -73,7 +84,10 @@ Remaining integration gates, not claimed:
 4. Verify existing backup/delete orchestration includes the additive file.
    Privacy export includes learned state. The suppression-preserving pure merge
    is not a mounted restore endpoint. Cross-custodian import requires original
-   backup-owner custody and scope verification.
+   backup-owner custody and scope verification. Root reports Core's actual
+   capsule now carries a content-free forget/reset ledger and transactional
+   merge at e44a13dd; the actual restorer and Native owner composition remain
+   open. This worker does not duplicate that authority or claim restoration.
 5. Qualify legacy memory-off/Windows/explicit-user-WSL compatibility, auth/IPC,
    persistence, actual completed-source semantics, uncertain writes, source
    edits/deletion, private isolation, UI workflow and prompt admission.

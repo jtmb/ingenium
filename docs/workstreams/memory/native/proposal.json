@@ -2,6 +2,15 @@
   "native_revision": "4e8e29436cfe42c81cc6401599cf8d224357a928",
   "projects_proposal": "7250f55f92e6554c47b945a529fbbbe7de114c06",
   "status": "unapplied-uncompiled-source-proposal",
+  "required_reconciliation": {
+    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
+    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "status": "pending-frozen-shared-contract",
+    "actual_export": null,
+    "owner": "Root/Projects",
+    "apply_gate": "Root must replace provisional client call with actual frozen Projects export and verify scope/order/bounds before Native apply/build",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output"
+  },
   "operations": [
     {
       "path": "Cargo.toml",
@@ -62,12 +71,6 @@
       "preimage_sha256": "5b827915417ac52cd909be76f1852c0941621492db5df8f7b8dfd504f63b52da",
       "find": "mod prompt_original;",
       "replacement": "mod prompt_original;\nmod memory;"
-    },
-    {
-      "path": "crates/adapters/src/opencode/workflows.rs",
-      "preimage_sha256": "82fef000dbaa6146b89dd9c0d92eee180eebec601987a490c517a42e09a56f38",
-      "find": "    pub fn history_page(",
-      "replacement": "    /// One bounded latest page, canonical conversion, no cursor traversal.\n    pub fn memory_recent(&self,session:&str)->Result<Vec<super::EngineMessage>,EngineError>{\n        validate_session(session)?;\n        let page:WireMessagePage=decode(self.request_query(Method::GET,&[\"api\",\"session\",session,\"message\"],\n            &[(\"limit\",\"32\".into()),(\"order\",\"desc\".into())],None)?)?;\n        if page.data.len()>32{return Err(EngineError::Malformed)}\n        let mut messages=page.data.into_iter().map(|m|m.normalize(session)).collect::<Result<Vec<_>,_>>()?;\n        messages.reverse();Ok(messages)\n    }\n    pub fn history_page("
     },
     {
       "path": "apps/service/src/routes/goal_runtime.rs",
