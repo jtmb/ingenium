@@ -1,0 +1,3190 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-original-candidate-closure-followon",
+  "productBotName": "veyra-bot",
+  "rootHead": "653e2c2da775b75a94c53c074946a3c410743ce0",
+  "patch": {
+    "bytes": 32119,
+    "sha256": "0b02f1bf90c847a58a9e5e85b7bde9a82adab29bed635a9836dd8188cdeb9ae6"
+  },
+  "canonicalEdits": [
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "beforeBytes": 12185,
+      "beforeSha256": "f262f1a2119add00119a16e5830678848492a08edd84307da3731ba897cd8338",
+      "afterBytes": 19101,
+      "afterSha256": "0ef220c2eb05a244704874719cf9829af3809047fed34afa13a77ab5fc5d2b67"
+    },
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "beforeBytes": 8325,
+      "beforeSha256": "6d3224c3b6b1f13d8b991840cd7a2f060334d2bb6684900c3760bd5ad8ebff80",
+      "afterBytes": 15117,
+      "afterSha256": "19d8a9387f026b09af030a99677b3c44e51b88e6710c882eef5a2dce9d35e5d4"
+    },
+    {
+      "path": "Dockerfile",
+      "beforeBytes": 27166,
+      "beforeSha256": "b113a5b93fe6203e8ae7f02e170af1e8742605d225c1534827ece114e28b2e2e",
+      "afterBytes": 30772,
+      "afterSha256": "43bfb364d079831b44a28d497ec21ae87916446624e55c269bda997f5456d6bc"
+    },
+    {
+      "path": "scripts/validate-deployment-config.sh",
+      "beforeBytes": 40507,
+      "beforeSha256": "5d52263e4daad877a7a8068e910ea1c4772c7112fe6fc767e824b4dbaef7b076",
+      "afterBytes": 40576,
+      "afterSha256": "57b194a5c7ed52fe4e2bae8cb87eaa96fd03fb6b995e20251a79a9685043fe69"
+    }
+  ],
+  "closure": {
+    "sourceBefore": 36,
+    "sourceAfter": 103,
+    "imageBefore": 31,
+    "imageAfter": 79,
+    "addedSources": [
+      "packages/veyra-operations/core126-candidate-material.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+      "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "packages/veyra-operations/core126-image-contract.mjs",
+      "packages/veyra-operations/core126-manager-proof.mjs",
+      "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "services/ingenium-api/lib/dot-v2/repository.ts",
+      "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "services/ingenium-api/lib/dot-v2/service.ts",
+      "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+      "services/ingenium-api/lib/job-response-verification.ts",
+      "services/ingenium-api/lib/runtime-manager-client.ts",
+      "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "services/ingenium-api/lib/job-native-provider.ts",
+      "services/ingenium-api/lib/opencode-client.ts",
+      "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "packages/ingenium-core/lib/index.ts",
+      "packages/ingenium-core/lib/db.ts",
+      "packages/ingenium-core/lib/schema.ts",
+      "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+      "packages/ingenium-core/lib/tools/jobs.ts",
+      "packages/ingenium-core/lib/tools/runtimes.ts",
+      "packages/ingenium-core/lib/tools/context-conversations.ts",
+      "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+      "packages/ingenium-core/lib/tools/agents.ts",
+      "packages/ingenium-core/lib/tools/authorization.ts",
+      "packages/ingenium-core/lib/tools/mcp-authorization-policy.ts",
+      "packages/ingenium-core/lib/tools/job-providers.ts",
+      "packages/ingenium-core/lib/tools/vault.ts",
+      "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+      "packages/ingenium-core/lib/tools/authentication.ts",
+      "packages/veyra-operations/core126-candidate-material.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts",
+      "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "packages/veyra-operations/core126-image-owner.d.mts",
+      "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "scripts/validate-deployment-config.sh",
+      "services/ingenium-api/tsconfig.json",
+      "packages/ingenium-core/tsconfig.json",
+      "tsconfig.base.json",
+      "services/ingenium-api/package.json",
+      "packages/ingenium-core/package.json",
+      "packages/ingenium-core/data/migrations/126_managed_job_execution.sql",
+      "packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql",
+      "packages/ingenium-core/data/migrations/130_dot_original_dispatch_fence.sql"
+    ],
+    "addedImages": [
+      "/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-candidate-material.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-carrier.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-docker-stream.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-loopback.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-original-invocation.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/candidate-private-plugin.mjs",
+      "/app/services/ingenium-api/dist/scripts/runtime-candidate-bootstrap.js",
+      "/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-image-contract.mjs",
+      "/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-manager-proof.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/core126-actual-factory.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/dot-original-context.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/installed-dot-approved-scope.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/dot-approved-scope.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/dot-job-policy.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/repository.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/request-binding.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/service.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/schedule.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/existing-jobs.js",
+      "/app/services/ingenium-api/dist/lib/projects-v2/request-chat-source.mjs",
+      "/app/services/ingenium-api/dist/lib/job-response-verification.js",
+      "/app/services/ingenium-api/dist/lib/runtime-manager-client.js",
+      "/app/services/ingenium-api/dist/lib/runtime-manager-auth.js",
+      "/app/services/ingenium-api/dist/lib/runtime-placement-contract.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/core126-runtime.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/core126-provider-resolution.js",
+      "/app/services/ingenium-api/dist/lib/job-native-provider.js",
+      "/app/services/ingenium-api/dist/lib/opencode-client.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/managed-job-owner.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/managed-job-core-client.mjs",
+      "/app/services/ingenium-api/dist/lib/dot-v2/core126-broker.js",
+      "/app/services/ingenium-api/dist/lib/dot-v2/core126-broker.mjs",
+      "/app/packages/ingenium-core/dist/lib/index.js",
+      "/app/packages/ingenium-core/dist/lib/db.js",
+      "/app/packages/ingenium-core/dist/lib/schema.js",
+      "/app/packages/ingenium-core/dist/lib/tools/dot-execution-delegation.js",
+      "/app/packages/ingenium-core/dist/lib/tools/jobs.js",
+      "/app/packages/ingenium-core/dist/lib/tools/runtimes.js",
+      "/app/packages/ingenium-core/dist/lib/tools/context-conversations.js",
+      "/app/packages/ingenium-core/dist/lib/tools/trusted-job-events.js",
+      "/app/packages/ingenium-core/dist/lib/tools/agents.js",
+      "/app/packages/ingenium-core/dist/lib/tools/authorization.js",
+      "/app/packages/ingenium-core/dist/lib/tools/mcp-authorization-policy.js",
+      "/app/packages/ingenium-core/dist/lib/tools/job-providers.js",
+      "/app/packages/ingenium-core/dist/lib/tools/vault.js",
+      "/app/packages/ingenium-core/dist/lib/tools/runtime-original-provision.js",
+      "/app/packages/ingenium-core/dist/lib/tools/authentication.js"
+    ]
+  },
+  "candidateExecutables": [
+    {
+      "source": "packages/veyra-operations/core126-candidate-material.mjs",
+      "image": "/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-candidate-material.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "veyra-packages/veyra-operations/core126-candidate-material.mjs",
+          "sourceSha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94",
+          "emittedSha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-bootstrap-runtime.mjs",
+          "sourceSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+          "emittedSha256": "d2527fe650239ba291da2266451a8cc9ad3f9b7d2daad83a2b6815a6cc842239"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-carrier.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-carrier.mjs",
+          "sourceSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+          "emittedSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-docker-stream.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-docker-stream.mjs",
+          "sourceSha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5",
+          "emittedSha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-loopback.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-loopback.mjs",
+          "sourceSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+          "emittedSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-original-invocation.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-original-invocation.mjs",
+          "sourceSha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe",
+          "emittedSha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+      "image": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-private-plugin.mjs",
+      "kind": "same MJS copier",
+      "copierRows": [
+        {
+          "path": "lib/dot-v2/candidate-private-plugin.mjs",
+          "sourceSha256": "41f696f1568d09321e61cbd4099335850485ff25feaf448a916beafb229aafc1",
+          "emittedSha256": "af534e109410360000576f935a7fa3846d16ea5fdf53d39ba5fd73e9c8c3de08"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "image": "/app/services/ingenium-api/dist/scripts/runtime-candidate-bootstrap.js",
+      "kind": "existing API TypeScript include; compiler not invoked",
+      "copierRows": []
+    }
+  ],
+  "originalCopier": {
+    "plannedMjs": 82,
+    "materialized": false,
+    "newSingletons": [],
+    "newRoots": [],
+    "newGlobs": [],
+    "compiledRelocations": [
+      {
+        "source": "services/ingenium-api/scripts/runtime-manager.ts",
+        "runtimeTarget": "scripts/runtime-manager.js",
+        "declarationTarget": "scripts/runtime-manager.d.ts",
+        "sourceSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+        "references": [
+          {
+            "source": "../../../packages/veyra-operations/core126-candidate-observation.mjs",
+            "target": "../veyra-packages/veyra-operations/core126-candidate-observation.mjs",
+            "runtimeRequired": true
+          },
+          {
+            "source": "../../../packages/veyra-operations/core126-manager-proof.mjs",
+            "target": "../veyra-packages/veyra-operations/core126-manager-proof.mjs",
+            "runtimeRequired": true
+          },
+          {
+            "source": "../../../packages/veyra-operations/core126-image-contract.mjs",
+            "target": "../veyra-packages/veyra-operations/core126-image-contract.mjs",
+            "runtimeRequired": true
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+        "runtimeTarget": "lib/dot-v2/dot-original-context.js",
+        "declarationTarget": "lib/dot-v2/dot-original-context.d.ts",
+        "sourceSha256": "c6fd4d762622dda2bd9f8b81d6e93ce989d20c7ae4e0a02e92b84aa1aa3c250f",
+        "references": [
+          {
+            "source": "../../../../packages/veyra-operations/core126-candidate-observation.mjs",
+            "target": "../../veyra-packages/veyra-operations/core126-candidate-observation.mjs",
+            "runtimeRequired": true
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+        "runtimeTarget": "lib/dot-v2/core126-installed-image-owner.js",
+        "declarationTarget": "lib/dot-v2/core126-installed-image-owner.d.ts",
+        "sourceSha256": "6b389fcd9e9780dc29b930969583079eea6188520a5de18e79b88e2f76203063",
+        "references": [
+          {
+            "source": "../../../../packages/veyra-operations/core126-candidate-observation.mjs",
+            "target": "../../veyra-packages/veyra-operations/core126-candidate-observation.mjs",
+            "runtimeRequired": true
+          },
+          {
+            "source": "../../../../packages/veyra-operations/core126-image-owner.mjs",
+            "target": "../../veyra-packages/veyra-operations/core126-image-owner.mjs",
+            "runtimeRequired": true
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+        "runtimeTarget": "lib/dot-v2/core126-actual-factory.js",
+        "declarationTarget": "lib/dot-v2/core126-actual-factory.d.ts",
+        "sourceSha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba",
+        "references": [
+          {
+            "source": "../../../../packages/veyra-operations/core126-image-owner.mjs",
+            "target": "../../veyra-packages/veyra-operations/core126-image-owner.mjs",
+            "runtimeRequired": false
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+        "runtimeTarget": "lib/dot-v2/core126-runtime.js",
+        "declarationTarget": "lib/dot-v2/core126-runtime.d.ts",
+        "sourceSha256": "09458d257660fa9bd393eff4cde4e6c296195a742cf0e5173c9df022c52b0692",
+        "references": [
+          {
+            "source": "../../../../packages/veyra-operations/core126-image-owner.mjs",
+            "target": "../../veyra-packages/veyra-operations/core126-image-owner.mjs",
+            "runtimeRequired": false
+          }
+        ]
+      }
+    ]
+  },
+  "validator": {
+    "obsoleteSocketRequirement": "Root already removed obsolete requirement; no duplicate mutation",
+    "jobPluginDirectoryGuard": "exact guard update proposed",
+    "checkedLiteralGuards": 317,
+    "failed": [],
+    "unexamined": [
+      {
+        "line": 296,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 329,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 330,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 379,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 380,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 413,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 418,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 461,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 464,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 467,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 470,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 471,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 472,
+        "reason": "Unresolved shell variable"
+      },
+      {
+        "line": 502,
+        "reason": "Unresolved shell variable"
+      }
+    ],
+    "notClaimed": "Full shell validator execution including dynamic loops/order, nginx render, API policy checks and compiler/build checks remain open"
+  },
+  "sourceInventory": [
+    {
+      "path": "Dockerfile",
+      "bytes": 27166,
+      "sha256": "b113a5b93fe6203e8ae7f02e170af1e8742605d225c1534827ece114e28b2e2e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 653874,
+      "sha256": "07e954e2af4bad758da89ffe94d08cc1309568a9d990c321aba7cdf2dd87e179",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "scripts/runtime-entrypoint.sh",
+      "bytes": 4796,
+      "sha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-job-child.ts",
+      "bytes": 786,
+      "sha256": "dff0164eabb77d776736ac36db20211fdb327061c22807cdd68af35a0d581502",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+      "bytes": 2732,
+      "sha256": "df4d6f2da61ae7d9a4a836e2d95948ec8ef478032caf2076adc2a52b2bdd2e1e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+      "bytes": 8702,
+      "sha256": "dbaccea339d8c9f6cbee96acfa10b489e5b26e4e7f13a4608d0d5453063b591e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "bytes": 11277,
+      "sha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "bytes": 27606,
+      "sha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "bytes": 8325,
+      "sha256": "6d3224c3b6b1f13d8b991840cd7a2f060334d2bb6684900c3760bd5ad8ebff80",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "bytes": 659,
+      "sha256": "6d22a7a97a5602fc66629a2bde3ff8513ea58cdfdd41ef400db8c18ccff04dcd",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-agent-material.mjs",
+      "bytes": 7493,
+      "sha256": "6d6e0354becc927326e5d90b5477adaa8968ee4ae5e4e48d433fc069c19a20a6",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "config/opencode-managed/job-opencode.json",
+      "bytes": 418,
+      "sha256": "55a6797f6e2ce9d22278608bfe8757a7f2e1b439de8d324afa6410f9503f7b69",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "config/opencode-managed/plugins/enforce-job-agent/index.mjs",
+      "bytes": 665,
+      "sha256": "f0abe3f7e53d91d56b9ed45d2f958d9e4edaa5d5faae930636e80fe8cfcae35c",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "config/opencode-managed/plugins/enforce-reserved-broker/index.mjs",
+      "bytes": 4763,
+      "sha256": "d26faf67b82152bbbf9ba6d0a2591b8ecc8fee18ec1af357ed00302c2a91ac95",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": ".opencode/agents/execution/ingenium-llm-broker.md",
+      "bytes": 527,
+      "sha256": "ce5e3609aa4d05e018d739873cb6ca72cd148a79cb4674d1051c8a68325eb805",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-job-plugin.mjs",
+      "bytes": 8490,
+      "sha256": "f6e09ad01f3de57d948b2b159d10b20a931664cca5bc3e6a4b6bd4500ee99dfc",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-job-bootstrap.mjs",
+      "bytes": 2286,
+      "sha256": "d685142d5c2c3ba5ced0c64d9fa2b100ed1979e662462bd493d9bd414cce3343",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-job-bootstrap.ts",
+      "bytes": 515,
+      "sha256": "126f89bb908b7240b91841b9bc7b7e7dabb8f02a3c48097267535736e794e862",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+      "bytes": 2471,
+      "sha256": "d18d5d892477eb5d5a9c501ee3194edf8314cf896997bdd0559aeabcc271400e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "bytes": 2337,
+      "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+      "bytes": 5152,
+      "sha256": "3b9334dc6e32b27b1de2ad50443c63a05a7a48a3d1d78f6454b0baf6d8507b6a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+      "bytes": 3139,
+      "sha256": "e45245d6923f37f17a2f5a8503be0a67852c50eeada2ba3d1fcd202b222e6631",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+      "bytes": 5845,
+      "sha256": "15fca1e2f55a70ea6e259949a44c2b948abf3870d3a4be2133d58ea5143bbd42",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-private-plugin.mjs",
+      "bytes": 2753,
+      "sha256": "6a4fd7a98856465273934fd1ce1f1a8c8f35e12b2b20c958ffc43dd58a456e88",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+      "bytes": 524,
+      "sha256": "c98582e75fed3791aed7b8c5679ba30d67be6cc2034884fb488eef1f19e07226",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "bytes": 31082,
+      "sha256": "d532e2b5abc43455d38d973fe3b6573ea33bcf33aecf30f0b356a80aef005602",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+      "bytes": 39263,
+      "sha256": "541c86dd2488e9917068372ed9a1653f0e4f5e7540a38d24889a5e6173a07ed0",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-extension/scripts/job-run-mcp-transport.ts",
+      "bytes": 1310,
+      "sha256": "aa67ad16b4ab24352bd11d01d08619d52d1da76a45bb1eeb500124ae91b8f2d8",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-extension/scripts/job-run-mcp-client.ts",
+      "bytes": 3556,
+      "sha256": "145fd796bce00a0b680aba0b80b293a9bca1058f5476a2d6cb6321020646552a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+      "bytes": 2675,
+      "sha256": "d865891ca7678458ec9872e5d108cdef31e7a913bf217e806d091b7420fc9bda",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "tools/veyra-release/core126-candidate-intent.mjs",
+      "bytes": 4893,
+      "sha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-observation.mjs",
+      "bytes": 12489,
+      "sha256": "ff416fb5e4b8334265b325cb7e7943548003902fe4339b8296c780f1f04afa55",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "bytes": 18182,
+      "sha256": "1e6beefa49622995ecdd7cb32f64c5e1715512fcb5ec3fb0b8338eaddf73f2e8",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "tools/veyra-release/core126-docker-binary.mjs",
+      "bytes": 11083,
+      "sha256": "b3b5456f73996ff63eaa0f433895de6fce62dc1a5cc5eedead38ddb183522d8f",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "config/opencode-managed/candidate-inert-catalog.json",
+      "bytes": 435,
+      "sha256": "ce1190a5bf8e32a6eee392640350744cd30f0df6d7526c5a57349e929eb30225",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+      "bytes": 5660,
+      "sha256": "6b389fcd9e9780dc29b930969583079eea6188520a5de18e79b88e2f76203063",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-material.mjs",
+      "bytes": 2571,
+      "sha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "bytes": 9895,
+      "sha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "bytes": 10644,
+      "sha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "bytes": 2018,
+      "sha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "bytes": 6784,
+      "sha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "bytes": 1329,
+      "sha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+      "bytes": 3524,
+      "sha256": "41f696f1568d09321e61cbd4099335850485ff25feaf448a916beafb229aafc1",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "bytes": 918,
+      "sha256": "d807173cbb481fe7f096f55bdca59cc5f770ccbc04f2522c8744044819c714e3",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "bytes": 12185,
+      "sha256": "f262f1a2119add00119a16e5830678848492a08edd84307da3731ba897cd8338",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-manager-proof.mjs",
+      "bytes": 1585,
+      "sha256": "36faf7dc7064fd4183759c2799d31ade57d9eccbb02eb727bb1998b91cd332a2",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "bytes": 9461,
+      "sha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "bytes": 12127,
+      "sha256": "c6fd4d762622dda2bd9f8b81d6e93ce989d20c7ae4e0a02e92b84aa1aa3c250f",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "bytes": 2340,
+      "sha256": "fc6ef51d4e71ca58b50cd66ee3b5caebca183bb2d39f3f096dd63d03c65f6365",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "bytes": 12223,
+      "sha256": "9baccc0a8ec748ad0679070826162155dd3c92b2d223938fead79ba83463322a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "bytes": 4201,
+      "sha256": "0ab7360153ad50f87df5759275593ed4da48f99f1dc5bcacad6885e39b936136",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "bytes": 3832,
+      "sha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "bytes": 23480,
+      "sha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/service.ts",
+      "bytes": 20194,
+      "sha256": "1d8af5c2fb93c30b1d214acb0cc37a30f556ad69aa4712b944e283ce8cbdffbd",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "bytes": 4452,
+      "sha256": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "bytes": 1729,
+      "sha256": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+      "bytes": 1372,
+      "sha256": "0f5b3fa9056ed38c218a83bc300c82495dfe7459b480377b240303c4cdd14624",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/job-response-verification.ts",
+      "bytes": 2681,
+      "sha256": "d5a023e1e6e91bf24ef7d8ac7734f3df330e307ab1f083b6bca1399ccadc0c46",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "bytes": 10565,
+      "sha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "bytes": 850,
+      "sha256": "ef443c5b122dec81c184291c0b86320f70735446b0aa9f94293ce419c2bf8b97",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "bytes": 5619,
+      "sha256": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "bytes": 1463,
+      "sha256": "09458d257660fa9bd393eff4cde4e6c296195a742cf0e5173c9df022c52b0692",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "bytes": 2774,
+      "sha256": "d1878007ef1ae8fbcd7b1ca459a0fc01291946ef379ecfde0c5a425781013bf8",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/job-native-provider.ts",
+      "bytes": 1526,
+      "sha256": "be7caf71d1f9adf874c0def9cb4292be4b8962986f574bcaf9c5b465803cb4fb",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "bytes": 93818,
+      "sha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "bytes": 12169,
+      "sha256": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "bytes": 2136,
+      "sha256": "c451bb63f00fdaa36b4fb12afd3db5ea5adebb34cf241b407b463b5f19169000",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "bytes": 600,
+      "sha256": "a95183d3535b6da6ba62c1af3358bc724195d9c1dbdbc3174948e0c3177ecdb4",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "bytes": 2158,
+      "sha256": "9459006f6964abbadba314e17a700e89896a6ccc7b25aff291de9899884088c1",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "bytes": 5295,
+      "sha256": "eeb37db490aecb0516fa72b7b8df41a3bf7e0f2e322c6fc4698779ae13fb9c33",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/db.ts",
+      "bytes": 308067,
+      "sha256": "adcaa7be673140175b30dbbab7d593fc7d4b642961f0090a160d8fd43ebb289a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/schema.ts",
+      "bytes": 53644,
+      "sha256": "0131ca7ce9db0f7841239e09eb07d8fcacc1c340858f887b755ebe3805eafe1b",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+      "bytes": 15656,
+      "sha256": "d915d34a49a49c1f242138eb87772e599e0f2676e23955d6d17aa8c289cf02d5",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/jobs.ts",
+      "bytes": 56670,
+      "sha256": "3eb50d727132dcdc77a6d505ef48ec0ed2bbbc8af70bf2747414eb83b889b3bd",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/runtimes.ts",
+      "bytes": 58127,
+      "sha256": "47118264a1ec11e03a094212487bb9c9f7745de5aea66b3b83a3514398fd7c38",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/context-conversations.ts",
+      "bytes": 64500,
+      "sha256": "9d04b98823b766bd15a2a44a9c344248dce7f2dba08d598767a6fcbc40ac6700",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+      "bytes": 15315,
+      "sha256": "30554e3b4b0e0d6d6e6ab36bed3d2415d3fa91cbab001671cb041f6595728c42",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/agents.ts",
+      "bytes": 57776,
+      "sha256": "bf2230970004420be9c88752f08b6e0a23888c9e3581cb95760420ccee035ec3",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/authorization.ts",
+      "bytes": 19024,
+      "sha256": "9248705e19c7d49e1be57a182ca5e62181b5d9fd6fecd659df6d76f167a8cae7",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-authorization-policy.ts",
+      "bytes": 11872,
+      "sha256": "aa2a41a4bcf2196f7ba6e594337e44a10b737a1e009231eb821b884897979215",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/job-providers.ts",
+      "bytes": 11242,
+      "sha256": "7f3d56a90bb6a6e585d95502a2e45279fbe352539bcf3869ac6e49605008680e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/vault.ts",
+      "bytes": 37021,
+      "sha256": "85d6a1b33a923cad267137372a5c2fe1f4aba9d2d4b3ae35e46baf6526e9163f",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+      "bytes": 17982,
+      "sha256": "2d231a2015739bee169f92c4bc2a3037f9eb3524772efe2903790fe184e870c7",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/authentication.ts",
+      "bytes": 30350,
+      "sha256": "6614b9124326ea5dac21fb0f9da9f1f07378126c61e8a4e670978b5cfc25306f",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-material.d.mts",
+      "bytes": 375,
+      "sha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "bytes": 667,
+      "sha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "bytes": 2611,
+      "sha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "bytes": 290,
+      "sha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "bytes": 1117,
+      "sha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "bytes": 434,
+      "sha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts",
+      "bytes": 189,
+      "sha256": "5e083615accd16b2f9cf49ba4b452bf6ee71f174993c48c97119fffb0e6b326d",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "bytes": 1129,
+      "sha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.d.mts",
+      "bytes": 5869,
+      "sha256": "b16847ab048991fd702f67d7d33b9d2e230150a905cd22fd8e82b96bc2ae18ce",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "bytes": 13087,
+      "sha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "scripts/validate-deployment-config.sh",
+      "bytes": 40507,
+      "sha256": "5d52263e4daad877a7a8068e910ea1c4772c7112fe6fc767e824b4dbaef7b076",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/tsconfig.json",
+      "bytes": 245,
+      "sha256": "c6d353d9521f1a1bc028e887c2bb9db6cdd6310548314de03f42030f4b4b2361",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/tsconfig.json",
+      "bytes": 190,
+      "sha256": "6b29c8dbf24a6837ef61466fe869cb461b9110446effbd8ee33ff80d3560ca17",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "tsconfig.base.json",
+      "bytes": 532,
+      "sha256": "d3a56e5bd556499e9d83efd8838233514341395972098aa24d5981253eabfbcc",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "services/ingenium-api/package.json",
+      "bytes": 1086,
+      "sha256": "9cd0daf7ba6bed7d5d2f049b67b2158f786df338115a428b912b4d031b77e0aa",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/package.json",
+      "bytes": 795,
+      "sha256": "54218c32ae7c321bd70e4fe03530c70c48e7a78f0183602d257f6db6bf61c97e",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/126_managed_job_execution.sql",
+      "bytes": 8644,
+      "sha256": "44532aace969cf4b76465d72fb14cb68341c269ac08433d77febc89a44adbc4a",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql",
+      "bytes": 23513,
+      "sha256": "62c72c6e6c2dee158e7730ae4a9dba2d7a29a8726384b046909ad153ff9ab11b",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/130_dot_original_dispatch_fence.sql",
+      "bytes": 14308,
+      "sha256": "3d81d09fce002348304943d18f762740c3fd42cf74cc599048411ccd0237e653",
+      "role": "Actual Root pre-integration bytes; not a qualification manifest"
+    }
+  ],
+  "imports": [
+    {
+      "path": "packages/veyra-operations/core126-candidate-material.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./core126-image-contract.mjs",
+          "typeOnly": false,
+          "names": "{UUID,hash,originalJsonHash,freeze,hex,imageId,unavailable}",
+          "target": "packages/veyra-operations/core126-image-contract.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-agent-material.mjs",
+          "typeOnly": false,
+          "names": "{validateCore126AgentConfiguration}",
+          "target": "packages/veyra-operations/core126-agent-material.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-candidate-material.mjs",
+          "typeOnly": false,
+          "names": "{verifyCandidateAgentMaterial,candidateAgentOverlay}",
+          "target": "packages/veyra-operations/core126-candidate-material.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "node:child_process",
+          "typeOnly": false,
+          "names": "{spawn as nodeSpawn}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{readFileSync}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./candidate-carrier.mjs",
+          "typeOnly": false,
+          "names": "{createCandidateChildCarrier,candidateSelection,candidateDenied,exact}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./candidate-loopback.mjs",
+          "typeOnly": false,
+          "names": "{openCandidateLoopback,CANDIDATE_CATALOG,CANDIDATE_CORE_ORIGIN}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./candidate-original-invocation.mjs",
+          "typeOnly": false,
+          "names": "{originalManagedJobInvocation}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-original-authority.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalJobAuthority,readOriginalJobCapability}",
+          "target": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-private-control.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalJobCustody,createOriginalJobControl,openOriginalJobControl}",
+          "target": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-private-files.mjs",
+          "typeOnly": false,
+          "names": "{prepareJobPrivateDirectories,writeOriginalJobPrivate,assertOriginalJobStaticFiles}",
+          "target": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-bootstrap-runtime.mjs",
+          "typeOnly": false,
+          "names": "{assertOriginalBootstrapAssignment,readOriginalProtectedBroker}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-bootstrap-facade.mjs",
+          "typeOnly": false,
+          "names": "{IMAGE_INPUTS,JOB_CONFIG,JOB_CONFIG_DIRECTORY,core126ClosedJobConfig,hash,freeze}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./job-bootstrap-frame.mjs",
+          "typeOnly": false,
+          "names": "{parseStrictJobJson}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:stream",
+          "typeOnly": false,
+          "names": "{Transform}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./candidate-carrier.mjs",
+          "typeOnly": false,
+          "names": "{CANDIDATE_FRAME_LIMIT,CANDIDATE_TOTAL_LIMIT,candidateDenied}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:http",
+          "typeOnly": false,
+          "names": "{createServer}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash,timingSafeEqual}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{openSync,closeSync,readFileSync,fstatSync,realpathSync,constants}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./candidate-carrier.mjs",
+          "typeOnly": false,
+          "names": "{candidateDenied,operationRoute,CANDIDATE_BODY_LIMIT}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./job-original-authority.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalJobAuthority,readOriginalJobCapability}",
+          "target": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-private-control.mjs",
+          "typeOnly": false,
+          "names": "{requestOriginalJobControl}",
+          "target": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-private-files.mjs",
+          "typeOnly": false,
+          "names": "{assertOriginalJobStaticFiles,assertJobPrivateTmpfs}",
+          "target": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-bootstrap-runtime.mjs",
+          "typeOnly": false,
+          "names": "{readOriginalProtectedBroker}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./candidate-bootstrap-runtime.mjs",
+          "typeOnly": false,
+          "names": "{assertCandidateBootstrapAssignment}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./candidate-carrier.mjs",
+          "typeOnly": false,
+          "names": "{candidateBinding,candidateDenied}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-bootstrap-frame.mjs",
+          "typeOnly": false,
+          "names": "{parseStrictJobJson}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-candidate-material.mjs",
+          "typeOnly": false,
+          "names": "{verifyCandidateAgentMaterial}",
+          "target": "packages/veyra-operations/core126-candidate-material.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-job-plugin.mjs",
+          "typeOnly": false,
+          "names": "{createCore126CandidateJobAgentPlugin}",
+          "target": "packages/veyra-operations/core126-job-plugin.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-bootstrap-facade.mjs",
+          "typeOnly": false,
+          "names": "{IMAGE_INPUTS,hash}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{agents}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "../lib/job-response-verification.js",
+          "typeOnly": false,
+          "names": "{JobResponseVerification}",
+          "target": "services/ingenium-api/lib/job-response-verification.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../lib/dot-v2/job-bootstrap-frame.mjs",
+          "typeOnly": false,
+          "names": "{parseStrictJobJson}",
+          "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../lib/dot-v2/candidate-bootstrap-runtime.mjs",
+          "typeOnly": false,
+          "names": "{runOriginalCandidateBootstrap}",
+          "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-manager-proof.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./core126-image-contract.mjs",
+          "typeOnly": false,
+          "names": "{UUID,hash,text,integer,publicContainer,unavailable,freeze}",
+          "target": "packages/veyra-operations/core126-image-contract.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./dot-original-context.js",
+          "typeOnly": false,
+          "names": "{requireOriginalCandidateCoordinatorContext,originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext}",
+          "target": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-provider-resolution.js",
+          "typeOnly": false,
+          "names": "{createOriginalManagedProviderResolution}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-image-owner.mjs",
+          "typeOnly": true,
+          "names": "type {Core126ImageOwner}",
+          "target": "packages/veyra-operations/core126-image-owner.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./managed-job-contracts.mjs",
+          "typeOnly": true,
+          "names": "type {Core126Facts,Core126Handlers}",
+          "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-owner.mjs",
+          "typeOnly": false,
+          "names": "{createCore126Owner}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-http.mjs",
+          "typeOnly": false,
+          "names": "{createCore126ManagerGuard,createCore126ToolAuthorizer,createCore126Handlers,createCore126WithdrawalHandler}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../runtime-manager-auth.js",
+          "typeOnly": false,
+          "names": "{loadManagerToken}",
+          "target": "services/ingenium-api/lib/runtime-manager-auth.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../job-response-verification.js",
+          "typeOnly": false,
+          "names": "{JobResponseVerification}",
+          "target": "services/ingenium-api/lib/job-response-verification.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-broker.js",
+          "typeOnly": false,
+          "names": "{createActualCore126Broker,actualManagedJobToolCatalog}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:async_hooks",
+          "typeOnly": false,
+          "names": "{AsyncLocalStorage}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-candidate-observation.mjs",
+          "typeOnly": false,
+          "names": "{readInstalledCandidateSource}",
+          "target": "packages/veyra-operations/core126-candidate-observation.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{dotExecutionDelegation,getDb}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "./installed-dot-approved-scope.js",
+          "typeOnly": false,
+          "names": "{installedDotApprovedScopeReader,revalidateInstalledDotApproval,readInstalledDotOperationEvidence}",
+          "target": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./repository.js",
+          "typeOnly": false,
+          "names": "{scopeKey}",
+          "target": "services/ingenium-api/lib/dot-v2/repository.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./managed-job-contracts.mjs",
+          "typeOnly": true,
+          "names": "type {Core126Selection,ManagedJobAdmission}",
+          "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{getDb,jobs,agents,jobProviders,runtimes,contextConversations,trustedJobEvents}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "../runtime-manager-client.js",
+          "typeOnly": false,
+          "names": "{inspectManagedRuntimePlacement}",
+          "target": "services/ingenium-api/lib/runtime-manager-client.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../runtime-placement-contract.js",
+          "typeOnly": false,
+          "names": "{qualifyManagedRuntimePlacement}",
+          "target": "services/ingenium-api/lib/runtime-placement-contract.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../projects-v2/request-chat-source.mjs",
+          "typeOnly": false,
+          "names": "{findRequestChatSourceIds,isRequestChatConversationActive}",
+          "target": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./request-binding.js",
+          "typeOnly": false,
+          "names": "{dotExecutionFingerprint,dotEventDigest,dotSourceReference}",
+          "target": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-owner.mjs",
+          "typeOnly": false,
+          "names": "{originalJobRunIdentity}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./repository.js",
+          "typeOnly": false,
+          "names": "{scopeKey}",
+          "target": "services/ingenium-api/lib/dot-v2/repository.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./dot-job-policy.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalDotJobPolicy}",
+          "target": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./dot-approved-scope.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalDotApprovedScopeReader,type OriginalDotApprovalLease}",
+          "target": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../../../../packages/veyra-automation/contracts.js",
+          "typeOnly": true,
+          "names": "type { DotScope, Suggestion, Followup, Operation, Notification }",
+          "target": "packages/veyra-automation/contracts.d.ts",
+          "classification": "type declaration outside selected executable closure"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "express",
+          "typeOnly": true,
+          "names": "type { Request }",
+          "target": null,
+          "classification": "existing package dependency, package-lock and immutable image boundary"
+        },
+        {
+          "specifier": "../authorization-policy.js",
+          "typeOnly": true,
+          "names": "type { toAuthorizationPrincipal }",
+          "target": "services/ingenium-api/lib/authorization-policy.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "../middleware/auth.js",
+          "typeOnly": true,
+          "names": "type { RequestPrincipal, AttestedCoordinationIdentity }",
+          "target": "services/ingenium-api/lib/middleware/auth.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "../../../../packages/veyra-automation/contracts.js",
+          "typeOnly": true,
+          "names": "type { Actor, Authorization, DotScope }",
+          "target": "packages/veyra-automation/contracts.d.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./core-binding.js",
+          "typeOnly": true,
+          "names": "type { CoreJob, CoreRun, CoreDotBindingPolicy, CoreDotExecution }",
+          "target": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./router.js",
+          "typeOnly": true,
+          "names": "type { DotQueueReader, DotRequestContext }",
+          "target": "services/ingenium-api/lib/dot-v2/router.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./service.js",
+          "typeOnly": false,
+          "names": "{ DotError, type JobAuthority }",
+          "target": "services/ingenium-api/lib/dot-v2/service.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./existing-jobs.js",
+          "typeOnly": false,
+          "names": "{ existingJobsAuthority }",
+          "target": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./repository.js",
+          "typeOnly": false,
+          "names": "{ scopeKey }",
+          "target": "services/ingenium-api/lib/dot-v2/repository.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/service.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../../../../packages/veyra-automation/contracts.js",
+          "typeOnly": true,
+          "names": "type { Actor, Authorization, DotScope, Suggestion, Followup, Operation, Notification, Schedule, MissedPolicy }",
+          "target": "packages/veyra-automation/contracts.d.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./repository.js",
+          "typeOnly": false,
+          "names": "{ DotRepository, DotConflict, scopeKey }",
+          "target": "services/ingenium-api/lib/dot-v2/repository.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./schedule.js",
+          "typeOnly": false,
+          "names": "{ validateSchedule, planDue }",
+          "target": "services/ingenium-api/lib/dot-v2/schedule.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../../../../packages/veyra-automation/contracts.js",
+          "typeOnly": true,
+          "names": "type { Schedule, MissedPolicy }",
+          "target": "packages/veyra-automation/contracts.d.ts",
+          "classification": "type declaration outside selected executable closure"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../../../../packages/veyra-automation/contracts.js",
+          "typeOnly": true,
+          "names": "type { Actor, DotScope }",
+          "target": "packages/veyra-automation/contracts.d.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./service.js",
+          "typeOnly": true,
+          "names": "type { BoundJob, JobAuthority }",
+          "target": "services/ingenium-api/lib/dot-v2/service.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./service.js",
+          "typeOnly": false,
+          "names": "{ DotError }",
+          "target": "services/ingenium-api/lib/dot-v2/service.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "services/ingenium-api/lib/job-response-verification.ts",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{ lstatSync, readFileSync, realpathSync }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": true,
+          "names": "type {runtimes}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "ingenium-core/lib/tools/runtime-original-provision",
+          "typeOnly": false,
+          "names": "* as runtimeProvision",
+          "target": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+          "classification": "explicit original Core subpath"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{randomUUID}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./runtime-placement-contract.js",
+          "typeOnly": false,
+          "names": "{ isManagedRuntimeObservation, type ManagedRuntimeObservation }",
+          "target": "services/ingenium-api/lib/runtime-placement-contract.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{lstatSync,readFileSync,realpathSync}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./projects-v2/request-execution-owner.mjs",
+          "typeOnly": true,
+          "names": "type { PlacementRequest, TrustedPlacement }",
+          "target": "services/ingenium-api/lib/projects-v2/request-execution-owner.mjs",
+          "classification": "type declaration outside selected executable closure"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{mcpCredentials}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "./core126-http.mjs",
+          "typeOnly": false,
+          "names": "{createCore126WithdrawalHandler}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../../../../packages/veyra-operations/core126-image-owner.mjs",
+          "typeOnly": true,
+          "names": "type {Core126ImageOwner}",
+          "target": "packages/veyra-operations/core126-image-owner.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./managed-job-contracts.mjs",
+          "typeOnly": true,
+          "names": "type {Core126Handlers}",
+          "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./core126-actual-factory.js",
+          "typeOnly": false,
+          "names": "{createActualCore126Owner}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:async_hooks",
+          "typeOnly": false,
+          "names": "{AsyncLocalStorage}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{getDb,vault}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "../job-native-provider.js",
+          "typeOnly": false,
+          "names": "{resolveJobProviderModel}",
+          "target": "services/ingenium-api/lib/job-native-provider.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./managed-job-contracts.mjs",
+          "typeOnly": true,
+          "names": "type {Core126Facts}",
+          "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/job-native-provider.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": true,
+          "names": "type { vault }",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "./chat-provider-catalog.js",
+          "typeOnly": false,
+          "names": "{ getBuiltinChatProvider }",
+          "target": "services/ingenium-api/lib/chat-provider-catalog.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./opencode-client.js",
+          "typeOnly": false,
+          "names": "{ opencodeClient }",
+          "target": "services/ingenium-api/lib/opencode-client.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./chat-model-variants.js",
+          "typeOnly": false,
+          "names": "{ chatModelVariants }",
+          "target": "services/ingenium-api/lib/chat-model-variants.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{ getDb, logger, runtimes }",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{ closeSync, constants, fstatSync, lstatSync, openSync, readFileSync }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:path",
+          "typeOnly": false,
+          "names": "{ dirname }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../config/index.js",
+          "typeOnly": false,
+          "names": "{ config }",
+          "target": "services/ingenium-api/config/index.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./runtime-opencode-context.js",
+          "typeOnly": false,
+          "names": "{ currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget }",
+          "target": "services/ingenium-api/lib/runtime-opencode-context.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./runtime-provisioner.js",
+          "typeOnly": false,
+          "names": "{ isLocalRuntimeBinding }",
+          "target": "services/ingenium-api/lib/runtime-provisioner.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./synthesis-provider-resolution.js",
+          "typeOnly": false,
+          "dynamic": true,
+          "target": "services/ingenium-api/lib/synthesis-provider-resolution.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "ingenium-core",
+          "typeOnly": false,
+          "names": "{mcpToolStates,projects}",
+          "target": "packages/ingenium-core/lib/index.ts",
+          "classification": "original Core barrel explicitly fingerprinted; named authority exports audited separately"
+        },
+        {
+          "specifier": "./core126-broker.mjs",
+          "typeOnly": false,
+          "names": "{createCore126Broker}",
+          "target": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./managed-job-contracts.mjs",
+          "typeOnly": true,
+          "names": "type {Core126Owner,ClosedToolAuthorizer}",
+          "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "parseErrors": 0,
+      "imports": []
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./db.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./database-integrity.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/database-integrity.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/skills.js",
+          "typeOnly": false,
+          "names": "* as skills",
+          "target": "packages/ingenium-core/lib/tools/skills.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/skill-governance.js",
+          "typeOnly": false,
+          "names": "* as skillGovernance",
+          "target": "packages/ingenium-core/lib/tools/skill-governance.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/paths.js",
+          "typeOnly": false,
+          "names": "{ getSkillsBase, getPluginsBase, getCommandsBase }",
+          "target": "packages/ingenium-core/lib/tools/paths.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/tasks.js",
+          "typeOnly": false,
+          "names": "* as tasks",
+          "target": "packages/ingenium-core/lib/tools/tasks.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/task-claims.js",
+          "typeOnly": false,
+          "names": "* as taskClaims",
+          "target": "packages/ingenium-core/lib/tools/task-claims.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/context.js",
+          "typeOnly": false,
+          "names": "* as context",
+          "target": "packages/ingenium-core/lib/tools/context.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/context-conversations.js",
+          "typeOnly": false,
+          "names": "* as contextConversations",
+          "target": "packages/ingenium-core/lib/tools/context-conversations.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/context-rag.js",
+          "typeOnly": false,
+          "names": "* as contextRag",
+          "target": "packages/ingenium-core/lib/tools/context-rag.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/context-snapshot-import.js",
+          "typeOnly": false,
+          "names": "* as contextSnapshotImport",
+          "target": "packages/ingenium-core/lib/tools/context-snapshot-import.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/explicit-memory.js",
+          "typeOnly": false,
+          "names": "* as explicitMemory",
+          "target": "packages/ingenium-core/lib/tools/explicit-memory.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/projects.js",
+          "typeOnly": false,
+          "names": "* as projects",
+          "target": "packages/ingenium-core/lib/tools/projects.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/identity.js",
+          "typeOnly": false,
+          "names": "* as identity",
+          "target": "packages/ingenium-core/lib/tools/identity.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/organizations.js",
+          "typeOnly": false,
+          "names": "* as organizations",
+          "target": "packages/ingenium-core/lib/tools/organizations.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/authorization.js",
+          "typeOnly": false,
+          "names": "* as authorization",
+          "target": "packages/ingenium-core/lib/tools/authorization.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/mcp-authorization-policy.js",
+          "typeOnly": false,
+          "names": "* as mcpAuthorizationPolicy",
+          "target": "packages/ingenium-core/lib/tools/mcp-authorization-policy.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/authentication.js",
+          "typeOnly": false,
+          "names": "* as authentication",
+          "target": "packages/ingenium-core/lib/tools/authentication.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/oidc-authentication.js",
+          "typeOnly": false,
+          "names": "* as oidcAuthentication",
+          "target": "packages/ingenium-core/lib/tools/oidc-authentication.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/bootstrap.js",
+          "typeOnly": false,
+          "names": "* as bootstrap",
+          "target": "packages/ingenium-core/lib/tools/bootstrap.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/security-audit.js",
+          "typeOnly": false,
+          "names": "* as securityAudit",
+          "target": "packages/ingenium-core/lib/tools/security-audit.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/security-tokens.js",
+          "typeOnly": false,
+          "names": "* as securityTokens",
+          "target": "packages/ingenium-core/lib/tools/security-tokens.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/mcp-credentials.js",
+          "typeOnly": false,
+          "names": "* as mcpCredentials",
+          "target": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/runtimes.js",
+          "typeOnly": false,
+          "names": "* as runtimes",
+          "target": "packages/ingenium-core/lib/tools/runtimes.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/invitations.js",
+          "typeOnly": false,
+          "names": "* as invitations",
+          "target": "packages/ingenium-core/lib/tools/invitations.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/plugins.js",
+          "typeOnly": false,
+          "names": "* as plugins",
+          "target": "packages/ingenium-core/lib/tools/plugins.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/servers.js",
+          "typeOnly": false,
+          "names": "* as servers",
+          "target": "packages/ingenium-core/lib/tools/servers.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/child-mcp-servers.js",
+          "typeOnly": false,
+          "names": "* as childMcpServers",
+          "target": "packages/ingenium-core/lib/tools/child-mcp-servers.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/settings.js",
+          "typeOnly": false,
+          "names": "* as settings",
+          "target": "packages/ingenium-core/lib/tools/settings.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/observations.js",
+          "typeOnly": false,
+          "names": "* as observations",
+          "target": "packages/ingenium-core/lib/tools/observations.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/personality.js",
+          "typeOnly": false,
+          "names": "* as personality",
+          "target": "packages/ingenium-core/lib/tools/personality.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/synthesis.js",
+          "typeOnly": false,
+          "names": "* as synthesis",
+          "target": "packages/ingenium-core/lib/tools/synthesis.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/synthesis-llm.js",
+          "typeOnly": false,
+          "names": "* as synthesisLlm",
+          "target": "packages/ingenium-core/lib/tools/synthesis-llm.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./schema.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./logger.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/logger.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./constants.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/constants.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./restore-fixture-path.js",
+          "typeOnly": false,
+          "names": "*",
+          "target": "packages/ingenium-core/lib/restore-fixture-path.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/agents.js",
+          "typeOnly": false,
+          "names": "* as agents",
+          "target": "packages/ingenium-core/lib/tools/agents.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/pipeline-events.js",
+          "typeOnly": false,
+          "names": "* as pipelineEvents",
+          "target": "packages/ingenium-core/lib/tools/pipeline-events.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/commands.js",
+          "typeOnly": false,
+          "names": "* as commands",
+          "target": "packages/ingenium-core/lib/tools/commands.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/configs.js",
+          "typeOnly": false,
+          "names": "* as configs",
+          "target": "packages/ingenium-core/lib/tools/configs.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/extraction.js",
+          "typeOnly": false,
+          "names": "* as extraction",
+          "target": "packages/ingenium-core/lib/tools/extraction.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/extraction.js",
+          "typeOnly": true,
+          "names": "{\n  OpenCodeMessage,\n  OpenCodeMessagesClient,\n  OpenCodeMessagesFailure,\n}",
+          "target": "packages/ingenium-core/lib/tools/extraction.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/jobs.js",
+          "typeOnly": false,
+          "names": "* as jobs",
+          "target": "packages/ingenium-core/lib/tools/jobs.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/job-providers.js",
+          "typeOnly": false,
+          "names": "* as jobProviders",
+          "target": "packages/ingenium-core/lib/tools/job-providers.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/job-event-deliveries.js",
+          "typeOnly": false,
+          "names": "* as jobEventDeliveries",
+          "target": "packages/ingenium-core/lib/tools/job-event-deliveries.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/job-suggest-llm.js",
+          "typeOnly": false,
+          "names": "* as jobSuggestLlm",
+          "target": "packages/ingenium-core/lib/tools/job-suggest-llm.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/trusted-job-events.js",
+          "typeOnly": false,
+          "names": "* as trustedJobEvents",
+          "target": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/mcp-tool-states.js",
+          "typeOnly": false,
+          "names": "* as mcpToolStates",
+          "target": "packages/ingenium-core/lib/tools/mcp-tool-states.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/mcp-tool-conformance.js",
+          "typeOnly": false,
+          "names": "* as mcpToolConformance",
+          "target": "packages/ingenium-core/lib/tools/mcp-tool-conformance.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/mcp-usefulness-evidence.js",
+          "typeOnly": false,
+          "names": "* as mcpUsefulnessEvidence",
+          "target": "packages/ingenium-core/lib/tools/mcp-usefulness-evidence.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/mcp-usefulness-report.js",
+          "typeOnly": false,
+          "names": "* as mcpUsefulnessReport",
+          "target": "packages/ingenium-core/lib/tools/mcp-usefulness-report.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/email-cache.js",
+          "typeOnly": false,
+          "names": "* as emailCache",
+          "target": "packages/ingenium-core/lib/tools/email-cache.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/email-suggestion-queue.js",
+          "typeOnly": false,
+          "names": "* as emailSuggestionQueue",
+          "target": "packages/ingenium-core/lib/tools/email-suggestion-queue.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/email-watcher-markers.js",
+          "typeOnly": false,
+          "names": "* as emailWatcherMarkers",
+          "target": "packages/ingenium-core/lib/tools/email-watcher-markers.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/email-key-transition.js",
+          "typeOnly": false,
+          "names": "* as emailKeyTransition",
+          "target": "packages/ingenium-core/lib/tools/email-key-transition.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/usage.js",
+          "typeOnly": false,
+          "names": "* as usage",
+          "target": "packages/ingenium-core/lib/tools/usage.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/docs.js",
+          "typeOnly": false,
+          "names": "* as docs",
+          "target": "packages/ingenium-core/lib/tools/docs.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/repository-docs.js",
+          "typeOnly": false,
+          "names": "* as repositoryDocs",
+          "target": "packages/ingenium-core/lib/tools/repository-docs.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/repository-resources.js",
+          "typeOnly": false,
+          "names": "* as repositoryResources",
+          "target": "packages/ingenium-core/lib/tools/repository-resources.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/repository-sync.js",
+          "typeOnly": false,
+          "names": "* as repositorySync",
+          "target": "packages/ingenium-core/lib/tools/repository-sync.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/worktree-binding.js",
+          "typeOnly": false,
+          "names": "* as worktreeBinding",
+          "target": "packages/ingenium-core/lib/tools/worktree-binding.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/maintenance-locks.js",
+          "typeOnly": false,
+          "names": "* as maintenanceLocks",
+          "target": "packages/ingenium-core/lib/tools/maintenance-locks.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/vault.js",
+          "typeOnly": false,
+          "names": "* as vault",
+          "target": "packages/ingenium-core/lib/tools/vault.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./tools/vault-crypto.js",
+          "typeOnly": false,
+          "names": "* as vaultCrypto",
+          "target": "packages/ingenium-core/lib/tools/vault-crypto.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/protected-settings.js",
+          "typeOnly": false,
+          "names": "* as protectedSettings",
+          "target": "packages/ingenium-core/lib/tools/protected-settings.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/cloudflare-tunnel.js",
+          "typeOnly": false,
+          "names": "* as cloudflareTunnel",
+          "target": "packages/ingenium-core/lib/tools/cloudflare-tunnel.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/backups.js",
+          "typeOnly": false,
+          "names": "* as backups",
+          "target": "packages/ingenium-core/lib/tools/backups.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/rag-chunker.js",
+          "typeOnly": false,
+          "names": "* as ragChunker",
+          "target": "packages/ingenium-core/lib/tools/rag-chunker.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/rag.js",
+          "typeOnly": false,
+          "names": "* as rag",
+          "target": "packages/ingenium-core/lib/tools/rag.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/endpoint-policy.js",
+          "typeOnly": false,
+          "names": "{ EndpointPolicyError, isIP, isPrivateAddress, safeEndpointFetch, safeLlmFetch, validateEndpointUrl }",
+          "target": "packages/ingenium-core/lib/tools/endpoint-policy.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/endpoint-policy.js",
+          "typeOnly": true,
+          "names": "{ EndpointPolicyErrorCode, EndpointPolicyOptions }",
+          "target": "packages/ingenium-core/lib/tools/endpoint-policy.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/hosted-governance.js",
+          "typeOnly": false,
+          "names": "{ createHostedGovernance, HostedRefusal, proposalReviewHash, payloadHash as hostedGovernancePayloadHash }",
+          "target": "packages/ingenium-core/lib/tools/hosted-governance.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/hosted-governance.js",
+          "typeOnly": true,
+          "names": "{ Row as HostedGovernanceRow, VerifiedNative as VerifiedNativeGovernanceContext, SqlDb as HostedGovernanceSqlDb }",
+          "target": "packages/ingenium-core/lib/tools/hosted-governance.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/hosted-governance-owner.js",
+          "typeOnly": false,
+          "names": "{ createHostedGovernanceOwner }",
+          "target": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/hosted-governance-owner.js",
+          "typeOnly": true,
+          "names": "{ HostedGovernanceAuthentication }",
+          "target": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/voice-operation-ledger.js",
+          "typeOnly": false,
+          "names": "* as voiceOperations",
+          "target": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/voice-operation-owner.js",
+          "typeOnly": false,
+          "names": "{ createVoiceOperationOwner }",
+          "target": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/voice-operation-owner.js",
+          "typeOnly": true,
+          "names": "{ VoiceOperationAuthorities }",
+          "target": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/voice-operation-contract.js",
+          "typeOnly": true,
+          "names": "{ CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, CpuResultFingerprint, VoiceControl }",
+          "target": "packages/ingenium-core/lib/tools/voice-operation-contract.ts",
+          "classification": "type declaration outside selected executable closure"
+        },
+        {
+          "specifier": "./tools/node-native-lifecycle.js",
+          "typeOnly": false,
+          "names": "{assertNativeGovernanceLifecycleClear}",
+          "target": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./tools/dot-execution-delegation.js",
+          "typeOnly": false,
+          "names": "* as dotExecutionDelegation",
+          "target": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/db.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "better-sqlite3",
+          "typeOnly": false,
+          "names": "Database",
+          "target": null,
+          "classification": "existing package dependency, package-lock and immutable image boundary"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{ readFileSync, mkdirSync, existsSync }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:path",
+          "typeOnly": false,
+          "names": "{ resolve, dirname }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./logger.js",
+          "typeOnly": false,
+          "names": "{ logger }",
+          "target": "packages/ingenium-core/lib/logger.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./restore-fixture-path.js",
+          "typeOnly": false,
+          "names": "{ isAuthorizedRestoreMaintenanceFixturePath }",
+          "target": "packages/ingenium-core/lib/restore-fixture-path.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./schema.js",
+          "typeOnly": false,
+          "names": "{\n  SKILL_PROPOSAL_RETENTION_DELETE_ERROR,\n  SKILL_PROPOSAL_RETENTION_DELETE_TRIGGER,\n  SKILL_PROPOSAL_RETENTION_INDEX,\n}",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/schema.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "zod",
+          "typeOnly": false,
+          "names": "{ z }",
+          "target": null,
+          "classification": "existing package dependency, package-lock and immutable image boundary"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{getDb,execTransaction,checkpointAfterWrite}",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./jobs.js",
+          "typeOnly": false,
+          "names": "* as jobs",
+          "target": "packages/ingenium-core/lib/tools/jobs.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./runtimes.js",
+          "typeOnly": false,
+          "names": "* as runtimes",
+          "target": "packages/ingenium-core/lib/tools/runtimes.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./context-conversations.js",
+          "typeOnly": false,
+          "names": "* as context",
+          "target": "packages/ingenium-core/lib/tools/context-conversations.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./trusted-job-events.js",
+          "typeOnly": false,
+          "names": "* as events",
+          "target": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/jobs.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ getDb, execTransaction, checkpointAfterWrite }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": false,
+          "names": "{\n  Job,\n  JobRun,\n  JobRunLog,\n  JobRunWithEventMetadata,\n  JobVaultReference,\n  MAX_CONCURRENT_AUTOMATION_RUNS,\n  MAX_CONCURRENT_RUNS_PER_ORGANIZATION,\n  MAX_CONCURRENT_RUNS_PER_SERVICE_PRINCIPAL,\n  TrustedJobEventTypeSchema,\n  type TrustedJobEventType,\n}",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "./job-event-deliveries.js",
+          "typeOnly": false,
+          "names": "{ sanitizeJobEventText }",
+          "target": "packages/ingenium-core/lib/tools/job-event-deliveries.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/runtimes.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash, randomBytes, randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./coordination.js",
+          "typeOnly": false,
+          "names": "{ coordinationWorktreeId }",
+          "target": "packages/ingenium-core/lib/tools/coordination.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./runtime-original-provision.js",
+          "typeOnly": false,
+          "names": "{insertRuntimeOriginalProvision,readRuntimeOriginalProvision,type RuntimeOriginalProvision,type StoredRuntimeOriginalProvision}",
+          "target": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./runtime-original-provision.js",
+          "typeOnly": false,
+          "names": "{originalProvisionFromNewFlow,publicProvisionRequest,publicProvisionSpec,decodeRuntimeOriginalProvision,validateProvisionResponse,provisionHash}",
+          "target": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./runtime-original-provision.js",
+          "typeOnly": true,
+          "names": "{RuntimeOriginalProvision,StoredRuntimeOriginalProvision,PublicProvisionRequest}",
+          "target": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/context-conversations.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash, randomBytes, randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb, sanitizeFts5Query }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./trusted-job-events.js",
+          "typeOnly": false,
+          "names": "{\n  appendTrustedJobEventInTransaction,\n  trustedJobEventFromContextAuditEvent,\n}",
+          "target": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": false,
+          "names": "{\n  AppendContextMessageInputSchema,\n  AuthorizeContextMaintenanceInputSchema,\n  ContextCheckpointAuditEventSchema,\n  ContextConversationArchiveInputSchema,\n  CONTEXT_TAGS_MAX_BYTES,\n  ContextCheckpointRagSourceSchema,\n  ContextCheckpointSchema,\n  ContextConversationSchema,\n  ContextMessageSchema,\n  CreateContextCheckpointInputSchema,\n  CreateContextConversationInputSchema,\n  PreviewContextMaintenanceInputSchema,\n  PersistContextChatTurnInputSchema,\n  RestoreContextCheckpointInputSchema,\n  isBoundedContextMetadata,\n  type ContextCheckpointAuditEvent,\n  type ContextCheckpoint,\n  type ContextCheckpointRagSource,\n  type ContextConversation,\n  type ContextMaintenanceOperation,\n  type ContextMessage,\n}",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": false,
+          "names": "{\n  TRUSTED_JOB_EVENT_PRODUCER,\n  TRUSTED_JOB_EVENT_SCHEMA_VERSION,\n  TrustedJobEventArchivePayloadSchema,\n  TrustedJobEventRecordSchema,\n  TrustedJobEventRestorePayloadSchema,\n  TrustedJobEventTypeSchema,\n  type ContextCheckpointAuditEvent,\n  type TrustedJobEventPayload,\n  type TrustedJobEventRecord,\n  type TrustedJobEventType,\n}",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/agents.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ getDb, execTransaction, checkpointAfterWrite }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": false,
+          "names": "{ Agent }",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHash, randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{ accessSync, closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:path",
+          "typeOnly": false,
+          "names": "{ basename, resolve, sep }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../logger.js",
+          "typeOnly": false,
+          "names": "{ logger }",
+          "target": "packages/ingenium-core/lib/logger.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./paths.js",
+          "typeOnly": false,
+          "names": "{ getConfigPath }",
+          "target": "packages/ingenium-core/lib/tools/paths.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/authorization.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": true,
+          "names": "type { OrganizationRole, Project, ProjectRole }",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-authorization-policy.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "./authorization.js",
+          "typeOnly": true,
+          "names": "type { AuthorizationPermission }",
+          "target": "packages/ingenium-core/lib/tools/authorization.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/job-providers.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./jobs.js",
+          "typeOnly": false,
+          "names": "{ getJob }",
+          "target": "packages/ingenium-core/lib/tools/jobs.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/vault.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{ createHmac, randomInt, randomUUID }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./vault-crypto.js",
+          "typeOnly": false,
+          "names": "{\n  decryptSecret,\n  decryptSecretBuffer,\n  deriveKey,\n  encryptSecret,\n  generateDEK,\n  generateSalt,\n  unwrapKey,\n  verifyHMAC,\n  wrapKey,\n}",
+          "target": "packages/ingenium-core/lib/tools/vault-crypto.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./protected-settings.js",
+          "typeOnly": false,
+          "names": "{ migrateLegacyOAuthClientSecretsForActiveGlobalProject }",
+          "target": "packages/ingenium-core/lib/tools/protected-settings.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "./jobs.js",
+          "typeOnly": false,
+          "names": "{ insertJobVaultRuntimeAudit, isJobRunAuthorizationCurrent }",
+          "target": "packages/ingenium-core/lib/tools/jobs.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./job-providers.js",
+          "typeOnly": false,
+          "names": "{ JOB_NATIVE_PROVIDER_ID, nativeJobConnectionId, parseAnonymousJobProvider }",
+          "target": "packages/ingenium-core/lib/tools/job-providers.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./authorization.js",
+          "typeOnly": false,
+          "names": "{ insertResourceAuditEvent }",
+          "target": "packages/ingenium-core/lib/tools/authorization.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{createHash}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/authentication.ts",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "node:crypto",
+          "typeOnly": false,
+          "names": "{\n  createCipheriv,\n  createDecipheriv,\n  createHash,\n  createHmac,\n  randomBytes,\n  randomUUID,\n  scrypt as scryptCallback,\n  timingSafeEqual,\n}",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "node:fs",
+          "typeOnly": false,
+          "names": "{ closeSync, constants, fstatSync, openSync, readFileSync }",
+          "target": null,
+          "classification": "Node builtin bound by image"
+        },
+        {
+          "specifier": "better-sqlite3",
+          "typeOnly": true,
+          "names": "type Database",
+          "target": null,
+          "classification": "existing package dependency, package-lock and immutable image boundary"
+        },
+        {
+          "specifier": "../db.js",
+          "typeOnly": false,
+          "names": "{ checkpointAfterWrite, execTransaction, getDb }",
+          "target": "packages/ingenium-core/lib/db.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": true,
+          "names": "type { AuthSession, User }",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        },
+        {
+          "specifier": "./identity.js",
+          "typeOnly": false,
+          "names": "{ normalizeEmail }",
+          "target": "packages/ingenium-core/lib/tools/identity.ts",
+          "classification": "existing transitive source outside selected explicit closure"
+        },
+        {
+          "specifier": "../schema.js",
+          "typeOnly": true,
+          "names": "{ AuthSession }",
+          "target": "packages/ingenium-core/lib/schema.ts",
+          "classification": "explicit source input"
+        }
+      ]
+    },
+    {
+      "path": "config/opencode-managed/plugins/enforce-job-agent/index.mjs",
+      "parseErrors": 0,
+      "imports": [
+        {
+          "specifier": "/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalPrivateJobPlugin}",
+          "target": null,
+          "classification": "fixed explicit image artifact"
+        },
+        {
+          "specifier": "/app/services/ingenium-api/dist/lib/dot-v2/candidate-private-plugin.mjs",
+          "typeOnly": false,
+          "names": "{createOriginalCandidatePrivatePlugin}",
+          "target": null,
+          "classification": "fixed explicit image artifact"
+        }
+      ]
+    }
+  ],
+  "tests": {
+    "windows": {
+      "node": "24.18.0",
+      "passed": 15,
+      "failed": 0
+    },
+    "wsl": {
+      "node": "22.23.1",
+      "passed": 15,
+      "failed": 0
+    },
+    "class": "Actual-source read-only MJS planner, AST/VM/shell parsing and source guard consistency/mutation tests; no tsc, build, module runtime, daemon, Docker, network or model"
+  },
+  "remaining": [
+    "Root apply exact current-preimage delta and run focused actual build/copier/compiler checks within approved storage boundaries",
+    "Root same actual coordinator/SQL131 waiting-child/readiness/material owner and real emitted artifacts remain incomplete; SQL131 migration was not present and must be added explicitly when owned source exists",
+    "Root inspect actual emitted JS/declaration imports and immutable Docker files; this worker never materialized or compiled them",
+    "Existing voice-v2/request-context.ts cross-root runtime MJS import has same output-depth issue outside the five candidate-specific reviewed relocation sources; notify voice/Root rather than silently widen this candidate patch",
+    "Selected explicit source/image rows are not a full transitive dependency inventory; residual AST edges are preserved here, existing whole-source SHA/package-lock/immutable image ID remain mandatory boundaries",
+    "All18 original actual runtime cases, parent/child/egress/readiness/private control/retirement evidence, independent protected approval and fresh production admission remain open"
+  ],
+  "cleanup": {
+    "newDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "sourceSnapshotsCopied": false,
+    "sharedSourceMutated": false,
+    "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalStorage": "Existing C-backed WSL Ubuntu ext4 VHDX; unchanged approved root",
+    "retainedReason": "Nine small owned source/inventory/audit/proposal/test/patch/receipt/guide artifacts for Root integration; no compiled/dependency/cache trees",
+    "protected": "All original user/runtime/editor/workspace/backup data, Native targets/Cargo homes/caches/failure evidence and frozen1b3d2551/930964a1 proposals",
+    "regeneration": "Existing process TEMP/TMP/TMPDIR=coordination/packaging; NODE_COMPILE_CACHE empty; VEYRA_CLOSURE_ROOT and Windows VEYRA_CLOSURE_LINUX_ROOT point at actual Root source; Node --experimental-vm-modules candidate-closure-freeze.mjs; Node --experimental-vm-modules --test ./candidate-closure.test.mjs",
+    "windowsRecoveryClaimed": false,
+    "linuxRecoveryClaimed": false
+  }
+}
