@@ -8,8 +8,8 @@ impl LocalGitLaunch{
   Arc::new(Self{scope:uuid::Uuid::new_v4().to_string(),binding,attempted:AtomicBool::new(false)})
  }
  #[cfg(windows)]
- pub fn spawn_once(&self,command:&mut Command)->Result<(Child,OwnedProcessJob),String>{
-  self.binding.verify()?;
+ pub fn spawn_once(&self,command:&mut Command,current:&dyn Fn()->Result<(),String>)->Result<(Child,OwnedProcessJob),String>{
+  self.binding.verify()?;current()?;
   if self.attempted.swap(true,Ordering::AcqRel){return Err("original private Git launch consumed".into());}
   OwnedProcessJob::spawn_scoped(command,&self.scope)
  }

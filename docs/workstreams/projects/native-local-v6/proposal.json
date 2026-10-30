@@ -36,7 +36,7 @@
     {
       "path": "crates/adapters/src/opencode/desktop_runtime.rs",
       "baseBlob": "b7a87c01af74b914c8fbd04f6329d1ecf83bc42f",
-      "proposedSha256": "03551c49fe7d92524aeb50ecf8201c8ce91043ab55c268096d39531616b1cc45",
+      "proposedSha256": "d43bcf5dc114b345ff137bc148f82670e3c6409d1ae2ba3d99e16a1c7c0f34b4",
       "changed": true
     },
     {
@@ -54,7 +54,7 @@
     {
       "path": "apps/service/src/routes/live_agent.rs",
       "baseBlob": "27eba510d1d8528250ccf20d82cc1ebd640f4d70",
-      "proposedSha256": "319e2283080f6260721660b54eb498a591f187003b8d2e4a1669c8f71f7dd046",
+      "proposedSha256": "983da07273e30370e57b6d62385eb8494a137a9863e70859a9a3b34f05a7d0ed",
       "changed": true
     },
     {
@@ -181,13 +181,13 @@
   "canonicalNewSources": [
     {
       "path": "apps/service/src/routes/local_workspaces/git.rs",
-      "bytes": 6494,
-      "sha256": "f1f21f998556d7ad40b290ae75e7a043e59ef00488e6cd7aa59a228cf2e5ab73"
+      "bytes": 6572,
+      "sha256": "735e614a97fcaadc37972a951ab577601a77130e55c0f96a084b900e9c55dc78"
     },
     {
       "path": "apps/service/src/routes/local_workspaces.rs",
-      "bytes": 12582,
-      "sha256": "e47c830a5496d3d1a305ed232be47d2019d8352502c58ef00f84eabdbc69ac55"
+      "bytes": 13356,
+      "sha256": "5754468330dbee531079f1a512c8f930d580f1821e57a7f32bee93c663a11ca4"
     },
     {
       "path": "apps/service/src/routes/state_startup/local_custody.rs",
@@ -196,8 +196,8 @@
     },
     {
       "path": "crates/adapters/src/interactive_terminal/local_workspaces.rs",
-      "bytes": 6447,
-      "sha256": "e3836384f57084f1c1f33abc9351e3a3edeadc9f1e4bbe2038b614692adaa017"
+      "bytes": 7081,
+      "sha256": "b8a5a80c74a389a3474f6639237ca26e3c79d2211e0357c52870ec0f2859c5b5"
     },
     {
       "path": "crates/adapters/src/local_custody/linux.rs",
@@ -221,18 +221,18 @@
     },
     {
       "path": "crates/adapters/src/local_execution.rs",
-      "bytes": 5611,
-      "sha256": "f40c2e36163b6dc76ee1ad75a8a18bcecb17e466ae75529d121a5b71fd635518"
+      "bytes": 6331,
+      "sha256": "2eabf6e12dbcc6be125dfcbe7f3b3a15bc560614e53ff188d2017c21eaa0d8e0"
     },
     {
       "path": "crates/adapters/src/local_git_launch.rs",
-      "bytes": 1084,
-      "sha256": "97dc0f57a1c786a7a7f1a9ea593ed49e1f122126861484cb2c9be987b4913141"
+      "bytes": 1132,
+      "sha256": "911ffb31447a457e4a970280247ef124894327ca2019f4d8905bb124a88e376d"
     },
     {
       "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
-      "bytes": 2745,
-      "sha256": "6b50d9138fb8db22b06acd14dbd62d2a87980e34f9dff1a59723df97c33aa596"
+      "bytes": 3083,
+      "sha256": "e16de6bbb636c83859e5078bee613f007eb00e52f4ea7d3d50b5cc5c9f2b41ec"
     },
     {
       "path": "crates/adapters/src/projects/0006.sql",
@@ -255,7 +255,7 @@
       "sha256": "21217ee03740d91303085eb73ce87ef5cb8c2d199f57515c14e71b43828a63c7"
     }
   ],
-  "integrationPatchSha256": "90d37c21fcf27624a2b33becf3b185e7d11e31e865eee1a89c315fafad5fa9f6",
+  "integrationPatchSha256": "2201781a5480dddbf81cc593ddf56ed2c8bef5d941d069951ce9adf985869f20",
   "nativeCheckoutWritten": false,
   "applied": false,
   "compiled": false,

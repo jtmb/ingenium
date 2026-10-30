@@ -9,8 +9,8 @@ pub(super) struct GitWorkers{retained:Mutex<Vec<Original>>,launches:Mutex<Vec<Ar
 fn branch(value:&str)->bool{!value.is_empty()&&value.len()<=128&&!value.starts_with('-')&&!value.contains("..")&&!value.contains("@{")&&!value.chars().any(|v|v.is_whitespace()||v.is_control()||"~^:?*[\\\"".contains(v))}
 fn read(mut input:impl Read)->Vec<u8>{let mut out=Vec::new();let _=input.by_ref().take(1024*1024+1).read_to_end(&mut out);out}
 impl GitWorkers {
- pub(super) fn run(&self,binding:Arc<LocalWorkspaceBinding>,operation:&LocalOperation)->Result<Value,String>{
-  binding.verify()?;
+ pub(super) fn run(&self,binding:Arc<LocalWorkspaceBinding>,operation:&LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+  binding.verify()?;current()?;
   // Original run_wsl owns its Windows bridge, not arbitrary Linux Git
   // descendants. Do not enable this effect before that actual owner qualifies.
   if matches!(binding.owner().environment,LocalEnvironment::Wsl{..}){
@@ -38,12 +38,12 @@ impl GitWorkers {
    .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
   let mut retained=self.retained.lock().map_err(|_|"Git originals unavailable")?;
   if !retained.is_empty(){return Err("original Git work remains unresolved".into());}
-  binding.verify()?;
+  binding.verify()?;current()?;
   let mut launches=self.launches.lock().map_err(|_|"private Git launch originals unavailable")?;
   if !launches.is_empty(){return Err("original partial Git launch remains retained".into());}
   let launch=LocalGitLaunch::prepare(binding.clone());
   launches.push(launch.clone()); // before the actual suspended spawn
-  let (child,job)=launch.spawn_once(&mut command)?;
+  let (child,job)=launch.spawn_once(&mut command,current)?;
   launches.clear(); // successful spawn returned its actual child and job
   retained.push(Original{child,job,out:None,err:None,binding});
   let original=retained.first_mut().ok_or("Git original lost")?;
@@ -59,7 +59,7 @@ impl GitWorkers {
      let original=retained.remove(0);
      let output=original.out.ok_or("stdout custody")?.join().map_err(|_|"stdout original")?;
      let error=original.err.ok_or("stderr custody")?.join().map_err(|_|"stderr original")?;
-     original.binding.verify()?;
+     original.binding.verify()?;current()?;
      if output.len()>1024*1024||error.len()>1024*1024{return Err("Git output exceeded original bound".into());}
      return Ok(json!({"exit_code":status.code(),"output":String::from_utf8_lossy(&output),"stderr":String::from_utf8_lossy(&error)}));
     }

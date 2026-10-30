@@ -87,4 +87,4 @@ Request execution composition and native ownership follow-through are documented
 
 ## Native local custody follow-on
 
-See [native-local-v6/README.md](native-local-v6/README.md) for the unapplied actual local-bearer/OS-custodian schema-6 and typed execution proposal, exact original-file preimages, native integration recipe, 91 passing CPU tests and nine real Linux FD metadata checks. Native compilation, original resource retirement and full Windows/WSL/hosted/UI acceptance remain open. The earlier abstract private-workspace proposal is superseded; Node migrations 122–124 are unchanged.
+See [native-local-v6/README.md](native-local-v6/README.md) for the unapplied actual local-bearer/OS-custodian schema-6 and typed execution proposal, exact original-file preimages, native integration recipe, 93 passing CPU tests and nine real Linux FD metadata checks. Native compilation, original resource retirement and full Windows/WSL/hosted/UI acceptance remain open. The earlier abstract private-workspace proposal is superseded; Node migrations 122–124 are unchanged.

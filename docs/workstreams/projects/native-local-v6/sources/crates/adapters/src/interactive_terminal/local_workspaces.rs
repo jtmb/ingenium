@@ -10,7 +10,7 @@ struct PrivateTerminal {
 #[derive(Default)]
 pub struct LocalTerminals { originals:Mutex<HashMap<String,PrivateTerminal>>,pending:Mutex<Vec<PendingLaunch>> }
 impl LocalTerminals {
- pub fn open(&self,binding:Arc<LocalWorkspaceBinding>,request:&str,shell:&str,columns:u16,rows:u16)->Result<Value,TerminalError>{
+ pub fn open(&self,binding:Arc<LocalWorkspaceBinding>,request:&str,shell:&str,columns:u16,rows:u16,current:&dyn Fn()->Result<(),String>)->Result<Value,TerminalError>{
   validate_request_id(request)?;validate_size(columns,rows)?;binding.verify().map_err(|_|TerminalError::OwnerMismatch)?;
   let (program,args,cwd)=match &binding.owner().environment {
    LocalEnvironment::Windows=>{
@@ -26,30 +26,38 @@ impl LocalTerminals {
   if entries.contains_key(request){return Err(TerminalError::NotAdmitted);}
   let output=Arc::new(Mutex::new(OutputRing{chunks:VecDeque::new(),bytes:0,sequence:0,truncated_through:None}));
   binding.verify().map_err(|_|TerminalError::OwnerMismatch)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
   let native=match NativeTerminal::spawn(&program,&args,cwd.as_deref(),columns,rows,output.clone()){
    Ok(v)=>v,Err(failure)=>{if let Some(original)=failure.pending{pending.push(original);}return Err(failure.error);}
   };
   entries.insert(request.into(),PrivateTerminal{binding,output,native,shell:shell.into(),closed:false,close_request:None});
-  read(request,entries.get(request).ok_or(TerminalError::Unavailable)?,0)
+  let result=read(request,entries.get(request).ok_or(TerminalError::Unavailable)?,0)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;Ok(result)
  }
- pub fn poll(&self,binding:&LocalWorkspaceBinding,id:&str,after:u64)->Result<Value,TerminalError>{
+ pub fn poll(&self,binding:&LocalWorkspaceBinding,id:&str,after:u64,current:&dyn Fn()->Result<(),String>)->Result<Value,TerminalError>{
   let entries=self.originals.lock().map_err(|_|TerminalError::Unavailable)?;
-  let terminal=entries.get(id).ok_or(TerminalError::NotFound)?;same(terminal,binding)?;read(id,terminal,after)
+  let terminal=entries.get(id).ok_or(TerminalError::NotFound)?;same(terminal,binding)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
+  let result=read(id,terminal,after)?;current().map_err(|_|TerminalError::OwnerMismatch)?;Ok(result)
  }
- pub fn input(&self,binding:&LocalWorkspaceBinding,id:&str,text:&str)->Result<Value,TerminalError>{
+ pub fn input(&self,binding:&LocalWorkspaceBinding,id:&str,text:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,TerminalError>{
   if text.is_empty()||text.len()>MAX_INPUT{return Err(TerminalError::TooLarge);}
   let mut entries=self.originals.lock().map_err(|_|TerminalError::Unavailable)?;
   let terminal=entries.get_mut(id).ok_or(TerminalError::NotFound)?;same(terminal,binding)?;
   binding.verify().map_err(|_|TerminalError::OwnerMismatch)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
   if terminal.closed{return Err(TerminalError::NotAdmitted);}terminal.native.write(text.as_bytes())?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
   Ok(json!({"terminal_id":id,"input_state":"queued"}))
  }
- pub fn resize(&self,binding:&LocalWorkspaceBinding,id:&str,columns:u16,rows:u16)->Result<Value,TerminalError>{
+ pub fn resize(&self,binding:&LocalWorkspaceBinding,id:&str,columns:u16,rows:u16,current:&dyn Fn()->Result<(),String>)->Result<Value,TerminalError>{
   validate_size(columns,rows)?;
   let mut entries=self.originals.lock().map_err(|_|TerminalError::Unavailable)?;
   let terminal=entries.get_mut(id).ok_or(TerminalError::NotFound)?;same(terminal,binding)?;
   binding.verify().map_err(|_|TerminalError::OwnerMismatch)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
   if terminal.closed{return Err(TerminalError::NotAdmitted);}terminal.native.resize(columns,rows)?;
+  current().map_err(|_|TerminalError::OwnerMismatch)?;
   Ok(json!({"terminal_id":id,"columns":columns,"rows":rows}))
  }
  pub fn check_close_request(&self,owner:&veyra_contracts::local_workspaces::LocalWorkspaceOwner,id:&str,request:&str)->Result<(),TerminalError>{

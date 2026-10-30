@@ -113,28 +113,28 @@ replace(rel,anchor,anchor+'''
     }
     fn prompt_scoped_checked_local(&self,id:&str,directory:&str,request_id:&str,text:&str,
         files:&[super::attachments::PromptFile],skill_ids:&[String],require_idle:bool,
-        original:Option<&veyra_contracts::PromptOriginal>,local:Option<&crate::local_execution::LocalWorkspaceBinding>,
+        original:Option<&veyra_contracts::PromptOriginal>,local:Option<(&crate::local_execution::LocalWorkspaceBinding,&dyn Fn()->Result<(),String>)>,
     )->Result<Value,RuntimeError>{''')
 a=changed[rel].index('    fn prompt_scoped_checked_local');z=changed[rel].index('    pub fn lookup_prompt',a)
 section=changed[rel][a:z]
 needle='        let engine = self.lock_engine_for_directory(directory)?;'
 assert section.count(needle)==1
-section=section.replace(needle,needle+'\n        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}')
+section=section.replace(needle,needle+'\n        if let Some((binding,current))=local {local_workspaces::require_local_engine(&engine,binding,current)?;}')
 needle='        let admission = if files.is_empty() && skill_ids.is_empty() {'
 assert section.count(needle)==1
-section=section.replace(needle,'        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}\n'+needle)
+section=section.replace(needle,'        if let Some((binding,current))=local {local_workspaces::require_local_engine(&engine,binding,current)?;}\n'+needle)
 changed[rel]=changed[rel][:a]+section+changed[rel][z:]
 rel='apps/service/src/routes/live_agent.rs'
 anchor='impl LiveAgent {'
 replace(rel,anchor,anchor+'''
-    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str)->Result<Value,String>{
-        self.runtime.create_local_session(binding,request,title,agent).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
+    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+        self.runtime.create_local_session(binding,request,title,agent,current).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
     }
-    pub(super) fn prompt_local(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,request:&str,text:&str)->Result<Value,String>{
-        self.runtime.prompt_local(binding,session,request,text).map_err(|_|"private prompt original outcome unknown".into())
+    pub(super) fn prompt_local(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,request:&str,text:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+        self.runtime.prompt_local(binding,session,request,text,current).map_err(|_|"private prompt original outcome unknown".into())
     }
-    pub(super) fn local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str)->Result<Value,String>{
-        self.runtime.local_session(binding,session).and_then(|s|serde_json::to_value(s).map_err(|_|RuntimeError::Binding)).map_err(|_|"private session unavailable".into())
+    pub(super) fn local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+        self.runtime.local_session(binding,session,current).and_then(|s|serde_json::to_value(s).map_err(|_|RuntimeError::Binding)).map_err(|_|"private session unavailable".into())
     }
 ''')
 rel='apps/service/src/routes.rs'

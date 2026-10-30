@@ -165,3 +165,34 @@ test("proposal uses concrete native custody/execution owners and leaves remote p
    assert.equal(bytes.toString().includes(forbidden),false,file.path+" "+forbidden);
  }
 });
+
+// Protocol fixtures over the real SQL, not execution/compilation of Rust.
+function requireCurrentRegistry(f){
+ const row=f.db.prepare("SELECT * FROM local_workspaces WHERE id=?").get(workspace);
+ assert.ok(row);assert.equal(row.state,"active");assert.equal(row.revision,f.owner.revision);
+ assert.equal(row.installation_id,f.owner.installation_id);assert.equal(row.custodian_key,f.owner.custodian_key);
+ assert.deepEqual(JSON.parse(row.environment),f.owner.environment);
+ assert.equal(row.root_identity,"actual-child-file");assert.equal(row.root_path,"C:/state/private-child");
+}
+test("retired current registry denies a previously captured root before a terminal or Git effect",()=>{
+ const f=fixture();try{
+  f.migrate();f.active();requireCurrentRegistry(f);f.op();
+  f.db.prepare("UPDATE local_workspace_operations SET state='unknown' WHERE id=? AND state='intent'").run(operation);
+  f.db.prepare("UPDATE local_workspaces SET state='retired' WHERE id=?").run(workspace);
+  let effects=0;assert.throws(()=>{requireCurrentRegistry(f);effects++;});assert.equal(effects,0);
+  assert.equal(f.db.prepare("SELECT root_identity FROM local_workspaces WHERE id=?").get(workspace).root_identity,"actual-child-file");
+  assert.equal(f.db.prepare("SELECT state FROM local_workspace_operations WHERE id=?").get(operation).state,"unknown");
+  assert.equal(f.op(),false);
+ }finally{f.close();}
+});
+test("registry revision changing during async work suppresses output and preserves the unknown original without replay",()=>{
+ const f=fixture();try{
+  f.migrate();f.active();requireCurrentRegistry(f);f.op();
+  f.db.prepare("UPDATE local_workspace_operations SET state='unknown' WHERE id=? AND state='intent'").run(operation);
+  let effects=0,published=0;requireCurrentRegistry(f);effects++;
+  f.db.prepare("UPDATE local_workspaces SET revision=revision+1 WHERE id=?").run(workspace);
+  assert.throws(()=>{requireCurrentRegistry(f);published++;});assert.equal(effects,1);assert.equal(published,0);
+  assert.equal(f.db.prepare("SELECT state FROM local_workspace_operations WHERE id=?").get(operation).state,"unknown");
+  assert.equal(f.op(),false);assert.equal(effects,1);
+ }finally{f.close();}
+});

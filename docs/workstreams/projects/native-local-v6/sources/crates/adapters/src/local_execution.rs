@@ -24,9 +24,20 @@ impl LocalWorkspaceBinding {
   let bound=Arc::new(Self{owner:owner.clone(),installation,windows,directory,physical});
   bound.verify()?;Ok(bound)
  }
+ /// Continuing permission requires the actual original registry, not only root
+ /// custody. Call under its original mutex at every effect/read boundary.
+ pub fn verify_current(&self,store:&ProjectStore,instance:&str)->Result<(),String>{
+  let record=store.check_local_owner(&self.owner,instance).map_err(|_|"current private registry permission refused")?;
+  if record.root_identity.as_deref()!=Some(self.physical.as_str())||record.root_path.as_deref()!=Some(self.directory.as_str()){
+   return Err("current private registry root changed".into());
+  }
+  self.verify()
+ }
+ /// Cleanup-only account check; never read or execution permission.
  pub fn verify_account(&self)->Result<(),String>{self.installation.verify_account()}
  pub fn owner(&self)->&LocalWorkspaceOwner{&self.owner}
  pub fn directory(&self)->&str{&self.directory}
+ /// Physical installation/root custody only. This does not read the registry.
  pub fn verify(&self)->Result<(),String>{
   self.installation.verify()?;
   match &self.owner.environment {

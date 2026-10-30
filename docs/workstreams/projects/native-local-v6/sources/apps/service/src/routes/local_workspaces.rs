@@ -50,6 +50,12 @@ fn with_store<T>(state:&ServiceState,work:impl FnOnce(&mut veyra_adapters::proje
  let mut guard=state.projects.lock().map_err(|_|"local writer unavailable")?;
  work(guard.as_mut().ok_or("original workspace writer retired")?)
 }
+// Nonblocking original-registry admission can run while an engine/terminal/Git
+// owner lock is held. Do not wait on the catalog and invert its engine lock order.
+fn check_current(state:&ServiceState,binding:&LocalWorkspaceBinding)->Result<(),String>{
+ let guard=state.projects.try_lock().map_err(|_|"current private registry busy")?;
+ binding.verify_current(guard.as_ref().ok_or("original registry retired")?,&state.instance_id)
+}
 fn current_owner(state:&ServiceState,record:&veyra_adapters::projects::LocalWorkspaceRecord,store:&veyra_adapters::projects::ProjectStore)->Result<LocalWorkspaceOwner,String>{
  Ok(LocalWorkspaceOwner{installation_id:store.local_installation_id().map_err(|_|"installation unavailable")?.into(),
   custodian_key:store.local_custody().map_err(|_|"OS custody unavailable")?.key().into(),
@@ -130,17 +136,19 @@ async fn operation(State(state):State<Arc<ServiceState>>,Extension(actor):Extens
   })?;
   if !fresh{return with_store(&state,|store|serde_json::to_value(store.local_receipt(&body.request_id).map_err(|_|"receipt")?).map_err(|_|"receipt encoding".into()));}
   let binding=binding.ok_or("original custody missing")?;
-  binding.verify()?;
+  let current=||check_current(&state,&binding);
+  current()?;
   let outcome=match &body.operation {
-   LocalOperation::SessionCreate{title,agent}=>state.live_agent.create_local_session(&binding,&body.request_id,title,agent),
-   LocalOperation::AgentTurn{session_id,text}=>state.live_agent.prompt_local(&binding,session_id,&body.request_id,text),
-   LocalOperation::TerminalOpen{shell,columns,rows}=>state.local_workspaces.terminals.open(binding.clone(),&body.request_id,shell,*columns,*rows).map_err(|_|"terminal outcome uncertain".into()),
-   LocalOperation::TerminalInput{terminal_id,text}=>state.local_workspaces.terminals.input(&binding,terminal_id,text).map_err(|_|"terminal input outcome uncertain".into()),
-   LocalOperation::TerminalResize{terminal_id,columns,rows}=>state.local_workspaces.terminals.resize(&binding,terminal_id,*columns,*rows).map_err(|_|"terminal resize outcome uncertain".into()),
+   LocalOperation::SessionCreate{title,agent}=>state.live_agent.create_local_session(&binding,&body.request_id,title,agent,&current),
+   LocalOperation::AgentTurn{session_id,text}=>state.live_agent.prompt_local(&binding,session_id,&body.request_id,text,&current),
+   LocalOperation::TerminalOpen{shell,columns,rows}=>state.local_workspaces.terminals.open(binding.clone(),&body.request_id,shell,*columns,*rows,&current).map_err(|_|"terminal outcome uncertain".into()),
+   LocalOperation::TerminalInput{terminal_id,text}=>state.local_workspaces.terminals.input(&binding,terminal_id,text,&current).map_err(|_|"terminal input outcome uncertain".into()),
+   LocalOperation::TerminalResize{terminal_id,columns,rows}=>state.local_workspaces.terminals.resize(&binding,terminal_id,*columns,*rows,&current).map_err(|_|"terminal resize outcome uncertain".into()),
    LocalOperation::TerminalClose{..}=>unreachable!(),
-   git=>state.local_workspaces.git.run(binding.clone(),git),
+   git=>state.local_workspaces.git.run(binding.clone(),git,&current),
   }?;
   with_store(&state,|store|{
+   binding.verify_current(store,&state.instance_id)?;
    store.settle_local_operation(&body.request_id,&outcome).map_err(|_|"outcome retained but receipt uncertain")?;
    serde_json::to_value(store.local_receipt(&body.request_id).map_err(|_|"receipt")?).map_err(|_|"receipt encoding".into())
   })
@@ -156,7 +164,9 @@ async fn session(State(state):State<Arc<ServiceState>>,Extension(actor):Extensio
    store.require_local_session(&workspace_id,&session_id).map_err(|_|"private session unavailable")?;
    LocalWorkspaceBinding::acquire(store,&owner,&state.instance_id)
   })?;
-  state.live_agent.local_session(&binding,&session_id)
+  let current=||check_current(&state,&binding);
+  let result=state.live_agent.local_session(&binding,&session_id,&current)?;
+  current()?;Ok(result)
  }).await;
  reply(result.unwrap_or_else(|_|Err("session read unavailable".into())))
 }
@@ -173,7 +183,9 @@ async fn terminal(State(state):State<Arc<ServiceState>>,Extension(actor):Extensi
    let owner=current_owner(&state,&record,store)?;
    LocalWorkspaceBinding::acquire(store,&owner,&state.instance_id)
   })?;
-  state.local_workspaces.terminals.poll(&binding,&terminal_id,cursor.after.unwrap_or(0)).map_err(|_|"private terminal original unavailable".into())
+  let current=||check_current(&state,&binding);
+  let result=state.local_workspaces.terminals.poll(&binding,&terminal_id,cursor.after.unwrap_or(0),&current).map_err(|_|"private terminal original unavailable".to_owned())?;
+  current()?;Ok(result)
  }).await;
  reply(result.unwrap_or_else(|_|Err("terminal read unavailable".into())))
 }

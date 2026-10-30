@@ -124,7 +124,7 @@
 +    }
 +    fn prompt_scoped_checked_local(&self,id:&str,directory:&str,request_id:&str,text:&str,
 +        files:&[super::attachments::PromptFile],skill_ids:&[String],require_idle:bool,
-+        original:Option<&veyra_contracts::PromptOriginal>,local:Option<&crate::local_execution::LocalWorkspaceBinding>,
++        original:Option<&veyra_contracts::PromptOriginal>,local:Option<(&crate::local_execution::LocalWorkspaceBinding,&dyn Fn()->Result<(),String>)>,
 +    )->Result<Value,RuntimeError>{
          if let Some(saved) = self.prompt_original_receipt(request_id)? {
              if !saved["original"].is_null() {
@@ -133,7 +133,7 @@
              return Err(RuntimeError::Unavailable("prompt request is invalid"));
          }
          let engine = self.lock_engine_for_directory(directory)?;
-+        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}
++        if let Some((binding,current))=local {local_workspaces::require_local_engine(&engine,binding,current)?;}
          if let Some(original) = original { self.check_prompt_engine(&engine,original,true)?; }
          if files.iter().any(|file| file.uri.starts_with("data:image/")) && !engine.model.vision {
              return Err(RuntimeError::Unavailable(
@@ -141,7 +141,7 @@
              );
              previous
          };
-+        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}
++        if let Some((binding,current))=local {local_workspaces::require_local_engine(&engine,binding,current)?;}
          let admission = if files.is_empty() && skill_ids.is_empty() {
              engine.client()?.prompt(id, &record.message_id, text, true)
          } else {
@@ -238,14 +238,14 @@
      replies: veyra_adapters::public_reply_store::ReplyStore,
  }
  impl LiveAgent {
-+    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str)->Result<Value,String>{
-+        self.runtime.create_local_session(binding,request,title,agent).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
++    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++        self.runtime.create_local_session(binding,request,title,agent,current).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
 +    }
-+    pub(super) fn prompt_local(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,request:&str,text:&str)->Result<Value,String>{
-+        self.runtime.prompt_local(binding,session,request,text).map_err(|_|"private prompt original outcome unknown".into())
++    pub(super) fn prompt_local(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,request:&str,text:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++        self.runtime.prompt_local(binding,session,request,text,current).map_err(|_|"private prompt original outcome unknown".into())
 +    }
-+    pub(super) fn local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str)->Result<Value,String>{
-+        self.runtime.local_session(binding,session).and_then(|s|serde_json::to_value(s).map_err(|_|RuntimeError::Binding)).map_err(|_|"private session unavailable".into())
++    pub(super) fn local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++        self.runtime.local_session(binding,session,current).and_then(|s|serde_json::to_value(s).map_err(|_|RuntimeError::Binding)).map_err(|_|"private session unavailable".into())
 +    }
 +
      pub(super) fn attachment_owned<T>(&self, owner:&Value, environment:&Environment, model:&ModelSelection, effect:impl FnOnce(&dyn Fn()->Result<(),RuntimeError>)->T)->Result<T,RuntimeError> {
