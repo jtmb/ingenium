@@ -1,0 +1,30 @@
+import {createRequire} from 'node:module';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
+import {managerChanges} from './manager-proposal.mjs';
+const integration=process.argv[2];if(!integration?.startsWith('/'))throw new Error('Explicit existing dependency owner required');
+const ts=createRequire(resolve(integration,'package.json'))('typescript'),root=dirname(fileURLToPath(import.meta.url));
+const virtual=new Map(),api=resolve(integration,'services/ingenium-api/lib/voice-v2'),core=resolve(integration,'packages/ingenium-core/lib/tools');
+for(const item of managerChanges(integration))virtual.set(resolve(integration,item.path),item.after);
+virtual.set(resolve(api,'linux-cpu-admission.d.mts'),readFileSync(new URL('linux-cpu-admission.d.mts',import.meta.url),'utf8'));
+const entry=resolve(api,'linux-cpu-admission-contract.mts');
+virtual.set(entry,`import {createLinuxCpuSupervisor,type LinuxCpuSupervisorOptions} from './linux-cpu-admission.mjs';
+import type {ManagedCpuSupervisor,ManagedCpuDependencies} from './managed-supervisor.mjs';
+export function construct<C>(options:LinuxCpuSupervisorOptions<C>):ManagedCpuSupervisor<C>{return createLinuxCpuSupervisor(options);}
+export function witness<C>(deps:ManagedCpuDependencies<C>,scope:Parameters<ManagedCpuDependencies<C>['requireCpuAdmission']>[1],producer:ManagedCpuSupervisor<C>,proof:object){
+ const token=deps.admitCpuWitness({context:scope.context,scope,profileDigest:'source-contract',deadlineAt:1});
+ void Promise.resolve(token).then(value=>deps.releaseCpuWitness(value,proof,producer));return producer.inspectResourceRetirement(proof);
+}`);
+const facade=resolve(api,'linux-cpu-core-types.mts');
+virtual.set(facade,`export type {CoreVoiceLedger} from '${core}/voice-operation-contract.js';
+export type VoiceOperationAuthorities<C> = Pick<import('${core}/voice-operation-ledger.js').VoiceLedgerPorts<C>,'currentScope'|'verifyRetirement'|'requireOriginalResource'>;
+export * as voiceOperations from '${core}/voice-operation-ledger.js';`);
+const options={strict:true,noUncheckedIndexedAccess:true,noEmit:true,incremental:false,skipLibCheck:false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,moduleResolution:ts.ModuleResolutionKind.NodeNext,types:['node'],typeRoots:[resolve(integration,'node_modules/@types')]};
+const host=ts.createCompilerHost(options),read=host.readFile.bind(host),exists=host.fileExists.bind(host);
+host.readFile=p=>virtual.get(resolve(p))??read(p);host.fileExists=p=>virtual.has(resolve(p))||exists(p);
+host.writeFile=()=>{throw new Error('No compiler output authorized');};
+host.resolveModuleNames=(names,containing)=>names.map(name=>name==='ingenium-core'?{resolvedFileName:facade,extension:ts.Extension.Dmts}:ts.resolveModuleName(name,containing,options,host).resolvedModule);
+const program=ts.createProgram([entry],options,host),diagnostics=ts.getPreEmitDiagnostics(program);
+for(const d of diagnostics)console.log((d.file?.fileName??'')+' '+ts.flattenDiagnosticMessageText(d.messageText,'\n'));
+if(diagnostics.length)process.exitCode=1;else console.log('PASS strict in-memory declaration/consumer check against actual Core ledger contracts and proposed manager types; no emit, no runtime claim');

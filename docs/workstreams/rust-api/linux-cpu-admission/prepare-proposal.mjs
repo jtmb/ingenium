@@ -1,0 +1,14 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {managerChanges,managerBase} from './manager-proposal.mjs';
+const integration=process.argv[2];if(!integration?.startsWith('/'))throw new Error('Explicit existing integration owner required');
+const sha=value=>createHash('sha256').update(value).digest('hex');
+const changes=managerChanges(integration);
+for(const change of changes)if(sha(readFileSync(integration+'/'+change.path))!==sha(change.before))throw new Error('Manager exact preimage drift: '+change.path);
+for(const name of ['linux-resource-probe.mjs','resource-approval.mjs','linux-cpu-admission.mjs','linux-cpu-admission.d.mts'])changes.push({path:'services/ingenium-api/lib/voice-v2/'+name,before:'',after:readFileSync(new URL(name,import.meta.url),'utf8'),expectedAbsent:true});
+const py="import json,sys,difflib\nfor c in json.load(sys.stdin):\n sys.stdout.writelines(difflib.unified_diff(c['before'].splitlines(True),c['after'].splitlines(True),fromfile='/dev/null' if c.get('expectedAbsent') else 'a/'+c['path'],tofile='b/'+c['path'],n=3))\n";
+const result=spawnSync('python3',['-c',py],{input:JSON.stringify(changes),encoding:'utf8',maxBuffer:2*1024*1024});if(result.status!==0)throw new Error('Patch rendering failed');
+writeFileSync(new URL('linux-cpu-admission.patch',import.meta.url),result.stdout);
+const manifest={managerBase,scope:'Docs-only source proposal; Root alone applies canonical files. No qualification or runtime authority.',patchSha256:sha(result.stdout),changes:changes.map(c=>({path:c.path,expectedAbsent:!!c.expectedAbsent,preimageSha256:c.expectedAbsent?null:sha(c.before),proposedSha256:sha(c.after)}))};
+writeFileSync(new URL('preimages.json',import.meta.url),JSON.stringify(manifest,null,2)+'\n');console.log(JSON.stringify(manifest));

@@ -1,0 +1,43 @@
+{
+  "managerBase": "5c41af5e",
+  "scope": "Docs-only source proposal; Root alone applies canonical files. No qualification or runtime authority.",
+  "patchSha256": "d0bb3c3e6969809fb206086adec54717a101f5e371c21f7e37e4946127b4c092",
+  "changes": [
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "expectedAbsent": false,
+      "preimageSha256": "110414c0012fe8c288c5009313f2f64c9a49768469e962ae8ab42652513e7f59",
+      "proposedSha256": "c681fda0509e50ac8c480383c149d565cb96c48d99a2a7c7651dbb34a8b7d347"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "expectedAbsent": false,
+      "preimageSha256": "9ecd554f8be9a1b162d2ad1523d0ad26c99f323272f739747db56b46b63dd6b3",
+      "proposedSha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-resource-probe.mjs",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "3a59d046dbfdf9fa446e195fbc8a979f32ca40a4799a3aecac0a479a709317cb"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/resource-approval.mjs",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "454d3f59954fc01653da1660f4e1256f5a0319950a8ea395fbe455707a0874a4"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "8b2ff9128ba83a83d7cc1c79372922dd2e49dd7baa26080946ba46068f6d094d"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "439b5b2459065ad488bc99420a6723f4abebb1a911d1251896087c5e982de061"
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+--- a/services/ingenium-api/lib/voice-v2/managed-supervisor.mjs
++++ b/services/ingenium-api/lib/voice-v2/managed-supervisor.mjs
+@@ -44,14 +44,24 @@
+  */
+ export class ManagedCpuSupervisor {
+   #scopes = new Map(); #proofs = new WeakMap(); #prepared = new WeakMap(); #handles = new WeakMap(); #current = null; #opening = null;
+-  constructor({ profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, fetch: request = globalThis.fetch, spawn: launch = spawn }) {
++  constructor({ profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, fetch: request = globalThis.fetch, spawn: launch = spawn }) {
+     if (!profile?.helperSource || !profile?.witnessSource || ['reserveControl', 'listControls', 'reserve', 'privateRead', 'retireOriginal', 'settle'].some(method => typeof ledger?.[method] !== 'function')
+-      || [bindContext, admitCpu, requireCpuAdmission, releaseCpu, request, launch].some(value => typeof value !== 'function')) fail('CPU_SUPERVISOR_BINDING_REQUIRED');
+-    Object.assign(this, { profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, request, launch, nodeBootId: randomUUID() });
++      || [bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch].some(value => typeof value !== 'function')) fail('CPU_SUPERVISOR_BINDING_REQUIRED');
++    Object.assign(this, { profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch, nodeBootId: randomUUID() });
+   }
+   status() { const scope = this.#current; return { ready: Boolean(scope?.ready && !scope.closing), gpuReady: false, backend: 'cpu-onnx', qualified: false,
+     instanceId: this.profile.settings.instance_id, voices: scope?.health?.voices ?? [], configuredDefaultVoice: this.profile.value.defaultVoice }; }
+   isOwnedScope(scope) { return Boolean(scope && this.#scopes.get(scope.owner?.ownerId) === scope); }
++  /** Read-only actual proof registry. Never accepts serialized booleans/PID/health/timeout evidence. */
++  inspectResourceRetirement(input) {
++    const proof=this.#proofs.get(input),scope=proof?.scope;
++    if(!proof||!scope)fail('CPU_RESOURCE_RETIREMENT_PRODUCER_REQUIRED');
++    if(proof.kind==='physical'&&scope.physicalRetired) return Object.freeze({manager:this,scope,owner:scope.owner,admission:scope.admission,
++      retired:true,kind:!scope.recovered&&!scope.started&&scope.child===null?'sealed-before-fork':'physical'});
++    if(proof.kind==='witness-retired'||proof.kind==='witness-before-fork') return Object.freeze({manager:this,scope,owner:scope.owner,
++      admission:proof.admission,retired:true,kind:proof.kind});
++    fail('CPU_RESOURCE_RETIREMENT_PRODUCER_REQUIRED');
++  }
+   #scope(context, input, deadlineAt, ownerGeneration = 1) {
+     const scope = { context, scope: validateScope(input), deadlineAt, controlOperationId: randomUUID(), owner: Object.freeze({ instanceId: this.profile.settings.instance_id,
+       bootId: this.nodeBootId, ownerId: randomUUID(), ownerGeneration, leaseId: randomUUID() }), contextFor: original => this.bindContext(original, scope, this),
+@@ -69,7 +79,7 @@
+   /** Exact callback passed to the real Core factory. The opaque resource object
+    * must be this manager's actual prepared/live/recovered original, never JSON. */
+   requireOriginalResource(_context, operation, action, request) {
+-    const scope = this.#scopes.get(request.owner?.ownerId);
++    const scope = action === 'retireOriginal' ? this.#proofs.get(request.physicalProof)?.scope : this.#scopes.get(request.owner?.ownerId);
+     if (!scope || !equal(scope.owner, request.owner)) fail('CPU_ORIGINAL_RESOURCE_REQUIRED');
+     if (operation && (!equal(operation.owner, scope.owner) || operation.original.operationId !== request.operationId)) fail('CPU_ORIGINAL_RESOURCE_CONFLICT');
+     const isControl = request.operationId === scope.controlOperationId || operation?.original?.kind === 'voice-cpu-supervisor';
+@@ -211,6 +221,7 @@
+     const requestedScope = validateScope(requested); signal?.throwIfAborted();
+     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128 || !Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now()) fail('CPU_SCOPE_DEADLINE_REQUIRED');
+     if (this.#current?.ready && !this.#current.closing && sameScope(this.#current.scope, requestedScope)) {
++      this.requireCpuAdmission(this.#current.admission,this.#current);
+       if (this.#current.sessions.size >= 16 && !this.#current.sessions.has(sessionId)) fail('CPU_SCOPE_CAPACITY');
+       this.#current.sessions.add(sessionId); return this.status();
+     }
+@@ -315,6 +326,12 @@
+     finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+   }
+   async #witness(scope, deadlineAt, requireParentExit) {
++    const admission=await this.admitCpuWitness({context:scope.context,scope,profileDigest:this.profile.profileDigest,deadlineAt});
++    scope.witnessAdmission=admission;let launchCalled=false;
++    try {
++    this.requireCpuAdmission(admission,scope);
++    if(!Number.isSafeInteger(admission.deadlineAt)||admission.deadlineAt<=Date.now())fail('CPU_RESOURCE_DEADLINE_REQUIRED');
++    deadlineAt=Math.min(deadlineAt,admission.deadlineAt);launchCalled=true;
+     const child = this.launch(this.profile.value.python, ['-I', '-S', '-B', '-c', this.profile.witnessSource], { env: this.#environment(), cwd: this.profile.value.workerRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+     scope.witnessChild = child;
+     scope.witness = childOriginal(child, 8192);
+@@ -322,13 +339,23 @@
+       recoveryEndpointIdentity: scope.control.recoveryEndpointIdentity, retirementSecretSha256: scope.control.retirementSecretSha256,
+       requireParentExit, deadlineMs: Math.max(1, Math.min(60000, deadlineAt - Date.now())) };
+     scope.witnessInput = new Promise((resolve, reject) => child.stdin.end(JSON.stringify(request) + '\n', error => error ? reject(error) : resolve()));
+-    const result = await this.#deadline(Promise.all([scope.witness.exited, scope.witness.closed, scope.witness.stdout, scope.witness.stderr, scope.witnessInput]), deadlineAt);
++    scope.witnessReleaseOriginal=Promise.all([scope.witness.exited,scope.witness.closed,scope.witness.stdout,scope.witness.stderr,scope.witnessInput]).then(async result=>{
++      const proof={};this.#proofs.set(proof,{kind:'witness-retired',scope,admission});
++      await this.releaseCpuWitness(admission,proof,this);return result;
++    });
++    scope.witnessReleaseOriginal.catch(error=>{scope.witnessReleaseFailure??=error;});
++    const result=await this.#deadline(scope.witnessReleaseOriginal,deadlineAt);
+     if (result[0].code !== 0 || result[0].signal || result[3].length) fail('CPU_RECOVERY_WITNESS_UNCONFIRMED');
+     const proof = privateJson(result[2]);
+     if (proof.controlOperationId !== scope.controlOperationId || !equal(proof.owner, scope.owner) || proof.recoveryEndpointIdentity !== scope.control.recoveryEndpointIdentity
+       || proof.retirementSecretSha256 !== scope.control.retirementSecretSha256 || proof.helperKernelExited !== true || proof.helperPipeEOF !== true
+       || proof.treeEmpty !== true || proof.pipeEof !== true || requireParentExit && proof.parentExited !== true && proof.noStartSealed !== true) fail('CPU_RECOVERY_WITNESS_CONFLICT');
+     return proof;
++    } catch(error) {
++      if(!launchCalled){const proof={};this.#proofs.set(proof,{kind:'witness-before-fork',scope,admission});
++        try{await this.releaseCpuWitness(admission,proof,this);}catch(releaseError){scope.witnessReleaseFailure??=releaseError;}}
++      throw error;
++    }
+   }
+   async #recoverControl(context, operation, deadlineAt) {
+     const scope = this.#scope(context, operation.original.scope, deadlineAt, operation.owner.ownerGeneration);
+@@ -337,6 +364,7 @@
+     await this.#witness(scope, deadlineAt, true); scope.physicalRetired = true;
+     const proof = {}; this.#proofs.set(proof, { kind: 'physical', scope, retentionSeed: randomBytes(32).toString('hex') });
+     this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof });
++    await this.releaseCpu(scope.admission,proof,this);
+   }
+   stopScope(scope = this.#current, deadlineAt = Date.now() + 20000) {
+     if (!scope) return Promise.resolve(); if (scope.stopOriginal) return scope.stopOriginal;
+--- a/services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts
++++ b/services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts
+@@ -35,6 +35,8 @@
+   admitCpu(input: { context: C; scope: VoiceScope; owner: voiceOperations.VoiceOwner; profileDigest: string; memoryBytes: number; cpuThreads: number; deadlineAt: number; signal?: AbortSignal }): CpuAdmission | Promise<CpuAdmission>;
+   requireCpuAdmission(admission: CpuAdmission | null, scope: SupervisedCpuScope<C>): void;
+   releaseCpu(admission: CpuAdmission | null, proof: object, producer: ManagedCpuSupervisor<C>): void | Promise<void>;
++  admitCpuWitness(input: {context:C;scope:SupervisedCpuScope<C>;profileDigest:string;deadlineAt:number}):CpuAdmission|Promise<CpuAdmission>;
++  releaseCpuWitness(admission:CpuAdmission,proof:object,producer:ManagedCpuSupervisor<C>):void|Promise<void>;
+   fetch?: typeof globalThis.fetch;
+   /** Fixture-only override. Product omits it and retains the actual spawn API. */
+   spawn?: typeof import('node:child_process').spawn;
+@@ -42,6 +44,7 @@
+ export class ManagedCpuSupervisor<C> {
+   constructor(dependencies: ManagedCpuDependencies<C>);
+   status(): CpuSupervisorStatus;
++  inspectResourceRetirement(proof:object):Readonly<{manager:ManagedCpuSupervisor<C>;scope:SupervisedCpuScope<C>;owner:voiceOperations.VoiceOwner;admission:CpuAdmission|null;retired:true;kind:"physical"|"sealed-before-fork"|"witness-retired"|"witness-before-fork"}>;
+   isOwnedScope(value: unknown): value is SupervisedCpuScope<C>;
+   requireOriginalResource: VoiceOperationAuthorities<C>['requireOriginalResource'];
+   verifyRetirement: VoiceOperationAuthorities<C>['verifyRetirement'];
+--- /dev/null
++++ b/services/ingenium-api/lib/voice-v2/linux-resource-probe.mjs
+@@ -0,0 +1,53 @@
++import {readFileSync,readlinkSync,lstatSync,statfsSync} from 'node:fs';
++import {resolve,relative,dirname,sep} from 'node:path';
++import {createHash} from 'node:crypto';
++const fail=code=>{throw Object.assign(new Error(code),{code});};
++const bounded=(path,max=65536)=>{const value=readFileSync(path,'utf8');if(Buffer.byteLength(value)>max)fail('CPU_KERNEL_FACT_LIMIT');return value;};
++const uint=text=>{if(!/^(0|[1-9][0-9]*)$/.test(text))fail('CPU_KERNEL_FACT_INVALID');const n=BigInt(text);if(n>BigInt(Number.MAX_SAFE_INTEGER))fail('CPU_KERNEL_FACT_RANGE');return Number(n);};
++const limit=text=>text==='max'?null:uint(text);
++const decode=value=>value.replace(/\\(040|011|012|134)/g,(_,v)=>String.fromCharCode(parseInt(v,8)));
++function cpuSet(value){
++ if(!value.trim())fail('CPU_CPUSET_UNKNOWN');const ranges=value.trim().split(',').map(part=>{const m=part.match(/^(\d+)(?:-(\d+))?$/);if(!m)fail('CPU_CPUSET_INVALID');const a=uint(m[1]),b=m[2]===undefined?a:uint(m[2]);if(b<a||b>1048575)fail('CPU_CPUSET_INVALID');return [a,b];}).sort((a,b)=>a[0]-b[0]);
++ let count=0,last=-1;for(const [a,b]of ranges){if(a<=last)fail('CPU_CPUSET_INVALID');count+=b-a+1;last=b;}return count;
++}
++const identity=path=>{const s=lstatSync(path,{bigint:true});if(!s.isDirectory()||s.isSymbolicLink())fail('CPU_CGROUP_CUSTODY');return {path,device:String(s.dev),inode:String(s.ino)};};
++/** Concrete read-only Linux kernel probe. No injectable capacity/positive-admission port. */
++export function readLinuxCpuCapacity(){
++ if(process.platform!=='linux')fail('CPU_LINUX_RESOURCES_REQUIRED');
++ const membership=bounded('/proc/self/cgroup'),mounts=bounded('/proc/self/mountinfo',1048576),namespace=readlinkSync('/proc/self/ns/cgroup');
++ if(!/^cgroup:\[[0-9]+\]$/.test(namespace))fail('CPU_CGROUP_NAMESPACE_UNKNOWN');
++ const records=membership.trim().split('\n');if(records.length!==1||!records[0].startsWith('0::/'))fail('CPU_UNIFIED_CGROUP_REQUIRED');
++ const member=records[0].slice(3);if(member.includes('\0')||member.split('/').some(p=>p==='..'||p==='.'))fail('CPU_CGROUP_PATH_INVALID');
++ const candidates=mounts.trim().split('\n').map(line=>line.split(' - ')).filter(parts=>parts.length===2&&parts[1].split(' ')[0]==='cgroup2');
++ if(candidates.length!==1)fail('CPU_CGROUP_MOUNT_AMBIGUOUS');
++ const fields=candidates[0][0].split(' '),mountRoot=decode(fields[3]),mountPoint=decode(fields[4]);
++ if(mountPoint!=='/sys/fs/cgroup'||!mountRoot.startsWith('/'))fail('CPU_FIXED_CGROUP_MOUNT_REQUIRED');
++ const suffix=relative(mountRoot,member);if(suffix.startsWith('..')||suffix.startsWith('/'))fail('CPU_CGROUP_PATH_UNRESOLVED');
++ const leaf=resolve(mountPoint,suffix);if(leaf!==mountPoint&&!leaf.startsWith(mountPoint+sep))fail('CPU_CGROUP_PATH_INVALID');
++ if(BigInt(statfsSync(mountPoint,{bigint:true}).type)!==0x63677270n)fail('CPU_CGROUP_FILESYSTEM_UNKNOWN');
++ const chain=[];let path=leaf,memoryHeadroom=Infinity,pidsHeadroom=Infinity,cpuMilli=Infinity;
++ while(true){
++  if(chain.length>=64)fail('CPU_CGROUP_DEPTH_LIMIT');
++  const original=identity(path),memoryMax=limit(bounded(path+'/memory.max',128).trim()),memoryCurrent=uint(bounded(path+'/memory.current',128).trim());
++  const pidsMax=limit(bounded(path+'/pids.max',128).trim()),pidsCurrent=uint(bounded(path+'/pids.current',128).trim());
++  const cpu=bounded(path+'/cpu.max',128).trim().split(/\s+/);if(cpu.length!==2)fail('CPU_QUOTA_UNKNOWN');
++  const quota=limit(cpu[0]),period=uint(cpu[1]);if(period===0||quota===0)fail('CPU_QUOTA_INVALID');
++  const milli=quota===null?null:Number(BigInt(quota)*1000n/BigInt(period));
++  if(memoryMax!==null)memoryHeadroom=Math.min(memoryHeadroom,Math.max(0,memoryMax-memoryCurrent));
++  if(pidsMax!==null)pidsHeadroom=Math.min(pidsHeadroom,Math.max(0,pidsMax-pidsCurrent));
++  if(milli!==null)cpuMilli=Math.min(cpuMilli,milli);
++  chain.push({...original,memoryMax,memoryCurrent,pidsMax,pidsCurrent,cpuMilli:milli});
++  if(path===mountPoint)break;path=dirname(path);if(path!==mountPoint&&!path.startsWith(mountPoint+sep))fail('CPU_CGROUP_PATH_INVALID');
++ }
++ if(!Number.isFinite(memoryHeadroom)||!Number.isFinite(pidsHeadroom))fail('CPU_FINITE_CGROUP_CAPACITY_REQUIRED');
++ const cpus=cpuSet(bounded(leaf+'/cpuset.cpus.effective',32768));cpuMilli=Math.min(cpuMilli,cpus*1000);
++ const meminfo=bounded('/proc/meminfo'),available=meminfo.match(/^MemAvailable:\s+([0-9]+) kB$/m),total=meminfo.match(/^MemTotal:\s+([0-9]+) kB$/m);
++ if(!available||!total)fail('CPU_HOST_MEMORY_UNKNOWN');const hostAvailable=uint(available[1])*1024,hostTotal=uint(total[1])*1024;
++ if(!Number.isSafeInteger(hostAvailable)||!Number.isSafeInteger(hostTotal)||hostAvailable>hostTotal)fail('CPU_HOST_MEMORY_INVALID');
++ const cpuStat=bounded(leaf+'/cpu.stat');const usage=cpuStat.match(/^usage_usec ([0-9]+)$/m);if(!usage)fail('CPU_CPU_USAGE_UNKNOWN');
++ for(const node of chain)if(JSON.stringify(identity(node.path))!==JSON.stringify({path:node.path,device:node.device,inode:node.inode}))fail('CPU_CGROUP_IDENTITY_CHANGED');
++ if(bounded('/proc/self/cgroup')!==membership||bounded('/proc/self/mountinfo',1048576)!==mounts||readlinkSync('/proc/self/ns/cgroup')!==namespace)fail('CPU_CGROUP_IDENTITY_CHANGED');
++ const boot=bounded('/proc/sys/kernel/random/boot_id',128).trim();if(!/^[a-f0-9-]{36}$/.test(boot))fail('CPU_KERNEL_BOOT_UNKNOWN');
++ const original={boot,namespace,mountId:fields[0],mountRoot,mountPoint,chain:chain.map(({path,device,inode})=>({path,device,inode}))};
++ return Object.freeze({identity:createHash('sha256').update(JSON.stringify(original)).digest('hex'),original,memoryHeadroom:Math.min(memoryHeadroom,hostAvailable),pidsHeadroom,cpuMilli,cpus,cpuUsageUsec:uint(usage[1]),hostAvailable,chain});
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/voice-v2/resource-approval.mjs
+@@ -0,0 +1,70 @@
++import {constants,openSync,closeSync,fstatSync,readSync,lstatSync,readdirSync} from 'node:fs';
++import {resolve,dirname,parse,join,isAbsolute,sep} from 'node:path';
++import {createHash} from 'node:crypto';
++export const fail=code=>{throw Object.assign(new Error(code),{code});};
++export const canonical=v=>v&&typeof v==='object'?Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}':JSON.stringify(v);
++export const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
++const integer=n=>Number.isSafeInteger(n)&&n>=0;
++const sha=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
++function shape(v,keys){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join()!==keys.sort().join())fail('CPU_RESOURCE_PLAN_INVALID');}
++function custody(path,privateLeaf=false){
++ if(!isAbsolute(path)||path.split(sep).some(p=>p==='..'||p==='.'))fail('CPU_RESOURCE_PATH_INVALID');
++ let current=parse(path).root;for(const part of path.slice(current.length).split(sep).filter(Boolean)){
++  current=join(current,part);const s=lstatSync(current);if(!s.isDirectory()||s.isSymbolicLink()||![0,process.getuid()].includes(s.uid)||s.mode&0o022)fail('CPU_RESOURCE_DIRECTORY_CUSTODY');
++ }
++ if(privateLeaf){const s=lstatSync(path);if(s.uid!==process.getuid()||s.mode&0o077)fail('CPU_RESOURCE_DIRECTORY_CUSTODY');}
++}
++const facts=s=>({device:String(s.dev),inode:String(s.ino),bytes:Number(s.size),mtime:String(s.mtimeNs),ctime:String(s.ctimeNs)});
++function read(path,{privateFile=false,max=65536,expectedBytes,expectedSha,deadline=Infinity,signal,contents=false}={}){
++ custody(dirname(path),privateFile);let fd;
++ try{
++  fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_CLOEXEC);const before=fstatSync(fd,{bigint:true});
++  if(!before.isFile()||before.nlink!==1n||![0n,BigInt(process.getuid())].includes(before.uid)||Number(before.mode)&(privateFile?0o077:0o022)
++   ||privateFile&&before.uid!==BigInt(process.getuid())||before.size<1n||before.size>BigInt(max)||expectedBytes!==undefined&&before.size!==BigInt(expectedBytes))fail('CPU_RESOURCE_FILE_CUSTODY');
++  const digest=createHash('sha256'),buffer=Buffer.alloc(65536),chunks=[];let count=0;
++  for(;;){signal?.throwIfAborted();if(Date.now()>=deadline)fail('CPU_RESOURCE_DEADLINE');const n=readSync(fd,buffer,0,buffer.length,null);if(!n)break;count+=n;if(count>max)fail('CPU_RESOURCE_FILE_LIMIT');digest.update(buffer.subarray(0,n));if(contents)chunks.push(Buffer.from(buffer.subarray(0,n)));}
++  const after=fstatSync(fd,{bigint:true}),observed=hash(canonical(facts(before)));
++  if(count!==Number(before.size)||canonical(facts(before))!==canonical(facts(after)))fail('CPU_RESOURCE_FILE_CHANGED');
++  const sha256=digest.digest('hex');if(expectedSha&&sha256!==expectedSha)fail('CPU_RESOURCE_MODEL_HASH');
++  return {path,identity:observed,facts:facts(before),sha256,...(contents?{bytes:Buffer.concat(chunks)}:{})};
++ }finally{if(fd!==undefined)closeSync(fd);}
++}
++export function readResourceApproval(path,profile){
++ const snapshot=read(path,{privateFile:true,max:65536,contents:true}),plan=JSON.parse(snapshot.bytes.toString('utf8'));
++ shape(plan,['version','profileDigest','codeBundleDigest','helperSha256','witnessSha256','modelManifestSha256','modelSetDigest','assets','workerAddressSpaceBytes','cpuThreads','components','stages','qualifiedAt','expiresAt','retirementExpiresAt','maxLifetimeMs','maxWitnessLifetimeMs','qualificationDigest']);
++ if(plan.version!==1||!['profileDigest','codeBundleDigest','helperSha256','witnessSha256','modelManifestSha256','modelSetDigest','qualificationDigest'].every(k=>sha(plan[k]))
++  ||plan.profileDigest!==profile.profileDigest||plan.codeBundleDigest!==hash(canonical(profile.value.bundle))||plan.helperSha256!==hash(profile.helperSource)||plan.witnessSha256!==hash(profile.witnessSource)
++  ||plan.workerAddressSpaceBytes!==profile.value.memoryBytes||plan.cpuThreads!==profile.settings.cpu_threads
++  ||![plan.qualifiedAt,plan.expiresAt,plan.retirementExpiresAt,plan.maxLifetimeMs,plan.maxWitnessLifetimeMs].every(integer)
++  ||plan.qualifiedAt>Date.now()||plan.expiresAt<=plan.qualifiedAt||plan.retirementExpiresAt<plan.expiresAt||plan.retirementExpiresAt>plan.expiresAt+60000
++  ||plan.maxLifetimeMs<1||plan.maxLifetimeMs>1800000||plan.maxWitnessLifetimeMs<1||plan.maxWitnessLifetimeMs>60000)fail('CPU_RESOURCE_APPROVAL_MISMATCH');
++ shape(plan.components,['modelsResidentBytes','modelWarmupExtraBytes','helperBytes','witnessBytes','probeBytes','hotWorkspaceBytes','coldTasks','hotAdditionalTasks','witnessTasks']);
++ if(!Object.values(plan.components).every(n=>integer(n)&&n>0))fail('CPU_RESOURCE_PLAN_INVALID');
++ shape(plan.stages,['cold','hot','witness']);for(const stage of Object.values(plan.stages)){shape(stage,['additionalBytes','additionalTasks','cpuMilli']);if(!Object.values(stage).every(n=>integer(n)&&n>0))fail('CPU_RESOURCE_PLAN_INVALID');}
++ const c=plan.components;
++ if(plan.stages.cold.additionalBytes!==c.modelsResidentBytes+c.modelWarmupExtraBytes+c.helperBytes+c.witnessBytes+c.probeBytes
++  ||plan.stages.hot.additionalBytes!==c.hotWorkspaceBytes+c.witnessBytes+c.probeBytes||plan.stages.witness.additionalBytes!==c.witnessBytes+c.probeBytes
++  ||plan.stages.cold.additionalTasks!==c.coldTasks||plan.stages.hot.additionalTasks!==c.hotAdditionalTasks||plan.stages.witness.additionalTasks!==c.witnessTasks)fail('CPU_RESOURCE_PEAK_COMPONENTS_INVALID');
++ if(!Array.isArray(plan.assets)||plan.assets.length<3||plan.assets.length>128)fail('CPU_RESOURCE_MODEL_SET_INVALID');
++ const paths=new Set();for(const asset of plan.assets){shape(asset,['role','file','sha256','bytes']);if(!['transcription','kokoro-model','kokoro-voices'].includes(asset.role)||typeof asset.file!=='string'||!asset.file||isAbsolute(asset.file)||asset.file.split('/').some(p=>['','..','.'].includes(p))||asset.file.includes('\\')||paths.has(asset.file)||!sha(asset.sha256)||!integer(asset.bytes)||asset.bytes<1||asset.bytes>68719476736)fail('CPU_RESOURCE_MODEL_SET_INVALID');paths.add(asset.file);}
++ if(hash(canonical(plan.assets.map(({role,file,sha256})=>({role,file,sha256})).sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0)))!==plan.modelSetDigest)fail('CPU_RESOURCE_MODEL_SET_INVALID');
++ const codeSnapshots=[read(profile.value.python,{max:67108864,expectedSha:profile.value.pythonSha256}),
++  ...Object.entries(profile.value.bundle).map(([name,expectedSha])=>read(join(profile.value.workerRoot,name),{max:1048576,expectedSha}))];
++ return {plan,snapshot,codeSnapshots};
++}
++export function assertSnapshot(snapshot){
++ custody(dirname(snapshot.path));let fd;try{fd=openSync(snapshot.path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_CLOEXEC);const s=fstatSync(fd,{bigint:true});if(!s.isFile()||s.nlink!==1n||Number(s.mode)&0o022||hash(canonical(facts(s)))!==snapshot.identity)fail('CPU_RESOURCE_ORIGINAL_CHANGED');}finally{if(fd!==undefined)closeSync(fd);}
++}
++export function verifyModelSet(profile,plan,deadline,signal){
++ const modelRoot=profile.settings.model_root,name=profile.settings.model_manifest;
++ if(typeof name!=='string'||isAbsolute(name)||name.split('/').some(p=>['','..','.'].includes(p))||name.includes('\\'))fail('CPU_RESOURCE_MANIFEST_PATH_INVALID');
++ custody(modelRoot);const manifest=read(resolve(modelRoot,name),{max:65536,expectedSha:plan.modelManifestSha256,deadline,signal,contents:true}),value=JSON.parse(manifest.bytes.toString('utf8'));
++ if(value.version!==3||value.backend!=='cpu-onnx'||!Array.isArray(value.transcription?.files)||!value.kokoro?.model||!value.kokoro?.voices)fail('CPU_RESOURCE_MANIFEST_INVALID');
++ const declared=[...value.transcription.files.map(file=>({role:'transcription',...file})),{role:'kokoro-model',...value.kokoro.model},{role:'kokoro-voices',...value.kokoro.voices}];
++ if(canonical(declared.sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0))!==canonical(plan.assets.map(({role,file,sha256})=>({role,file,sha256})).sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0)))fail('CPU_RESOURCE_MODEL_SET_CHANGED');
++ const snapshots=[manifest,...plan.assets.map(asset=>read(resolve(modelRoot,asset.file),{max:asset.bytes,expectedBytes:asset.bytes,expectedSha:asset.sha256,deadline,signal}))];
++ const directory=value.transcription.directory;if(typeof directory!=='string'||isAbsolute(directory)||directory.split('/').some(p=>['','..','.'].includes(p)))fail('CPU_RESOURCE_MODEL_SET_INVALID');
++ const actual=[];const walk=(dir,depth)=>{if(depth>8||actual.length>256)fail('CPU_RESOURCE_MODEL_SET_LIMIT');for(const item of readdirSync(dir,{withFileTypes:true})){const file=join(dir,item.name);if(item.isSymbolicLink())fail('CPU_RESOURCE_MODEL_CUSTODY');if(item.isDirectory())walk(file,depth+1);else if(item.isFile())actual.push(file);else fail('CPU_RESOURCE_MODEL_CUSTODY');}};
++ walk(resolve(modelRoot,directory),0);const expected=plan.assets.filter(a=>a.role==='transcription').map(a=>resolve(modelRoot,a.file));if(canonical(actual.sort())!==canonical(expected.sort()))fail('CPU_RESOURCE_MODEL_SET_CHANGED');
++ return snapshots;
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs
+@@ -0,0 +1,93 @@
++import {ManagedCpuProfile} from './managed-profile.mjs';
++import {ManagedCpuSupervisor} from './managed-supervisor.mjs';
++import {readLinuxCpuCapacity} from './linux-resource-probe.mjs';
++import {readResourceApproval,verifyModelSet,assertSnapshot,canonical,fail} from './resource-approval.mjs';
++let occupied=null; // One original scope in this API process; original Core controls cover restarts.
++const same=(a,b)=>canonical(a)===canonical(b);
++export function checkCpuResourceBudget(plan,facts,stage){
++ const needed=plan.stages[stage];
++ if(!needed||facts.memoryHeadroom<needed.additionalBytes||facts.pidsHeadroom<needed.additionalTasks||facts.cpuMilli<needed.cpuMilli||facts.cpus<plan.cpuThreads)fail('CPU_RESOURCE_CAPACITY_INSUFFICIENT');
++}
++
++/** Private production assembly: concrete protected files and kernel probes, no positive resource port. */
++export function createLinuxCpuSupervisor({profilePath,resourceApprovalPath,ledger,bindContext,currentScope}){
++ if(typeof bindContext!=='function'||typeof currentScope!=='function'||typeof ledger?.privateRead!=='function')fail('CPU_ACTUAL_CORE_BINDING_REQUIRED');
++ const profile=ManagedCpuProfile.load(profilePath),{plan,snapshot,codeSnapshots}=readResourceApproval(resourceApprovalPath,profile);
++ const tokens=new WeakMap();let producer;
++ const handle=record=>{const value=Object.freeze({get deadlineAt(){return record.deadlineAt;}});tokens.set(value,record);return value;};
++ const actualScope=scope=>{if(!producer?.isOwnedScope(scope))fail('CPU_RESOURCE_ORIGINAL_SCOPE_REQUIRED');};
++ function budget(stage,identity){
++  const facts=readLinuxCpuCapacity();if(identity&&facts.identity!==identity)fail('CPU_RESOURCE_CGROUP_ORIGINAL_CHANGED');
++  checkCpuResourceBudget(plan,facts,stage);
++  return facts;
++ }
++ function approved(retirement=false){assertSnapshot(snapshot);for(const code of codeSnapshots)assertSnapshot(code);if(Date.now()>=(retirement?plan.retirementExpiresAt:plan.expiresAt))fail('CPU_RESOURCE_APPROVAL_EXPIRED');}
++ function original(record,scope){
++  actualScope(scope);if(!same(scope.scope,record.scopeValue)||!same(scope.owner,record.owner)||record.scope&&record.scope!==scope||scope.control&&scope.control.profileDigest!==profile.profileDigest)fail('CPU_RESOURCE_ORIGINAL_CONFLICT');
++  if(!record.scope)record.scope=scope;if(!record.slot.scope)record.slot.scope=scope;
++ }
++ function fresh(record,scope){
++  original(record,scope);if(record.released||scope.closing||scope.physicalRetired||record.signal?.aborted||Date.now()>=record.deadlineAt)fail('CPU_RESOURCE_ADMISSION_CLOSED');
++  const context=bindContext(scope.context,scope,producer),verified=currentScope(context,scope.scope,scope.started?'transition':'reserve');
++  if(!verified||verified.mode!=='hosted'||verified.selectedConversationVerified!==true||!same(verified.scope,record.scopeValue)||!same(verified.owner,record.owner)||!Number.isSafeInteger(verified.deadlineAt)||verified.deadlineAt<=Date.now())fail('CPU_RESOURCE_CORE_SCOPE_CHANGED');
++  record.deadlineAt=Math.min(record.deadlineAt,verified.deadlineAt);
++  if(scope.started){const control=ledger.privateRead(context,{operationId:scope.controlOperationId,owner:scope.owner});
++   if(control.resourceRetired||control.original.operationId!==scope.controlOperationId||control.state!=='running'||!same(control.owner,scope.owner)||!same(control.original.scope,scope.scope)||control.original.control?.profileDigest!==profile.profileDigest)fail('CPU_RESOURCE_CORE_ORIGINAL_CHANGED');}
++ }
++ function requireAdmission(token,scope){
++  const record=tokens.get(token);if(!record||record.producer!==producer||occupied!==record.slot)fail('CPU_RESOURCE_ADMISSION_ORIGINAL_REQUIRED');
++  original(record,scope);approved(record.role==='witness');
++  if(record.role==='witness'){
++   if(record.released||Date.now()>=record.deadlineAt)fail('CPU_RESOURCE_ADMISSION_CLOSED');budget('witness',record.cgroupIdentity);return;
++  }
++  fresh(record,scope);for(const asset of record.assets)assertSnapshot(asset);
++  budget(scope.ready?'hot':'cold',record.cgroupIdentity);
++ }
++ function inspect(proof,manager,witness){
++  if(manager!==producer)fail('CPU_RESOURCE_MANAGER_ORIGINAL_REQUIRED');
++  const facts=producer.inspectResourceRetirement(proof);
++  if(facts.manager!==producer||facts.scope.owner!==facts.owner||!facts.retired
++    ||(witness?!['witness-retired','witness-before-fork'].includes(facts.kind):!['physical','sealed-before-fork'].includes(facts.kind)))fail('CPU_RESOURCE_RETIREMENT_REQUIRED');
++  return facts;
++ }
++ function retiredOriginal(record,scope){
++  if(record.scope!==scope||!same(scope.scope,record.scopeValue)||!same(scope.owner,record.owner))fail('CPU_RESOURCE_ORIGINAL_CONFLICT');
++ }
++ const callbacks={
++  admitCpu(input){
++   approved();input.signal?.throwIfAborted();
++   if(occupied)fail('CPU_RESOURCE_OTHER_ORIGINAL_ACTIVE');
++   if(input.profileDigest!==profile.profileDigest||input.memoryBytes!==plan.workerAddressSpaceBytes||input.cpuThreads!==plan.cpuThreads||!Number.isSafeInteger(input.deadlineAt))fail('CPU_RESOURCE_PROFILE_CONFLICT');
++   const deadlineAt=Math.min(input.deadlineAt,plan.expiresAt,Date.now()+plan.maxLifetimeMs);if(deadlineAt<=Date.now())fail('CPU_RESOURCE_DEADLINE');
++   const first=budget('cold'),assets=verifyModelSet(profile,plan,deadlineAt,input.signal),last=budget('cold',first.identity);
++   const slot={scope:null,owner:input.owner,scopeValue:input.scope,producer,role:'hot'},record={...slot,slot,deadlineAt,signal:input.signal,assets,cgroupIdentity:last.identity,released:false};occupied=slot;return handle(record);
++  },
++  requireCpuAdmission:requireAdmission,
++  releaseCpu(token,proof,manager){
++   const facts=inspect(proof,manager,false),record=token?tokens.get(token):null;
++   if(record){retiredOriginal(record,facts.scope);if(facts.scope.admission!==token||record.role!=='hot')fail('CPU_RESOURCE_ORIGINAL_CONFLICT');
++    if(record.released)return;if(occupied!==record.slot||record.slot.witnessActive)fail('CPU_RESOURCE_RETIREMENT_PENDING');record.released=true;occupied=null;
++   }else{
++    if(token!==null||!facts.scope.recovered||occupied&& (occupied.scope!==facts.scope||occupied.role!=='recovery'||occupied.witnessActive))fail('CPU_RESOURCE_ORIGINAL_CONFLICT');occupied=null;
++   }
++  },
++  admitCpuWitness({scope,profileDigest,deadlineAt}){
++   actualScope(scope);approved(true);if(profileDigest!==profile.profileDigest||scope.control?.profileDigest!==profile.profileDigest||!Number.isSafeInteger(deadlineAt))fail('CPU_RESOURCE_WITNESS_PROFILE_CONFLICT');
++   if(occupied&&(occupied.producer!==producer||occupied.scope!==scope)&&!(occupied?.scope===null&&same(occupied.owner,scope.owner)))fail('CPU_RESOURCE_OTHER_ORIGINAL_ACTIVE');
++   if(!occupied&&!scope.recovered)fail('CPU_RESOURCE_ORIGINAL_SCOPE_REQUIRED');
++   const facts=budget('witness');
++   if(!occupied)occupied={scope,owner:scope.owner,scopeValue:scope.scope,producer,role:'recovery'};
++   if(occupied.witnessActive)fail('CPU_RESOURCE_WITNESS_ALREADY_ACTIVE');
++   const deadline=Math.min(deadlineAt,plan.retirementExpiresAt,Date.now()+plan.maxWitnessLifetimeMs);if(deadline<=Date.now())fail('CPU_RESOURCE_DEADLINE');
++   const record={role:'witness',slot:occupied,scope,scopeValue:scope.scope,owner:scope.owner,producer,deadlineAt:deadline,cgroupIdentity:facts.identity,released:false};
++   const token=handle(record);occupied.witnessActive=token;return token;
++  },
++  releaseCpuWitness(token,proof,manager){
++   const facts=inspect(proof,manager,true),record=tokens.get(token);if(!record||record.role!=='witness')fail('CPU_RESOURCE_ADMISSION_ORIGINAL_REQUIRED');retiredOriginal(record,facts.scope);
++   if(facts.admission!==token)fail('CPU_RESOURCE_ORIGINAL_CONFLICT');if(record.released)return;
++   if(occupied!==record.slot||record.slot.witnessActive!==token)fail('CPU_RESOURCE_ORIGINAL_CONFLICT');record.released=true;delete record.slot.witnessActive;
++   if(record.slot.role==='recovery')occupied=null; // Only the positively retired model-free witness allocation; Core still guards its old model control.
++  },
++ };
++ producer=new ManagedCpuSupervisor({profile,ledger,bindContext,...callbacks});return producer;
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts
+@@ -0,0 +1,20 @@
++import type {CoreVoiceLedger,VoiceOperationAuthorities} from 'ingenium-core';
++import type {ManagedCpuSupervisor,ManagedCpuDependencies} from './managed-supervisor.mjs';
++export interface CpuResourceStage {additionalBytes:number;additionalTasks:number;cpuMilli:number}
++export interface CpuResourcePlan {
++ version:1;profileDigest:string;codeBundleDigest:string;helperSha256:string;witnessSha256:string;
++ modelManifestSha256:string;modelSetDigest:string;qualificationDigest:string;
++ assets:readonly {role:'transcription'|'kokoro-model'|'kokoro-voices';file:string;sha256:string;bytes:number}[];
++ workerAddressSpaceBytes:number;cpuThreads:number;
++ components:{modelsResidentBytes:number;modelWarmupExtraBytes:number;helperBytes:number;witnessBytes:number;probeBytes:number;hotWorkspaceBytes:number;coldTasks:number;hotAdditionalTasks:number;witnessTasks:number};
++ stages:{cold:CpuResourceStage;hot:CpuResourceStage;witness:CpuResourceStage};
++ qualifiedAt:number;expiresAt:number;retirementExpiresAt:number;maxLifetimeMs:number;maxWitnessLifetimeMs:number;
++}
++export interface LinuxCpuSupervisorOptions<C> {
++ /** Fixed server-owned protected paths; never renderer parameters. */
++ profilePath:string;resourceApprovalPath:string;ledger:CoreVoiceLedger<C>;
++ bindContext:ManagedCpuDependencies<C>['bindContext'];currentScope:VoiceOperationAuthorities<C>['currentScope'];
++}
++export function createLinuxCpuSupervisor<C>(options:LinuxCpuSupervisorOptions<C>):ManagedCpuSupervisor<C>;
++/** Pure arithmetic only; this does not issue admission or retirement authority. */
++export function checkCpuResourceBudget(plan:CpuResourcePlan,facts:{memoryHeadroom:number;pidsHeadroom:number;cpuMilli:number;cpus:number},stage:'cold'|'hot'|'witness'):void;
