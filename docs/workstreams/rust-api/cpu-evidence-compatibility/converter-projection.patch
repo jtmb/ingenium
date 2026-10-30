@@ -1,0 +1,143 @@
+--- a/docs/workstreams/voice/cpu-qualification/evidence-to-approval.mjs
++++ b/docs/workstreams/voice/cpu-qualification/evidence-to-approval.mjs
+@@ -6,6 +6,8 @@
+ import { resolve, dirname } from 'node:path';
+ import { pathToFileURL } from 'node:url';
+ import { createHash, randomUUID } from 'node:crypto';
++import {projectCapturedConfiguration,assertStableConfiguration,assertKernelEnvironment,assertCaptureDecoder} from './capture-projection.mjs';
++import {parseStrictJobJson} from '../../../../services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs';
+ const fail = code => { throw new Error(code); };
+ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+ const canonical = v => v && typeof v === 'object' ? Array.isArray(v) ? '[' + v.map(canonical).join(',') + ']'
+@@ -17,35 +19,39 @@
+   const bytes = readFileSync(path); if (bytes.length !== facts.size) fail('ROOT_CAPTURE_CHANGED');
+   return { bytes, sha256: hash(bytes) };
+ }
+-function json(path) { const input = trusted(path); return { ...input, value: JSON.parse(input.bytes.toString('utf8')) }; }
++function json(path) { const input = trusted(path); return { ...input, value: parseStrictJobJson(input.bytes,1048576) }; }
+ function counter(snapshot, field) {
+   const value = snapshot.kernel[field]; if (!/^(0|[1-9][0-9]*)\n?$/.test(value ?? '')) fail('RAW_KERNEL_COUNTER_REQUIRED');
+   const n = Number(value.trim()); if (!Number.isSafeInteger(n)) fail('RAW_KERNEL_COUNTER_RANGE'); return n;
+ }
+ function rss(snapshot) { const match = snapshot.procStatus.match(/^VmRSS:\s+([0-9]+) kB$/m); if (!match) fail('RAW_PROC_RSS_REQUIRED'); return Number(match[1]) * 1024; }
+-function run(path, expectedCase, bindings) {
++function run(path, expectedCase, review, closureSha256) {
++  const descriptor=review.captureDecoders?.[expectedCase];assertCaptureDecoder(descriptor,expectedCase);
+   const capture = json(path), value = capture.value, owner = value.kernelOwner;
+   if (value.case !== expectedCase || value.successful !== true || value.productionApproval !== false
+     || !['ownerExitJoined', 'ownerCloseJoined', 'stdoutJoined', 'stderrJoined'].every(k => value[k] === true)
+     || !owner || owner.runId !== value.runId || owner.waited !== true || owner.populated !== false || owner.leafRemoved !== true
+     || owner.stdoutEOF !== true || owner.stderrEOF !== true || owner.deadlineKilled !== false
+     || !['memoryPeakBytes', 'leaderMaxRssBytes', 'pidsPeak', 'childStartTicks', 'inode'].every(k => positive(owner[k]))
+-    || value.exit?.code !== 0 || value.exit.signal || canonical(value.bindings) !== canonical(bindings)) fail('POSITIVE_ORIGINAL_CAPTURE_REQUIRED');
++    || value.exit?.code !== 0 || value.exit.signal) fail('POSITIVE_ORIGINAL_CAPTURE_REQUIRED');
+   const stdout = trusted(resolve(dirname(path), 'stdout.log')), stderr = trusted(resolve(dirname(path), 'stderr.log'));
+   if (stdout.sha256 !== value.stdoutSha256 || stderr.sha256 !== value.stderrSha256) fail('ORIGINAL_CAPTURE_HASH');
+   // A constrained/failed workload must not mint a deceptively small peak.
+   const errors = stderr.bytes.toString('utf8');
+   for (const label of ['oom', 'oom_kill', 'oom_group_kill']) if (new RegExp(`^${label} [1-9][0-9]*$`, 'm').test(errors)) fail('QUALIFICATION_OOM');
+   if (/^max [1-9][0-9]*$/m.test(errors)) fail('QUALIFICATION_MEMORY_OR_PIDS_LIMIT_HIT');
+-  const events = stdout.bytes.toString('utf8').split('\n').filter(s => s.startsWith('{')).map(s => JSON.parse(s));
+-  return { ...capture, owner, events, stdoutSha256: stdout.sha256, stderrSha256: stderr.sha256 };
++  const events = stdout.bytes.toString('utf8').split('\n').filter(s => s.startsWith('{')).map(s => parseStrictJobJson(Buffer.from(s),1048576));
++  const grant=json(descriptor.grantPath);
++  const projection=projectCapturedConfiguration({capture:value,captureSha256:capture.sha256,grant:grant.value,grantSha256:grant.sha256,descriptor,review,closureSha256,events});
++  return { ...capture, owner, events, projection, stdoutSha256: stdout.sha256, stderrSha256: stderr.sha256 };
+ }
+ export async function generateApproval({ reviewPath, profilePath, profileModule, resourceModule, outputPath }) {
+   if (process.platform !== 'linux' || process.getuid?.() === 0) fail('ACTUAL_NONROOT_API_UID_REQUIRED');
+   const review = json(reviewPath), r = review.value;
+-  if (r.kind !== 'root-cpu-qualification-review-v1' || r.approved !== true || r.templateOnly === true || r.platform !== 'linux-cgroup-v2'
++  if (r.kind !== 'root-cpu-qualification-review-v2' || r.approved !== true || r.templateOnly === true || r.platform !== 'linux-cgroup-v2'
+     || r.fixtureEvidence !== false || !r.bindings || !r.cases || !positive(r.approvalLifetimeMs) || r.approvalLifetimeMs > 86400000
+     || !positive(r.maxLifetimeMs) || r.maxLifetimeMs > 1800000 || !positive(r.maxWitnessLifetimeMs) || r.maxWitnessLifetimeMs > 60000) fail('ACTUAL_ROOT_REVIEW_REQUIRED');
++  assertStableConfiguration(r.bindings);assertKernelEnvironment(r.kernelEnvironment);
+   const { ManagedCpuProfile } = await import(pathToFileURL(profileModule));
+   const profile = ManagedCpuProfile.load(profilePath);
+   if (r.bindings.profileDigest !== profile.profileDigest || r.bindings.codeBundleDigest !== hash(canonical(profile.value.bundle))
+@@ -53,9 +59,9 @@
+   const closure = json(r.dependencyClosurePath);
+   if (closure.sha256 !== r.bindings.dependencyClosureSha256 || closure.value.allRecordHashesVerified !== true
+     || closure.value.environmentSealed !== true || !closure.value.bundledVad?.sha256 || closure.value.bundledVad.bytes !== 1245151) fail('SEALED_ACTUAL_DEPENDENCY_CLOSURE_REQUIRED');
+-  const cold = run(r.cases.coldHot, 'model-cold-hot', r.bindings), helper = run(r.cases.helper, 'helper', r.bindings),
+-    witness = run(r.cases.witness, 'witness', r.bindings), probe = run(r.cases.probe, 'probe', r.bindings), wire = run(r.cases.wire, 'production-wire', r.bindings);
+-  if (r.bindings.kernelBootId !== cold.owner.bootId || [helper, witness, probe, wire].some(capture => capture.owner.bootId !== cold.owner.bootId
++  const cold = run(r.cases.coldHot, 'model-cold-hot', r, closure.sha256), helper = run(r.cases.helper, 'helper', r, closure.sha256),
++    witness = run(r.cases.witness, 'witness', r, closure.sha256), probe = run(r.cases.probe, 'probe', r, closure.sha256), wire = run(r.cases.wire, 'production-wire', r, closure.sha256);
++  if (r.kernelEnvironment.bootId !== cold.owner.bootId || [helper, witness, probe, wire].some(capture => capture.owner.bootId !== cold.owner.bootId
+     || capture.owner.namespaceInode !== cold.owner.namespaceInode)) fail('QUALIFIED_KERNEL_OR_NAMESPACE_CHANGED');
+   const wireAuthority = json(r.coreWireReceiptPath);
+   if (wireAuthority.sha256 !== r.coreWireReceiptSha256 || wireAuthority.value.actualCoreWriter !== true
+@@ -89,7 +95,8 @@
+       witness: { additionalBytes: components.witnessBytes + components.probeBytes, additionalTasks: components.witnessTasks, cpuMilli: cpu(witness) } },
+     qualifiedAt, expiresAt, retirementExpiresAt: expiresAt + r.maxWitnessLifetimeMs, maxLifetimeMs: r.maxLifetimeMs, maxWitnessLifetimeMs: r.maxWitnessLifetimeMs,
+     qualificationDigest: hash(canonical({ review: review.sha256, dependencyClosure: closure.sha256, coreWire: wireAuthority.sha256,
+-      cases: [cold, helper, witness, probe, wire].map(e => ({ receipt: e.sha256, stdout: e.stdoutSha256, stderr: e.stderrSha256 })) })) };
++      projectionSchema: "root-cpu-configuration-v1", configuration: r.bindings, kernelEnvironment: r.kernelEnvironment,
++      cases: [cold, helper, witness, probe, wire].map(e => ({ receipt: e.sha256, grant: e.projection.rawGrantSha256, decoder: e.projection.decoder, projection: e.projection.projectionSha256, stdout: e.stdoutSha256, stderr: e.stderrSha256 })) })) };
+   const { readResourceApproval, verifyModelSet } = await import(pathToFileURL(resourceModule));
+   // Validate actual sealed assets BEFORE emitting private approval. The review
+   // authority is Root; digest syntax alone is never represented as execution.
+--- /dev/null
++++ b/docs/workstreams/voice/cpu-qualification/capture-projection.mjs
+@@ -0,0 +1,60 @@
++/** Pure decoded-data checks only. Never reads files, runs workloads or issues approval. */
++import {createHash} from 'node:crypto';
++const fail=code=>{throw Object.assign(Error(code),{code});};
++export const canonical=v=>v&&typeof v==='object'?Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}':JSON.stringify(v);
++const sha=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v),positive=n=>Number.isSafeInteger(n)&&n>0;
++const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v);
++const must=(v,code='CAPTURE_IDENTITY_INVALID')=>{if(!v)fail(code);};
++function data(v,depth=0,budget={n:0}){must(depth<24&&++budget.n<32768);if(v===null||typeof v==='string'||typeof v==='boolean')return;if(typeof v==='number'){must(Number.isSafeInteger(v));return;}must(v&&typeof v==='object'&&(Array.isArray(v)?Object.getPrototypeOf(v)===Array.prototype:[Object.prototype,null].includes(Object.getPrototypeOf(v))));for(const k of Reflect.ownKeys(v)){if(Array.isArray(v)&&k==='length')continue;const d=Object.getOwnPropertyDescriptor(v,k);must(typeof k==='string'&&d.enumerable&&Object.hasOwn(d,'value'));data(d.value,depth+1,budget);}}
++function exact(v,keys){must(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join()===keys.slice().sort().join());}
++const common=['owner','kernelSourceSha256','profileDigest','helperSha256','witnessSha256','codeBundleDigest','modelManifestSha256','modelSetDigest','installedClosureSha256'];
++const digests=['profileDigest','codeBundleDigest','helperSha256','witnessSha256','modelManifestSha256','modelSetDigest','kernelSourceSha256','dependencyClosureSha256'];
++export const SUPPORTED_CAPTURE_SCHEMAS=Object.freeze({
++ 'model-r1':Object.freeze({case:'model-cold-hot',source:'e662fa81cd3709e9581c9b5c020731d204cbbb5c6bd02fdfed1cc3d6a8e981ac',child:'f2d362d3b735dab9164515a07456cdc60b36a87db2bb69e867c4d4e09f9cab89',legacy:true}),
++ 'resource-probe-r1':Object.freeze({case:'probe',source:'e1103ac06a98f675a93c41c8da163513928b713f7f342e81446a2ed5de7280b8',child:'83acea4c22ea83056f04e5996f88b4ee2a3fb58c1fa485680cb7599dcdff7224',legacy:true}),
++ 'resource-probe-r2':Object.freeze({case:'probe',source:'ff4867c9e3f60ba6b40592adc8ef93f92e05594dfb675d68e0e5ef4b78d046cc',child:'604d8cfcd4b258f08dfaaff5cda98a9afdd48156c17a3fd6b595ef4589b26e86',legacy:false}),
++});
++export function assertStableConfiguration(configuration){data(configuration);exact(configuration,['kind',...digests]);must(configuration.kind==='root-cpu-configuration-v1'&&digests.every(k=>sha(configuration[k])));}
++export function assertKernelEnvironment(environment){data(environment);exact(environment,['bootId','namespaceInode']);must(uuid(environment.bootId)&&positive(environment.namespaceInode),'CAPTURE_KERNEL_INVALID');}
++export function assertCaptureDecoder(descriptor,expectedCase){must(descriptor&&Object.hasOwn(SUPPORTED_CAPTURE_SCHEMAS,descriptor.decoder)&&SUPPORTED_CAPTURE_SCHEMAS[descriptor.decoder].case===expectedCase,'CAPTURE_PRODUCER_UNSUPPORTED');}
++export function projectCapturedConfiguration({capture,captureSha256,grant,grantSha256,descriptor,review,closureSha256,events}){
++ data({capture,grant,descriptor,review,events});
++ exact(descriptor,['decoder','producerSha256','grantPath','grantSha256','receiptSha256','legacySourceAttested']);
++ assertCaptureDecoder(descriptor,capture.case);const schema=SUPPORTED_CAPTURE_SCHEMAS[descriptor.decoder];
++ must(review.kind==='root-cpu-qualification-review-v2'&&review.approved===true&&review.fixtureEvidence===false&&review.templateOnly!==true,'ACTUAL_ROOT_REVIEW_REQUIRED');
++ assertStableConfiguration(review.bindings);assertKernelEnvironment(review.kernelEnvironment);must(uuid(review.owner));
++ must(sha(captureSha256)&&sha(grantSha256)&&descriptor.receiptSha256===captureSha256&&descriptor.grantSha256===grantSha256&&capture.grantSha256===grantSha256&&descriptor.producerSha256===schema.source&&descriptor.legacySourceAttested===schema.legacy&&typeof descriptor.grantPath==='string'&&descriptor.grantPath.startsWith('/'),'CAPTURE_PROVENANCE_MISMATCH');
++ must(capture.version===1&&capture.case===schema.case&&grant.case===schema.case&&grant.kind==='root-qualification-envelope-v1'&&grant.productionApproval===false&&grant.templateOnly!==true&&uuid(capture.runId)&&capture.runId===grant.runId,'CAPTURE_CASE_MISMATCH');
++ must(capture.successful===true&&capture.productionApproval===false&&['ownerExitJoined','ownerCloseJoined','stdoutJoined','stderrJoined'].every(k=>capture[k]===true)&&capture.exit?.code===0&&capture.exit.signal===null,'CAPTURE_ORIGINAL_JOINS_REQUIRED');
++ const b=capture.bindings;exact(b,descriptor.decoder==='model-r1'?[...common,'actualHostAvailableBytes','purpose']:[...common,'kernelBootId']);must(canonical(b)===canonical(grant.bindings)&&b.owner===review.owner,'CAPTURE_BINDINGS_MISMATCH');
++ for(const k of common.filter(k=>k!=='owner'))must(sha(b[k]));
++ const configuration={kind:'root-cpu-configuration-v1',...Object.fromEntries(digests.map(k=>[k,k==='dependencyClosureSha256'?b.installedClosureSha256:b[k]]))};
++ must(sha(closureSha256)&&configuration.dependencyClosureSha256===closureSha256&&canonical(configuration)===canonical(review.bindings),'CAPTURE_CONFIGURATION_CHANGED');
++ must(b.kernelSourceSha256==='1275dd230f10756d1f651e650f5b9f7195712ae836492bfe92c0cdf766f147d3','CAPTURE_KERNEL_SOURCE_CHANGED');
++ const owner=capture.kernelOwner,env=review.kernelEnvironment;
++ must(owner&&owner.runId===capture.runId&&owner.bootId===env.bootId&&owner.namespaceInode===env.namespaceInode&&owner.waited===true&&owner.populated===false&&owner.leafRemoved===true&&owner.stdoutEOF===true&&owner.stderrEOF===true&&owner.deadlineKilled===false,'CAPTURE_KERNEL_OR_JOINS_CHANGED');
++ for(const k of ['memoryPeakBytes','leaderMaxRssBytes','pidsPeak','childStartTicks','inode','device'])must(positive(owner[k]),'CAPTURE_MEASUREMENT_REQUIRED');
++ if(descriptor.decoder!=='model-r1')must(b.kernelBootId===owner.bootId,'CAPTURE_BOOT_BINDING_CHANGED');
++ exact(capture.hardLimits,['memoryBytes','pids','quotaUsec','periodUsec','timeoutMs']);must(canonical(capture.hardLimits)===canonical(grant.hardLimits),'CAPTURE_LIMITS_CHANGED');
++ const limits=capture.hardLimits;must(Object.values(limits).every(positive)&&positive(grant.hostReserveBytes)&&positive(grant.expiresAt));
++ const sourceLimits={memoryBytes:descriptor.decoder==='model-r1'?8589934592:1073741824,pids:64,quotaUsec:200000,periodUsec:100000,timeoutMs:descriptor.decoder==='model-r1'?600000:30000};
++ must(canonical(limits)===canonical(sourceLimits)&&grant.hostReserveBytes===3221225472&&grant.uid===1000&&grant.gid===1000,'CAPTURE_SOURCE_ENVELOPE_CHANGED');
++ must(owner.memoryMaxBytes===limits.memoryBytes&&owner.pidsMax===limits.pids&&owner.cpuQuotaUsec===limits.quotaUsec&&owner.cpuPeriodUsec===limits.periodUsec&&owner.memoryPeakBytes<=owner.memoryMaxBytes&&owner.pidsPeak<=owner.pidsMax,'CAPTURE_LIMIT_READBACK_CHANGED');
++ must(Array.isArray(capture.command)&&canonical(capture.command)===canonical(grant.command)&&Array.isArray(capture.inputFacts)&&Array.isArray(grant.readonlyInputs));
++ const childPath=capture.command[descriptor.decoder==='model-r1'?4:1];must(capture.command.length===(descriptor.decoder==='model-r1'?7:3)&&typeof childPath==='string');
++ function input(path,hash){const a=capture.inputFacts.filter(f=>f.path===path),g=grant.readonlyInputs.filter(f=>f.path===path);must(a.length===1&&g.length===1&&a[0].sha256===hash&&g[0].sha256===hash&&positive(a[0].bytes)&&typeof a[0].inode==='string'&&typeof a[0].device==='string','CAPTURE_ORIGINAL_INPUT_REQUIRED');}
++ input(childPath,schema.child);input(grant.kernelOwner,'036ffcc8dd2d8ca93e11854231d24dd66c92bd7426380057cd0d8ff59baddea8');
++ let operatorMeasurements=null,probeMeasurements=null;
++ if(descriptor.decoder==='model-r1'){
++  must(grant.producer===undefined&&b.purpose==='actual CPU model qualification only; no production approval or wire acceptance'&&positive(b.actualHostAvailableBytes)&&b.actualHostAvailableBytes>=limits.memoryBytes+grant.hostReserveBytes,'CAPTURE_MODEL_OBSERVATION_INVALID');operatorMeasurements={hostAvailableBytes:b.actualHostAvailableBytes,observedAt:null};
++ }else if(schema.legacy){must(grant.producer===undefined,'CAPTURE_PRODUCER_MISMATCH');}
++ else{
++  const p=grant.producer;exact(p,['schema','sourcePath','sourceSha256','childSha256','operatorMeasurements']);must(p.schema==='root-cpu-resource-probe-v2'&&p.sourceSha256===schema.source&&p.childSha256===schema.child&&typeof p.sourcePath==='string','CAPTURE_PRODUCER_MISMATCH');input(p.sourcePath,schema.source);
++  const m=p.operatorMeasurements;exact(m,['observedAt','hostAvailableBytes','hostReserveBytes']);must(positive(m.observedAt)&&positive(m.hostAvailableBytes)&&m.hostReserveBytes===grant.hostReserveBytes&&m.hostAvailableBytes>=limits.memoryBytes+m.hostReserveBytes,'CAPTURE_OPERATOR_MEASUREMENT_INVALID');
++  const completed=events.filter(e=>e.phase==='resource-probe-complete');must(completed.length===1,'CAPTURE_PROBE_EVENT_REQUIRED');const e=completed[0];
++  must(e.runId===capture.runId&&e.actualReadLinuxCpuCapacityUsed===true&&e.actualProtectedProfileHashProbeUsed===true&&e.profileDigest===b.profileDigest&&e.helperSha256===b.helperSha256&&e.witnessSha256===b.witnessSha256&&e.modelsImported===false&&e.productionWireValidated===false&&e.productionApproval===false&&String(e.capacityOriginal?.chain?.[0]?.inode)===String(owner.inode),'CAPTURE_PROBE_EVENT_CHANGED');
++  must(positive(e.hostAvailableBytes)&&positive(e.hostAvailableObservedAt)&&e.hostAvailableBytes>=limits.memoryBytes+m.hostReserveBytes&&e.hostAvailableObservedAt>=m.observedAt&&e.hostAvailableObservedAt-m.observedAt<=limits.timeoutMs&&e.hostAvailableObservedAt<grant.expiresAt,'CAPTURE_PROBE_MEASUREMENT_INVALID');
++  operatorMeasurements={...m};probeMeasurements={hostAvailableBytes:e.hostAvailableBytes,observedAt:e.hostAvailableObservedAt};
++ }
++ return Object.freeze({configuration:Object.freeze(configuration),kernelEnvironment:Object.freeze({...env}),decoder:descriptor.decoder,operatorMeasurements,probeMeasurements,legacySourceAttested:schema.legacy,rawCaptureSha256:captureSha256,rawGrantSha256:grantSha256,projectionSha256:createHash('sha256').update(canonical(configuration)).digest('hex')});
++}

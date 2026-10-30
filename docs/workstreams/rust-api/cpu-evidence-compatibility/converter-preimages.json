@@ -1,0 +1,22 @@
+{
+  "scope": "Owned source proposal only; unknown helper/witness/wire fail closed, no approval generated",
+  "patchSha256": "274ba2cbf283f5b8fa807a5a2fe146b764edff4e59026da7761ef98bbc516166",
+  "changes": [
+    {
+      "path": "docs/workstreams/voice/cpu-qualification/evidence-to-approval.mjs",
+      "expectedAbsent": false,
+      "preimageSha256": "148251806cf9333209822b17ddd93941b5f17d84d4c65622fa1fb9d62550a86f",
+      "proposedSha256": "f9b7227621ed19c8ee5232e34bd5e9bfbeaf8e41389b84177ede7cbee450d9cf"
+    },
+    {
+      "path": "docs/workstreams/voice/cpu-qualification/capture-projection.mjs",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "809da1ef013da05094eb24ffa01051d905cc61afbf16fed043d22dd423c59af1"
+    }
+  ],
+  "strictParser": {
+    "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+    "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8"
+  }
+}
