@@ -1,0 +1,268 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-vscode-removal-proposal",
+  "productBotName": "veyra-bot",
+  "rootHead": "116d27d1a2639a3b2604e733bce74b10e831cff3",
+  "scope": {
+    "actualWrites": "docs/workstreams/packaging/ plus existing coordination/packaging/status.json only",
+    "proposedCanonicalPaths": 20,
+    "proposedEditorSourceDeletions": 4,
+    "sharedSourceApplied": false,
+    "runtimeExecuted": false,
+    "buildExecuted": false,
+    "userDataDeleted": false,
+    "sourceSnapshotCopied": false
+  },
+  "ownership": {
+    "owner": "packaging worker 01a18935-1a8b-7eb3-a709-d874f70095e8",
+    "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "existing C-backed WSL Ubuntu ext4 VHDX; original approved root retained",
+    "generatedPaths": [
+      "docs/workstreams/packaging/vscode-removal-proposal.mjs",
+      "docs/workstreams/packaging/vscode-removal.test.mjs",
+      "docs/workstreams/packaging/vscode-removal-freeze.mjs",
+      "docs/workstreams/packaging/vscode-removal.patch",
+      "docs/workstreams/packaging/vscode-removal-receipt.json",
+      "docs/workstreams/packaging/vscode-removal.md"
+    ],
+    "protected": [
+      "All shared source and runtime data",
+      "Existing workspace/editor homes and vscode-data Docker volumes",
+      "Historical backups, DB migrations, restore journal/signature verification",
+      "Frozen original-candidate proposal1b3d255131e493d40ca060129fde16e4f5124797",
+      "Existing Native targets/Cargo homes/caches/failure evidence"
+    ],
+    "regeneration": "Set process TEMP/TMP/TMPDIR to existing coordination/packaging; NODE_COMPILE_CACHE empty; VEYRA_REMOVAL_ROOT and Windows-only VEYRA_REMOVAL_LINUX_ROOT name Root source; run Node vscode-removal-freeze.mjs; CPU tests Node --experimental-vm-modules --test ./vscode-removal.test.mjs from owned docs directory"
+  },
+  "files": [
+    {
+      "path": "Dockerfile",
+      "mode": "100644",
+      "beforeBytes": 32573,
+      "beforeSha256": "c19be5d1e15ef951218ac281ee4d1792e85d3ae13dfa19676c1bd78d3ee0c862",
+      "afterBytes": 27166,
+      "afterSha256": "b113a5b93fe6203e8ae7f02e170af1e8742605d225c1534827ece114e28b2e2e",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "config/vendor-security.json",
+      "mode": "100644",
+      "beforeBytes": 3815,
+      "beforeSha256": "c1761caf873561767a48103ee8d483fa1b9ced2b2c4b5e42eece356debd1a332",
+      "afterBytes": 503,
+      "afterSha256": "a5703a1d0d3df0127dff8a20bb7abe6beaf457e77c82703f7f343da40b5aefb3",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/install-vendor-security.mjs",
+      "mode": "100644",
+      "beforeBytes": 2943,
+      "beforeSha256": "ffaa9d440f46142b2719a570375c472129842e9f6bbc418a56801a77911845f5",
+      "afterBytes": 2838,
+      "afterSha256": "6cca36b82a9ab3e5b4cfa5e22a7aecf7aef13389e755c4be2e75c52c269090be",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "supervisord.conf",
+      "mode": "100644",
+      "beforeBytes": 5905,
+      "beforeSha256": "0245eacc09a1cb10f7c615543ae56b23b382b1a8893f38719a8340956782bb3a",
+      "afterBytes": 5513,
+      "afterSha256": "641e2c85e1b5fb9a2e552f354144c194bede8d4d26dbffec8bfb6027db10fd45",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "runtime-supervisord.conf",
+      "mode": "100644",
+      "beforeBytes": 1012,
+      "beforeSha256": "b38c61ea34538a0e75a77bdbbd3b937a220c647f4bc00574251005d6817e3b49",
+      "afterBytes": 707,
+      "afterSha256": "13353a46841632d16fbc3b811345ae339a29ede81311f61368f3919b3a54b21d",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/runtime-entrypoint.sh",
+      "mode": "100755",
+      "beforeBytes": 4909,
+      "beforeSha256": "b1f815cc70bf60f75e2a42849ff2d47daa45d2cf956ae01401463c6124668fa1",
+      "afterBytes": 4796,
+      "afterSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/runtime-healthcheck.sh",
+      "mode": "100755",
+      "beforeBytes": 1106,
+      "beforeSha256": "be1b4793fa857fc468445c505df53a3d2ddfb292cbba254f1a742841fd25cf7e",
+      "afterBytes": 1023,
+      "afterSha256": "27883ede905b742bb6089390b811f1537240e61c099b57cd45852d79512a9f9e",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/docker-entrypoint.sh",
+      "mode": "100755",
+      "beforeBytes": 46115,
+      "beforeSha256": "a8b45c54d63339b066699994094d9f976ec8f4ec2c1a54b852f991bd8887020b",
+      "afterBytes": 42273,
+      "afterSha256": "5370a807e56ff50273859867e0059e5ca6f218ea725e061342e173e956928be2",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/validate-process-isolation.sh",
+      "mode": "100644",
+      "beforeBytes": 4969,
+      "beforeSha256": "0b261c63eccffaa8980e65178a9d553d5bb87a05abb1bbc6298fd85f46e44adb",
+      "afterBytes": 4873,
+      "afterSha256": "333fe1aece779bd2c842c9c6a999f44792c15aaede2f53a94790edc93a2049a4",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "docker-compose.yml",
+      "mode": "100644",
+      "beforeBytes": 15675,
+      "beforeSha256": "1e22b40b9d523b3ab2ed54c52d030b58190fbe62ff69d38b146de5417438df6a",
+      "afterBytes": 15442,
+      "afterSha256": "704059dfef52cbb3c7367372409622a0a0b4db5699501de19daa39e2098d7e2b",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "nginx/gateway.conf",
+      "mode": "100644",
+      "beforeBytes": 8923,
+      "beforeSha256": "23f3733f482edb9d0ba4962500753103e331daf3adbda30ed749250ee6725ed6",
+      "afterBytes": 7899,
+      "afterSha256": "4d5c95f47bfa3d9c536c367b3f1e19f846ec8a7f59f4e45157094aec0264e623",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "nginx/runtime-aliases-compatibility.conf",
+      "mode": "100644",
+      "beforeBytes": 2176,
+      "beforeSha256": "b227e7af6015a09f66905d5bea0ebc2ddfe30fd4f0594c3c01084397070e7c92",
+      "afterBytes": 1824,
+      "afterSha256": "d7d87eaed6a8ea12f5a4994087b5ddfe173ee6c66710d0c326c2c6a738d39ec8",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/healthcheck.sh",
+      "mode": "100644",
+      "beforeBytes": 7336,
+      "beforeSha256": "c436320b1e274e6af881f975a26008d1053e058ca4383f04fd8fb23447978e0f",
+      "afterBytes": 7019,
+      "afterSha256": "1223cf98d5ca5f7f7353d5667576976aba40c6d39f7042afe3b6b9efcc17ee03",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "mode": "100644",
+      "beforeBytes": 53808,
+      "beforeSha256": "2cc428bf53db3cf613f13364855094622c485b98f652618155cdd975efe5fa59",
+      "afterBytes": 53788,
+      "afterSha256": "28df5a632f7f6ca366fdaf37278a9e0e1fee75d1706683926ea2f17764088dcd",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/start-vscode.sh",
+      "mode": "100644",
+      "beforeBytes": 3863,
+      "beforeSha256": "8352bf0265450b197d1d01bd0a5d0ae2cf9cffb15c90ea2356d736064efaf14c",
+      "afterBytes": null,
+      "afterSha256": null,
+      "action": "proposed-source-delete"
+    },
+    {
+      "path": "scripts/validate-vscode-theme-manifest.mjs",
+      "mode": "100644",
+      "beforeBytes": 2216,
+      "beforeSha256": "d73afd06be2423b61161f74e558982a59e0ad162c86fe06b1db8ea5442dc3350",
+      "afterBytes": null,
+      "afterSha256": null,
+      "action": "proposed-source-delete"
+    },
+    {
+      "path": "config/vscode-extensions/ingenium.system-theme-defaults/package.json",
+      "mode": "100644",
+      "beforeBytes": 354,
+      "beforeSha256": "e2b5596cd34d738080d58ee0e6594e2afa15587dd73611ef295e9aa22f74eba5",
+      "afterBytes": null,
+      "afterSha256": null,
+      "action": "proposed-source-delete"
+    },
+    {
+      "path": "nginx/proxy-vscode.conf",
+      "mode": "100644",
+      "beforeBytes": 1859,
+      "beforeSha256": "7c02a23555dbb696ccc1b9e641222775b060bd130560e35d76662af0ee93d017",
+      "afterBytes": null,
+      "afterSha256": null,
+      "action": "proposed-source-delete"
+    },
+    {
+      "path": "scripts/validate-gateway-config.sh",
+      "mode": "100644",
+      "beforeBytes": 16930,
+      "beforeSha256": "33a6cca3bbb31fb1d5d58255009725dd9ae53e0f5d998d16517f3fd884f8c41f",
+      "afterBytes": 14004,
+      "afterSha256": "2d45187def5eca5052b84e68b638f4cf8d2f3edb93a1e48a8d976f5d25c4ab59",
+      "action": "proposed-source-edit"
+    },
+    {
+      "path": "scripts/validate-deployment-config.sh",
+      "mode": "100755",
+      "beforeBytes": 47842,
+      "beforeSha256": "fd9fda3358ec86a7c832592209c58eacff6869c88288166e23f32a5ee339d24e",
+      "afterBytes": 40661,
+      "afterSha256": "67293f5e64081c885df34b46f5c01b8717dec00491dc2371546d96e0b0b01c42",
+      "action": "proposed-source-edit"
+    }
+  ],
+  "patch": {
+    "bytes": 75362,
+    "sha256": "8c2140dcda5ad01d87ca313efa8d928d8f8ae9024ecf25eaf37e3a844aa58ce6"
+  },
+  "retainedVendorOverlay": [
+    {
+      "name": "undici",
+      "from": "6.29.0",
+      "version": "6.29.1",
+      "target": "/usr/local/lib/node_modules/npm/node_modules/undici",
+      "url": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
+      "integrity": "sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA=="
+    }
+  ],
+  "qualification": {
+    "windowsNode": "24.18.0",
+    "wslNode": "22.23.1",
+    "windowsSourceChecks": {
+      "passed": 12,
+      "failed": 0
+    },
+    "wslSourceChecks": {
+      "passed": 12,
+      "failed": 0
+    },
+    "shellParseOnly": true,
+    "actualStaticValidatorRun": false,
+    "packageOrHelmRender": false,
+    "installedFilesystemOrProcessCheck": false,
+    "liveHTTPOrWebSocketCheck": false,
+    "liveWorkWebCLITerminalGitRestore": false
+  },
+  "remaining": [
+    "Root apply/review packaging delta and run original complete validators after integration",
+    "Root Core/API/gateway/compatibility/Cloudflare audience removal must deny new and historical vscode tickets/sessions, HTTP and upgrades",
+    "Root UI/navigation/iframe/CSP/standalone/Work service targets remove editor launch surfaces",
+    "External charts/ingenium in private jtmb/branconet-charts needs source and rendered Service/Ingress/mount/process audit; no chart checkout inspected",
+    "Actual build/npm-overlay resolution and all image targets must contain/start no bundled VS Code/code-server",
+    "Preserve and verify historical backup/restore; explicit retained legacy data has no live consumer and remains user-protected",
+    "Real Work/Web/CLI/terminal/Git/restore + editor denial acceptance; all preexisting candidate and independent approval gates remain open"
+  ],
+  "cleanup": {
+    "newDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retainedReason": "Six minimal source proposal/test/patch/receipt/guide artifacts for Root integration; one existing status updated in place",
+    "windowsFreeSpaceRecoveryClaimed": false,
+    "linuxFilesystemRecoveryClaimed": false
+  }
+}

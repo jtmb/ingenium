@@ -1,0 +1,1269 @@
+diff --git a/Dockerfile b/Dockerfile
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -90,45 +90,12 @@
+     install -o root -g root -m 0555 /tmp/cloudflared /usr/local/bin/cloudflared && \
+     cloudflared --version | grep -F "cloudflared version ${CLOUDFLARED_VERSION}" && \
+     rm /tmp/cloudflared
+-RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/releases/download/v4.143.1/code-server-4.143.1-linux-amd64.tar.gz" && \
+-    echo "614877cf71005f14ea252bd2d9b1c12237cf7d73681ef150f0dff7f13849fdb5  /tmp/code-server.tar.gz" | sha256sum -c - && \
+-    mkdir -p /usr/local/lib/code-server && \
+-    tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1 && \
+-    ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server && \
+-    code-server --version | grep -Eq '^4\.143\.1([[:space:]]|$)' && \
+-    rm /tmp/code-server.tar.gz
+ # Upstream vendor bundles can lag compatible security patches. Verify expected old
+ # identities, registry integrity and all resolved dependency ranges before overlaying.
+ COPY --from=vendor-security /vendor-security/ /tmp/ingenium-vendor-security/
+ COPY --chown=root:root --chmod=0444 scripts/install-vendor-security.mjs /tmp/install-vendor-security.mjs
+ RUN node /tmp/install-vendor-security.mjs /tmp/ingenium-vendor-security && \
+     rm -rf /tmp/ingenium-vendor-security /tmp/install-vendor-security.mjs
+-COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
+-COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs
+-RUN set -eu; \
+-    builtin_manifest="/usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json"; \
+-    builtin_dir="$(dirname "$builtin_manifest")"; \
+-    test -d "/usr/local/lib/code-server/lib/vscode/extensions"; \
+-    test -d "$builtin_dir"; \
+-    chmod 0755 "$builtin_dir"; \
+-    chmod 0444 "$builtin_manifest"; \
+-    test "$(stat -c '%U:%G:%a' "$builtin_manifest")" = "root:root:444"; \
+-    node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest" "$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')"; \
+-    rm /tmp/validate-vscode-theme-manifest.mjs
+-RUN set -eu; \
+-    extension_file="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"; \
+-    install -d -o root -g root -m 0755 /usr/local/share/ingenium/vscode-extensions; \
+-    curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/sst-dev.opencode-0.0.13.vsix "https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix"; \
+-    echo "e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4  /tmp/sst-dev.opencode-0.0.13.vsix" | sha256sum -c -; \
+-    install -o root -g root -m 0444 /tmp/sst-dev.opencode-0.0.13.vsix "$extension_file"; \
+-    rm /tmp/sst-dev.opencode-0.0.13.vsix; \
+-    extension_temp_dir="$(mktemp -d)"; \
+-    code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --install-extension "$extension_file" --force; \
+-    extension_list="$(code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --list-extensions --show-versions)"; \
+-    test "$extension_list" = "sst-dev.opencode@0.0.13"; \
+-    EXTENSION_MANIFEST="$extension_temp_dir/extensions/sst-dev.opencode-0.0.13/package.json" CODE_SERVER_VSCODE_VERSION="$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')" node -e 'const fs=require("fs"); const manifest=JSON.parse(fs.readFileSync(process.env.EXTENSION_MANIFEST,"utf8")); const version=(value)=>{const match=/^(\d+)\.(\d+)\.(\d+)$/.exec(value ?? ""); return match ? match.slice(1).map(Number) : null;}; const compare=(left,right)=>left[0]-right[0] || left[1]-right[1] || left[2]-right[2]; const satisfies=(range,actual)=>range.split("||").some((clause)=>clause.trim().split(/\s+/).every((token)=>{if (token==="*" || token==="x") return true; const match=/(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/.exec(token); if (!match) return false; const [,operator="",major,minor="0",patch="0"]=match; const minimum=[Number(major),Number(minor === "x" || minor === "*" ? 0 : minor),Number(patch === "x" || patch === "*" ? 0 : patch)]; const result=compare(actual,minimum); if (minor === "x" || minor === "*") return actual[0]===minimum[0]; if (patch === "x" || patch === "*") return actual[0]===minimum[0] && actual[1]===minimum[1]; if (operator==="^") return result>=0 && (minimum[0] > 0 ? actual[0]===minimum[0] : minimum[1] > 0 ? actual[0]===0 && actual[1]===minimum[1] : actual[0]===0 && actual[1]===0 && actual[2]===minimum[2]); if (operator==="~") return result>=0 && actual[0]===minimum[0] && actual[1]===minimum[1]; return ({">":result>0,">=":result>=0,"<":result<0,"<=":result<=0,"=":result===0,"":result===0})[operator];})); const runtime=version(process.env.CODE_SERVER_VSCODE_VERSION); if (manifest.publisher!=="sst-dev" || manifest.name!=="opencode" || manifest.version!=="0.0.13" || typeof manifest.engines?.vscode!=="string" || !runtime || !satisfies(manifest.engines.vscode,runtime)) throw new Error("baked VSIX manifest identity or VS Code engine compatibility check failed");'; \
+-    rm -rf "$extension_temp_dir"; \
+-    test "$(stat -c '%U:%G:%a' "$extension_file")" = "root:root:444"
+ RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64" && \
+     echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /tmp/ttyd.x86_64" | sha256sum -c - && \
+     mv /tmp/ttyd.x86_64 /usr/local/bin/ttyd && \
+@@ -145,7 +112,6 @@
+     groupadd --system --gid 1104 ingenium-gateway && useradd --system --uid 1104 --gid 1104 --home-dir /home/ingenium-gateway --shell /usr/sbin/nologin ingenium-gateway && \
+     groupadd --system --gid 1105 ingenium-opencode && useradd --system --uid 1105 --gid 1105 --groups ingenium-opencode-config,ingenium-opencode-restore --home-dir /home/ingenium-opencode --shell /usr/sbin/nologin ingenium-opencode && \
+     groupadd --system --gid 1106 ingenium-ttyd && useradd --system --uid 1106 --gid 1106 --home-dir /home/ingenium-ttyd --shell /usr/sbin/nologin ingenium-ttyd && \
+-    groupadd --system --gid 1107 ingenium-vscode && useradd --system --uid 1107 --gid 1107 --home-dir /home/ingenium-vscode --shell /usr/sbin/nologin ingenium-vscode && \
+     groupadd --system --gid 1108 ingenium-restore && useradd --system --uid 1108 --gid 1108 --groups ingenium-api,ingenium-restore-data,ingenium-opencode-restore --home-dir /home/ingenium-restore --shell /usr/sbin/nologin ingenium-restore && \
+     groupadd --system --gid 1109 ingenium-runtime-manager && useradd --system --uid 1109 --gid 1109 --home-dir /home/ingenium-runtime-manager --shell /usr/sbin/nologin ingenium-runtime-manager && \
+     groupadd --system --gid 1110 ingenium-runtime-gateway && useradd --system --uid 1110 --gid 1110 --home-dir /home/ingenium-runtime-gateway --shell /usr/sbin/nologin ingenium-runtime-gateway && \
+@@ -167,15 +133,13 @@
+     install -d -o ingenium-gateway -g ingenium-gateway -m 0700 /home/ingenium-gateway && \
+     install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /home/ingenium-opencode && \
+     install -d -o ingenium-ttyd -g ingenium-ttyd -m 0700 /home/ingenium-ttyd && \
+-    install -d -o ingenium-vscode -g ingenium-vscode -m 0700 /home/ingenium-vscode && \
+     install -d -o ingenium-restore -g ingenium-restore -m 0700 /home/ingenium-restore && \
+     install -d -o ingenium-runtime-manager -g ingenium-runtime-manager -m 0700 /home/ingenium-runtime-manager && \
+     install -d -o ingenium-runtime-gateway -g ingenium-runtime-gateway -m 0700 /home/ingenium-runtime-gateway && \
+     install -d -o ingenium-cloudflare -g ingenium-cloudflare -m 0700 /run/ingenium-secrets/cloudflare && \
+     install -d -o root -g root -m 0755 /usr/local/libexec && \
+     install -o root -g ingenium-restore -m 0750 /usr/local/bin/node /usr/local/libexec/ingenium-restore-node && \
+-    setcap cap_chown,cap_fowner=ep /usr/local/libexec/ingenium-restore-node && \
+-    runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
++    setcap cap_chown,cap_fowner=ep /usr/local/libexec/ingenium-restore-node
+
+ WORKDIR /app
+
+@@ -238,7 +202,7 @@
+ COPY --chown=root:root --chmod=0555 scripts/docker-entrypoint.sh ./entrypoint.sh
+ # `/dev/shm` is a container-runtime tmpfs. Do not create this VAULT-101 root at
+ # build time: the entrypoint provisions and validates it on every container start.
+-COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-cloudflare-tunnel.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
++COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-cloudflare-tunnel.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
+ COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
+ COPY --chown=root:root --chmod=0555 scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
+ COPY --chown=root:root --chmod=0444 scripts/provision-opencode-mcp-credential.mjs ./scripts/
+@@ -246,7 +210,7 @@
+ COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
+ # Nginx resolves includes from `/app/nginx` during build validation and runtime
+ # startup, so copy its primary configuration and declared include set together.
+-COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
++COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
+ # Validate the rendered Nginx configuration as its production user. Runtime
+ # startup recreates these ephemeral directories before Nginx starts.
+ RUN install -d -o ingenium-gateway -g ingenium-gateway -m 0700 \
+@@ -302,11 +266,7 @@
+ # OpenCode persists configuration and state under its dedicated home directory.
+ RUN mkdir -p /home/ingenium-opencode/.config/opencode /home/ingenium-opencode/.local/share/opencode/log && \
+     chown -R ingenium-opencode:ingenium-opencode /home/ingenium-opencode
+-# Docker initializes an empty named volume from this appuser-owned path. Keep
+-# code-server state separate from OpenCode state so user data/extensions persist
+-# without sharing an application data directory.
+-RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/vscode-data/extensions && \
+-    chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
++# The bundled editor was retired; preserve legacy data outside the new package.
+ # Compose overlays `/app/opencode.json` with repository configuration. Keep the
+ # generated image fallback under `/app/config` when that mount hides the root copy.
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":[".opencode/skills"],"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/usr/local/share/veyra/computer-use-plugin","/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail","/app/packages/ingenium-extension/plugins/v2/goal"]}' > /app/config/opencode.container.json && \
+diff --git a/config/vendor-security.json b/config/vendor-security.json
+--- a/config/vendor-security.json
++++ b/config/vendor-security.json
+@@ -1,86 +1,14 @@
+ {
+   "schemaVersion": 1,
+-  "description": "Exact compatible vendor security overlays; preserves original major APIs and application locks. Revisit/remove as upstream code-server/npm incorporates these versions.",
++  "description": "Exact compatible npm security overlay; preserves original major APIs and application locks.",
+   "packages": [
+     {
+-      "name": "shell-quote",
+-      "from": "1.10.0",
+-      "version": "1.11.0",
+-      "target": "/usr/local/lib/code-server/lib/vscode/node_modules/shell-quote",
+-      "url": "https://registry.npmjs.org/shell-quote/-/shell-quote-1.11.0.tgz",
+-      "integrity": "sha512-JdxDPD0DBTyu08pq0kPC0xSNet/qsU07qT6IsX1AS8oO2ICNRY4ldNa8OAI6PuwAH8tG3lxEhbqmyp4Dw4036g=="
+-    },
+-    {
+-      "name": "follow-redirects",
+-      "from": "1.16.0",
+-      "version": "1.16.1",
+-      "target": "/usr/local/lib/code-server/node_modules/follow-redirects",
+-      "url": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.1.tgz",
+-      "integrity": "sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg=="
+-    },
+-    {
+       "name": "undici",
+       "from": "6.29.0",
+       "version": "6.29.1",
+       "target": "/usr/local/lib/node_modules/npm/node_modules/undici",
+       "url": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
+       "integrity": "sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA=="
+-    },
+-    {
+-      "name": "undici",
+-      "from": "7.29.1",
+-      "version": "7.30.1",
+-      "target": "/usr/local/lib/code-server/lib/vscode/node_modules/undici",
+-      "url": "https://registry.npmjs.org/undici/-/undici-7.30.1.tgz",
+-      "integrity": "sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg=="
+-    },
+-    {
+-      "name": "body-parser",
+-      "from": "2.3.0",
+-      "version": "2.4.0",
+-      "target": "/usr/local/lib/code-server/node_modules/body-parser",
+-      "url": "https://registry.npmjs.org/body-parser/-/body-parser-2.4.0.tgz",
+-      "integrity": "sha512-Ifk1KcLrxaGt1occQagQNFNNOqRt1LFuehEnHHzB8Z6cRgIxRU1TBaiIsUiCdA+gy5PL7Y1IX31DNKkRmxtXjQ=="
+-    },
+-    {
+-      "name": "qs",
+-      "from": "6.16.0",
+-      "version": "6.16.1",
+-      "target": "/usr/local/lib/code-server/node_modules/qs",
+-      "url": "https://registry.npmjs.org/qs/-/qs-6.16.1.tgz",
+-      "integrity": "sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg=="
+-    },
+-    {
+-      "name": "iconv-lite",
+-      "from": "0.7.2",
+-      "version": "0.7.3",
+-      "target": "/usr/local/lib/code-server/node_modules/iconv-lite",
+-      "url": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.3.tgz",
+-      "integrity": "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ=="
+-    },
+-    {
+-      "name": "content-type",
+-      "from": "2.0.0",
+-      "version": "2.1.0",
+-      "target": "/usr/local/lib/code-server/node_modules/body-parser/node_modules/content-type",
+-      "url": "https://registry.npmjs.org/content-type/-/content-type-2.1.0.tgz",
+-      "integrity": "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=="
+-    },
+-    {
+-      "name": "zod",
+-      "from": "4.3.6",
+-      "version": "4.6.6",
+-      "target": "/usr/local/lib/code-server/lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod",
+-      "url": "https://registry.npmjs.org/zod/-/zod-4.6.6.tgz",
+-      "integrity": "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA=="
+-    },
+-    {
+-      "name": "zod",
+-      "from": "4.4.3",
+-      "version": "4.6.6",
+-      "target": "/usr/local/lib/code-server/lib/vscode/node_modules/zod",
+-      "url": "https://registry.npmjs.org/zod/-/zod-4.6.6.tgz",
+-      "integrity": "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA=="
+     }
+   ]
+ }
+diff --git a/scripts/install-vendor-security.mjs b/scripts/install-vendor-security.mjs
+--- a/scripts/install-vendor-security.mjs
++++ b/scripts/install-vendor-security.mjs
+@@ -6,8 +6,8 @@
+ const staging = process.argv[2];
+ if (!staging || process.getuid() !== 0) throw new Error('Build-only root staging required');
+ const manifest = JSON.parse(fs.readFileSync(path.join(staging, 'manifest.json'), 'utf8'));
+-const roots = ['/usr/local/lib/code-server/node_modules/', '/usr/local/lib/code-server/lib/vscode/node_modules/', '/usr/local/lib/node_modules/npm/node_modules/'];
+-const semver = createRequire('/usr/local/lib/code-server/package.json')('semver');
++const roots = ['/usr/local/lib/node_modules/npm/node_modules/'];
++const semver = createRequire('/usr/local/lib/node_modules/npm/package.json')('semver');
+ const seen = new Set();
+ for (const [index, item] of manifest.packages.entries()) {
+   const target = path.resolve(item.target);
+@@ -18,7 +18,7 @@
+   const replacement = JSON.parse(fs.readFileSync(path.join(staging, String(index), 'package/package.json'), 'utf8'));
+   if (original.name !== item.name || original.version !== item.from || replacement.name !== item.name || replacement.version !== item.version || semver.major(item.from) !== semver.major(item.version)) throw new Error(`Unexpected vendor identity or major API change at ${target}`);
+ }
+-// Validate every old identity first: body-parser contains the nested content-type target.
++// Validate every original identity before changing the image-only npm overlay.
+ for (const [index, item] of manifest.packages.entries()) {
+   if (fs.existsSync(item.target)) fs.rmSync(item.target, {recursive: true});
+   fs.mkdirSync(path.dirname(item.target), {recursive: true});
+diff --git a/supervisord.conf b/supervisord.conf
+--- a/supervisord.conf
++++ b/supervisord.conf
+@@ -207,19 +207,3 @@
+ stderr_logfile=/run/ingenium-supervisor/ttyd-opencode.stderr.log
+ stderr_logfile_maxbytes=0
+
+-[program:vscode]
+-user=ingenium-vscode
+-command=/app/scripts/start-vscode.sh
+-directory=/workspace
+-autorestart=unexpected
+-startsecs=5
+-startretries=5
+-stopsignal=TERM
+-stopasgroup=true
+-killasgroup=true
+-stopwaitsecs=30
+-priority=35
+-stdout_logfile=/run/ingenium-supervisor/vscode.stdout.log
+-stdout_logfile_maxbytes=0
+-stderr_logfile=/run/ingenium-supervisor/vscode.stderr.log
+-stderr_logfile_maxbytes=0
+diff --git a/runtime-supervisord.conf b/runtime-supervisord.conf
+--- a/runtime-supervisord.conf
++++ b/runtime-supervisord.conf
+@@ -35,18 +35,3 @@
+ stderr_logfile=/dev/fd/2
+ stderr_logfile_maxbytes=0
+
+-[program:vscode]
+-command=/app/scripts/start-vscode.sh
+-directory=/workspace
+-autorestart=unexpected
+-startsecs=5
+-startretries=5
+-stopsignal=TERM
+-stopasgroup=true
+-killasgroup=true
+-stopwaitsecs=30
+-priority=15
+-stdout_logfile=/dev/fd/1
+-stdout_logfile_maxbytes=0
+-stderr_logfile=/dev/fd/2
+-stderr_logfile_maxbytes=0
+diff --git a/scripts/runtime-entrypoint.sh b/scripts/runtime-entrypoint.sh
+--- a/scripts/runtime-entrypoint.sh
++++ b/scripts/runtime-entrypoint.sh
+@@ -71,10 +71,8 @@
+   "/home/appuser/.config/opencode/runtime/agents" \
+   "/home/appuser/.config/opencode/runtime" \
+   "/home/appuser/.local/share/opencode/log" \
+-  "/home/appuser/.local/state" \
+-  "/home/appuser/vscode-data/user-data" \
+-  "/home/appuser/vscode-data/extensions"
+-chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state" "/home/appuser/vscode-data"
++  "/home/appuser/.local/state"
++chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state"
+ chmod 0700 "/home/appuser/.config/opencode/runtime"
+
+ /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents
+diff --git a/scripts/runtime-healthcheck.sh b/scripts/runtime-healthcheck.sh
+--- a/scripts/runtime-healthcheck.sh
++++ b/scripts/runtime-healthcheck.sh
+@@ -18,4 +18,3 @@
+ opencode_auth | curl --fail --silent --max-time 3 --config - --output /dev/null http://127.0.0.1:4098/api/provider
+ opencode_auth | curl --fail --silent --max-time 3 --config - --output /dev/null http://127.0.0.1:4098/api/mcp
+ curl --fail --silent --max-time 3 --output /dev/null --header "X-Ingenium-Authenticated-User: runtime" http://127.0.0.1:4099/
+-curl --fail --silent --max-time 3 --output /dev/null http://127.0.0.1:4100/healthz
+diff --git a/scripts/docker-entrypoint.sh b/scripts/docker-entrypoint.sh
+--- a/scripts/docker-entrypoint.sh
++++ b/scripts/docker-entrypoint.sh
+@@ -230,101 +230,7 @@
+ NODE
+ }
+
+-remove_verified_stale_socket() {
+-  node - "$@" <<'NODE'
+-const fs = require("node:fs");
+-const net = require("node:net");
+-const path = require("node:path");
+-
+-const [target, uidText, gidText] = process.argv.slice(2);
+-const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+-const uid = Number.parseInt(uidText, 10);
+-const gid = Number.parseInt(gidText, 10);
+-
+-function fail() {
+-  process.stderr.write(`ERROR: stale runtime socket validation failed: ${target}\n`);
+-  process.exit(1);
+-}
+-
+-function sameObject(left, right) {
+-  return left.dev === right.dev && left.ino === right.ino;
+-}
+-
+-function openDirectory(parentDescriptor, name) {
+-  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
+-  const metadata = fs.lstatSync(childPath);
+-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) fail();
+-  const descriptor = fs.openSync(childPath, directoryFlags);
+-  if (!sameObject(metadata, fs.fstatSync(descriptor))) fail();
+-  return descriptor;
+-}
+-
+-function acceptsConnections(socketPath) {
+-  return new Promise((resolve, reject) => {
+-    const socket = net.createConnection({ path: socketPath });
+-    const timer = setTimeout(() => {
+-      socket.destroy();
+-      reject(new Error("socket connection timed out"));
+-    }, 500);
+-    socket.once("connect", () => {
+-      clearTimeout(timer);
+-      socket.destroy();
+-      resolve(true);
+-    });
+-    socket.once("error", (error) => {
+-      clearTimeout(timer);
+-      socket.destroy();
+-      if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve(false);
+-      else reject(error);
+-    });
+-  });
+-}
+-
+-function hasKernelOwner(socketPath) {
+-  const entries = fs.readFileSync("/proc/net/unix", "utf8").split("\n");
+-  return entries.some((entry) => {
+-    const fields = entry.trim().split(/\s+/);
+-    return fields.length >= 8 && fields.slice(7).join(" ") === socketPath;
+-  });
+-}
+-
+-async function main() {
+-  if (process.platform !== "linux" || !fs.constants.O_NOFOLLOW || !fs.constants.O_DIRECTORY
+-    || !path.isAbsolute(target) || path.resolve(target) !== target || path.basename(target) !== "code-server-ipc.sock"
+-    || !Number.isInteger(uid) || !Number.isInteger(gid)) fail();
+-
+-  const components = target.split("/").filter(Boolean);
+-  const finalName = components.pop();
+-  let parent = fs.openSync("/", directoryFlags);
+-  try {
+-    for (const component of components) {
+-      const child = openDirectory(parent, component);
+-      fs.closeSync(parent);
+-      parent = child;
+-    }
+-
+-    const childPath = `/proc/self/fd/${parent}/${finalName}`;
+-    let metadata;
+-    try {
+-      metadata = fs.lstatSync(childPath);
+-    } catch (error) {
+-      if (error.code === "ENOENT") return;
+-      throw error;
+-    }
+-    if (metadata.isSymbolicLink() || !metadata.isSocket() || metadata.uid !== uid || metadata.gid !== gid) fail();
+-    if (await acceptsConnections(target) || hasKernelOwner(target)) fail();
+-
+-    const current = fs.lstatSync(childPath);
+-    if (!sameObject(metadata, current) || !current.isSocket() || current.uid !== uid || current.gid !== gid) fail();
+-    fs.unlinkSync(childPath);
+-  } finally {
+-    fs.closeSync(parent);
+-  }
+-}
+-
+-main().catch(fail);
+-NODE
+-}
++# The bundled editor was retired; preserve legacy data outside the new package.
+
+ DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}"
+ case "$DEPLOYMENT_MODE" in
+@@ -372,11 +278,9 @@
+ RESTORE_GID="$(cat /usr/local/share/ingenium/restore-gid)"
+ RESTORE_DATA_GID="$(cat /usr/local/share/ingenium/restore-data-gid)"
+ OPENCODE_CONFIG_GID="$(getent group ingenium-opencode-config | cut -d: -f3)"
+-VSCODE_UID="$(id -u ingenium-vscode)"
+-VSCODE_GID="$(id -g ingenium-vscode)"
+ TTYD_UID="$(id -u ingenium-ttyd)"
+ TTYD_GID="$(id -g ingenium-ttyd)"
+-for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$VSCODE_UID:$VSCODE_GID" "$TTYD_UID:$TTYD_GID"; do
++for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$TTYD_UID:$TTYD_GID"; do
+   case "$identity" in *[!0-9:]*|:*|*:) echo "ERROR: immutable service identity is invalid"; exit 1 ;; esac
+ done
+
+@@ -716,11 +620,6 @@
+ setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share
+ setfacl -R -m u:ingenium-api:r-X,u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
+ setfacl -m d:u:ingenium-api:r-X,d:u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
+-secure_persistent_path directory /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700
+-secure_persistent_path directory /home/ingenium-vscode/vscode-data/user-data "$VSCODE_UID" "$VSCODE_GID" 0700
+-remove_verified_stale_socket /home/ingenium-vscode/vscode-data/user-data/code-server-ipc.sock "$VSCODE_UID" "$VSCODE_GID"
+-secure_persistent_path directory /home/ingenium-vscode/vscode-data/extensions "$VSCODE_UID" "$VSCODE_GID" 0700
+-secure_persistent_path tree /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700 user-only
+
+ # Compatibility mode retains the historical single-user OpenCode/VS Code state.
+ if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
+@@ -741,9 +640,9 @@
+   exit 1
+ fi
+ # Only search access belongs on the repositories root; never inherit grants into siblings.
+-setfacl -m 'u:ingenium-opencode:--x,u:ingenium-ttyd:--x,u:ingenium-vscode:--x' /workspace
++setfacl -m 'u:ingenium-opencode:--x,u:ingenium-ttyd:--x' /workspace
+ root_acls=$(getfacl -cp /workspace)
+-for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
++for identity in ingenium-opencode ingenium-ttyd; do
+   if printf '%s\n' "$root_acls" | grep -q "^default:user:$identity:"; then
+     setfacl -x "d:u:$identity" /workspace
+   fi
+@@ -756,10 +655,10 @@
+     -o -path "$workspace_root/.opencode/.ingenium-learning-credential" \
+     -o -path "$workspace_root/.opencode/.ingenium-repository-sync-credential" \) -prune -o \
+   \( -type d -exec setfacl -P \
+-    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' \
+-    -m 'd:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX' {} + \) -o \
++    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX' \
++    -m 'd:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX' {} + \) -o \
+   \( -type f -exec setfacl -P \
+-    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' {} + \)
++    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX' {} + \)
+ # Collaboration ACLs must not expose private runtime state or scoped credentials.
+ # The recursive ACL grant also changes existing owner-only env file masks.
+ if [ -e "$workspace_root/.env" ]; then
+diff --git a/scripts/validate-process-isolation.sh b/scripts/validate-process-isolation.sh
+--- a/scripts/validate-process-isolation.sh
++++ b/scripts/validate-process-isolation.sh
+@@ -6,7 +6,7 @@
+   exit 1
+ }
+
+-users="ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-runtime-manager ingenium-runtime-gateway ingenium-cloudflare appuser"
++users="ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-restore ingenium-runtime-manager ingenium-runtime-gateway ingenium-cloudflare appuser"
+ uids=""
+ for user in $users; do
+   uid="$(id -u "$user")"
+@@ -61,19 +61,19 @@
+
+ for file in "$api_dir"/*; do
+   can_read ingenium-api "$file" || fail
+-  for user in ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
++  for user in ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-restore ingenium-cloudflare appuser; do
+     ! can_read "$user" "$file" || fail
+   done
+ done
+ for file in "$dashboard_dir"/*; do
+   can_read ingenium-dashboard "$file" || fail
+-  for user in ingenium-api ingenium-boundary ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
++  for user in ingenium-api ingenium-boundary ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-restore ingenium-cloudflare appuser; do
+     ! can_read "$user" "$file" || fail
+   done
+ done
+ for file in "$opencode_dir"/*; do
+   can_read ingenium-opencode "$file" || fail
+-  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
++  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-ttyd ingenium-restore ingenium-cloudflare appuser; do
+     ! can_read "$user" "$file" || fail
+   done
+ done
+@@ -88,7 +88,7 @@
+ done
+ for file in "$restore_dir"/*; do
+   can_read ingenium-restore "$file" || fail
+-  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-cloudflare appuser; do
++  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-cloudflare appuser; do
+     ! can_read "$user" "$file" || fail
+   done
+ done
+@@ -96,7 +96,7 @@
+   [ -e "$file" ] || break
+   [ -f "$file" ] && [ ! -L "$file" ] && [ "$(stat -c '%a' "$file")" = 600 ] || fail
+   can_read ingenium-cloudflare "$file" || fail
+-  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore appuser; do
++  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-restore appuser; do
+     ! can_read "$user" "$file" || fail
+   done
+ done
+diff --git a/docker-compose.yml b/docker-compose.yml
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -62,9 +62,6 @@
+       - ingenium-data:/app/.ingenium
+       - opencode-config:/home/ingenium-opencode/.config
+       - opencode-data:/home/ingenium-opencode/.local
+-      # code-server is an administrator-grade, auth-none local profile with a
+-      # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
+-      - vscode-data:/home/ingenium-vscode/vscode-data
+       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+       - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
+       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
+@@ -285,7 +282,6 @@
+   ingenium-data:
+   opencode-config:
+   opencode-data:
+-  vscode-data:
+
+ networks:
+   runtime-control:
+diff --git a/nginx/gateway.conf b/nginx/gateway.conf
+--- a/nginx/gateway.conf
++++ b/nginx/gateway.conf
+@@ -28,7 +28,7 @@
+     access_log off;
+
+     # Keep each gateway surface in its own bucket: dashboard traffic must not
+-    # consume OpenCode or VS Code capacity. Assets and upgrades use an empty key
++    # consume OpenCode capacity. Assets and upgrades use an empty key
+     # so they do not compete with dynamic requests.
+     map $http_upgrade $opencode_upgrade_rate_limit_key {
+         default $binary_remote_addr;
+@@ -40,18 +40,6 @@
+         ~^/(?:assets/|_next/|@vite/|node_modules/\.vite/) "";
+     }
+
+-    # Keep code-server's workbench load and WebSocket upgrade budget independent
+-    # from OpenCode and dashboard traffic.
+-    map $http_upgrade $vscode_upgrade_rate_limit_key {
+-        default $binary_remote_addr;
+-        ~.+     "";
+-    }
+-
+-    map $uri $vscode_request_limit_key {
+-        default $vscode_upgrade_rate_limit_key;
+-        ~^/(?:_static/|static/|stable/) "";
+-    }
+-
+     # The generated positive policy rejects raw/normalized path disagreement,
+     # including encoded separators and dot-segment normalization. Express reads
+     # the same canonical JSON and remains the authoritative classifier.
+@@ -67,19 +55,6 @@
+         safe "";
+     }
+
+-    # Only WebSocket upgrade requests need an Origin gate. Normal workbench
+-    # documents and assets can legitimately omit Origin and pass unchanged.
+-    map $http_upgrade $vscode_upgrade_request {
+-        default 1;
+-        ""      0;
+-    }
+-
+-    map "$vscode_upgrade_request:$http_origin" $vscode_reject_upgrade {
+-        default                              1;
+-        ~^0:                                 0;
+-        "1:http://vscode.localhost:3000"    0;
+-    }
+-
+     # CSP cannot express an IPv6 literal frame ancestor. Canonicalize direct
+     # IPv6 loopback dashboard navigation to localhost before the iframe loads;
+     # localhost can still resolve to ::1 while retaining a valid CSP origin.
+@@ -109,7 +84,6 @@
+     limit_req_zone $dashboard_api_read_limit_key zone=dashboard_api_read:10m rate=60r/s;
+     limit_req_zone $dashboard_api_strict_limit_key zone=dashboard_api_strict:10m rate=30r/s;
+     limit_req_zone $opencode_request_limit_key zone=opencode_request:10m rate=30r/s;
+-    limit_req_zone $vscode_request_limit_key zone=vscode_request:10m rate=30r/s;
+     limit_req_status 429;
+     limit_conn_zone $binary_remote_addr zone=gateway_conn:10m;
+     limit_conn_status 429;
+@@ -141,11 +115,6 @@
+         keepalive 16;
+     }
+
+-    upstream vscode {
+-        server 127.0.0.1:4100;
+-        keepalive 16;
+-    }
+-
+     # Windows-to-WSL forwarding can preserve a host name other than localhost.
+     # Make the default virtual host the local dashboard gateway instead of
+     # closing the connection before the browser can use same-origin API
+diff --git a/nginx/runtime-aliases-compatibility.conf b/nginx/runtime-aliases-compatibility.conf
+--- a/nginx/runtime-aliases-compatibility.conf
++++ b/nginx/runtime-aliases-compatibility.conf
+@@ -58,18 +58,5 @@
+     listen 3000;
+     listen [::]:3000;
+     server_name vscode.localhost;
+-
+-    location / {
+-        if ($vscode_reject_upgrade) {
+-            return 403;
+-        }
+-
+-        limit_req zone=vscode_request burst=60 nodelay;
+-        limit_conn gateway_conn 16;
+-        proxy_pass http://vscode;
+-        include /app/nginx/proxy-common.conf;
+-        include /app/nginx/proxy-vscode.conf;
+-        proxy_set_header Host "vscode.localhost:3000";
+-        proxy_set_header Origin $http_origin;
+-    }
++    include /app/nginx/runtime-alias-unavailable-location.conf;
+ }
+diff --git a/scripts/healthcheck.sh b/scripts/healthcheck.sh
+--- a/scripts/healthcheck.sh
++++ b/scripts/healthcheck.sh
+@@ -1,6 +1,6 @@
+ #!/bin/sh
+ # Composite container health: every supervised process, the private dashboard
+-# and OpenCode/code-server listeners, and ttyd through its only supported health identity.
++# and OpenCode listeners, and ttyd through its only supported health identity.
+ set -eu
+
+ # Docker health commands can inherit the image's original environment even
+@@ -101,16 +101,6 @@
+   fi
+ }
+
+-require_vscode_gateway_csp() {
+-  expected_csp="Content-Security-Policy: frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000"
+-  headers="$(curl --fail --silent --show-error --max-time 5 --dump-header - --output /dev/null --header "Host: vscode.localhost" "http://127.0.0.1:3000/?folder=/workspace")"
+-
+-  if ! printf '%s\n' "$headers" | tr -d '\r' | grep -F -q "$expected_csp"; then
+-    echo "ERROR: VS Code gateway health check is missing the exact worker-safe frame policy"
+-    exit 1
+-  fi
+-}
+-
+ require_cli_root_ok() {
+   actual="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: cli.localhost" --header "X-Ingenium-Authenticated-User: attacker-controlled" http://127.0.0.1:3000/ || true)"
+   if [ "$actual" != "200" ]; then
+@@ -145,7 +135,7 @@
+
+ programs="restore-handoff ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
+ if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
+-  programs="$programs opencode-web opencode-internal-proxy ttyd-opencode vscode"
++  programs="$programs opencode-web opencode-internal-proxy ttyd-opencode"
+ fi
+ for program in $programs; do
+   require_running "$program"
+@@ -164,13 +154,14 @@
+   require_authenticated_http_ok "OpenCode internal proxy" "http://127.0.0.1:4101/api/info" "/run/ingenium-secrets/opencode/opencode-server-password"
+   require_gateway_status "OpenCode internal proxy Basic boundary" "localhost" "/api/info" "401" "4101"
+
+-  require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
+   require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
+-  require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"
+-  require_gateway_status "VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"
+-  require_vscode_gateway_csp
+   require_ttyd_gateway_health
+   require_cli_root_ok
+ else
+   require_production_aliases_unavailable
+ fi
++
++# Retired editor host refuses both HTTP and upgrades in either deployment profile.
++require_gateway_status "Retired editor" "vscode.localhost" "/" "404"
++retired_upgrade="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: vscode.localhost" --header "Connection: Upgrade" --header "Upgrade: websocket" http://127.0.0.1:3000/ || true)"
++[ "$retired_upgrade" = "404" ] || { echo "ERROR: retired editor host forwarded an upgrade"; exit 1; }
+diff --git a/services/ingenium-api/scripts/restore-maintenance.ts b/services/ingenium-api/scripts/restore-maintenance.ts
+--- a/services/ingenium-api/scripts/restore-maintenance.ts
++++ b/services/ingenium-api/scripts/restore-maintenance.ts
+@@ -56,10 +56,10 @@
+ const CONTROL_PLANE_MODE = process.env.INGENIUM_DEPLOYMENT_MODE === "control-plane";
+ const USER_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
+   ? ["ingenium-api"]
+-  : ["ttyd-opencode", "vscode", "opencode-web", "ingenium-api"];
++  : ["ttyd-opencode", "opencode-web", "ingenium-api"];
+ const RESTART_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
+   ? ["ingenium-api"]
+-  : ["ingenium-api", "opencode-web", "ttyd-opencode", "vscode"];
++  : ["ingenium-api", "opencode-web", "ttyd-opencode"];
+
+ type Phase = "claimed" | "quiescing" | "snapshotting" | "swapping" | "buffers_written" | "ingenium_rollback" | "ingenium_installed"
+   | "opencode_rollback" | "opencode_installed" | "pair_committed" | "rehydrated" | "restarting" | "completed"
+diff --git a/scripts/start-vscode.sh b/scripts/start-vscode.sh
+deleted file mode 100644
+--- a/scripts/start-vscode.sh
++++ /dev/null
+@@ -1,115 +0,0 @@
+-#!/bin/sh
+-# Compatibility uses its dedicated identity; isolated user runtimes retain their
+-# container-wide appuser identity and private tmpfs home.
+-# This auth-none, full-terminal administrator-grade profile is unsupported for LAN, remote, shared, or untrusted users.
+-set -eu
+-
+-# Re-exec before any filesystem or
+-# code-server operation so inherited deployment secrets never reach code-server.
+-if [ "${1:-}" != "--clean-env" ]; then
+-  if [ "$#" -ne 0 ]; then
+-    echo "ERROR: start-vscode does not accept arguments"
+-    exit 1
+-  fi
+-  deployment_mode="${INGENIUM_DEPLOYMENT_MODE:?INGENIUM_DEPLOYMENT_MODE is required}"
+-  if [ "$deployment_mode" = "user-runtime" ]; then
+-    service_home="/home/appuser"
+-  else
+-    service_home="/home/ingenium-vscode"
+-  fi
+-  exec env -i \
+-    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+-    HOME="$service_home" \
+-    XDG_CONFIG_HOME="$service_home/.config" \
+-    XDG_DATA_HOME="$service_home/.local/share" \
+-    INGENIUM_DEPLOYMENT_MODE="$deployment_mode" \
+-    INGENIUM_RUNTIME_BIND_HOST="${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}" \
+-    /bin/sh "$0" --clean-env
+-fi
+-
+-case "$INGENIUM_DEPLOYMENT_MODE:$(id -un)" in
+-  user-runtime:appuser) VSCODE_DATA_DIR="/home/appuser/vscode-data" ;;
+-  compatibility:ingenium-vscode) VSCODE_DATA_DIR="/home/ingenium-vscode/vscode-data" ;;
+-  *) echo "ERROR: code-server process identity is invalid"; exit 1 ;;
+-esac
+-VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"
+-VSCODE_EXTENSION_ID="sst-dev.opencode@0.0.13"
+-VSCODE_EXTENSION_SHA256="e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"
+-
+-for directory in "${VSCODE_DATA_DIR}/user-data" "${VSCODE_DATA_DIR}/extensions"; do
+-  if [ ! -d "$directory" ] || [ -L "$directory" ]; then
+-    echo "ERROR: code-server data directories must be initialized by the vscode-data volume"
+-    exit 1
+-  fi
+-done
+-
+-if [ ! -f "$VSCODE_EXTENSION_FILE" ] || [ -L "$VSCODE_EXTENSION_FILE" ]; then
+-  echo "ERROR: baked code-server extension artifact is unavailable"
+-  exit 1
+-fi
+-artifact_sum="$(sha256sum "$VSCODE_EXTENSION_FILE")" || {
+-  echo "ERROR: baked code-server extension artifact cannot be verified"
+-  exit 1
+-}
+-case "$artifact_sum" in
+-  "$VSCODE_EXTENSION_SHA256"\ *) ;;
+-  *)
+-    echo "ERROR: baked code-server extension artifact hash is invalid"
+-    exit 1
+-    ;;
+-esac
+-
+-code_server() {
+-  /usr/local/bin/code-server \
+-    --user-data-dir "${VSCODE_DATA_DIR}/user-data" \
+-    --extensions-dir "${VSCODE_DATA_DIR}/extensions" \
+-    "$@"
+-}
+-
+-list_extensions() {
+-  extension_list="$(code_server --list-extensions --show-versions)" || {
+-    echo "ERROR: code-server extension list failed"
+-    exit 1
+-  }
+-  printf '%s\n' "$extension_list"
+-}
+-
+-has_expected_extension() {
+-  found=0
+-  while IFS= read -r extension || [ -n "$extension" ]; do
+-    normalized_extension="$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+-    case "$normalized_extension" in
+-      sst-dev.opencode@*)
+-        if [ "$extension" != "$VSCODE_EXTENSION_ID" ]; then
+-          return 1
+-        fi
+-        found=$((found + 1))
+-        ;;
+-    esac
+-  done <<EOF
+-$1
+-EOF
+-  [ "$found" -eq 1 ]
+-}
+-
+-extension_list="$(list_extensions)"
+-if ! has_expected_extension "$extension_list"; then
+-  if ! code_server --install-extension "$VSCODE_EXTENSION_FILE" --force; then
+-    echo "ERROR: baked code-server extension installation failed"
+-    exit 1
+-  fi
+-  extension_list="$(list_extensions)"
+-fi
+-if ! has_expected_extension "$extension_list"; then
+-  echo "ERROR: baked code-server extension identity is invalid"
+-  exit 1
+-fi
+-
+-exec /usr/local/bin/code-server \
+-  --bind-addr "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}:4100" \
+-  --auth none \
+-  --disable-telemetry \
+-  --disable-update-check \
+-  --user-data-dir "${VSCODE_DATA_DIR}/user-data" \
+-  --extensions-dir "${VSCODE_DATA_DIR}/extensions" \
+-  /workspace
+diff --git a/scripts/validate-vscode-theme-manifest.mjs b/scripts/validate-vscode-theme-manifest.mjs
+deleted file mode 100644
+--- a/scripts/validate-vscode-theme-manifest.mjs
++++ /dev/null
+@@ -1,66 +0,0 @@
+-import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+-import { basename, dirname, isAbsolute, normalize } from "node:path";
+-import { isDeepStrictEqual } from "node:util";
+-
+-const [manifestPath, runtimeVersion] = process.argv.slice(2);
+-
+-if (
+-  !manifestPath ||
+-  !runtimeVersion ||
+-  !isAbsolute(manifestPath) ||
+-  normalize(manifestPath) !== manifestPath ||
+-  basename(manifestPath) !== "package.json"
+-) {
+-  throw new Error("invalid built-in VS Code theme manifest path or runtime version");
+-}
+-
+-const manifestDirectory = dirname(manifestPath);
+-const directoryStat = lstatSync(manifestDirectory);
+-const manifestStat = lstatSync(manifestPath);
+-if (
+-  !directoryStat.isDirectory() ||
+-  directoryStat.isSymbolicLink() ||
+-  realpathSync(manifestDirectory) !== manifestDirectory ||
+-  !manifestStat.isFile() ||
+-  manifestStat.isSymbolicLink() ||
+-  !isDeepStrictEqual(readdirSync(manifestDirectory).sort(), ["package.json"])
+-) {
+-  throw new Error("unsafe built-in VS Code theme manifest location");
+-}
+-
+-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+-const runtime = /^(\d+)\.(\d+)\.(\d+)$/.exec(runtimeVersion);
+-const engine = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(manifest.engines?.vscode ?? "");
+-const defaults = {
+-  "window.autoDetectColorScheme": true,
+-  "workbench.preferredDarkColorTheme": "Dark Modern",
+-  "workbench.preferredLightColorTheme": "Light Modern",
+-};
+-const forbidden = [
+-  "main",
+-  "browser",
+-  "activationEvents",
+-  "scripts",
+-  "dependencies",
+-  "devDependencies",
+-  "permissions",
+-];
+-const atLeast = (actual, minimum) =>
+-  actual[0] > minimum[0] ||
+-  (actual[0] === minimum[0] &&
+-    (actual[1] > minimum[1] ||
+-      (actual[1] === minimum[1] && actual[2] >= minimum[2])));
+-
+-if (
+-  manifest.name !== "system-theme-defaults" ||
+-  manifest.publisher !== "ingenium" ||
+-  manifest.version !== "1.0.0" ||
+-  !runtime ||
+-  !engine ||
+-  Number(runtime[1]) !== Number(engine[1]) ||
+-  !atLeast(runtime.slice(1).map(Number), engine.slice(1).map(Number)) ||
+-  !isDeepStrictEqual(manifest.contributes?.configurationDefaults, defaults) ||
+-  forbidden.some((key) => Object.hasOwn(manifest, key))
+-) {
+-  throw new Error("built-in VS Code theme defaults manifest validation failed");
+-}
+diff --git a/config/vscode-extensions/ingenium.system-theme-defaults/package.json b/config/vscode-extensions/ingenium.system-theme-defaults/package.json
+deleted file mode 100644
+--- a/config/vscode-extensions/ingenium.system-theme-defaults/package.json
++++ /dev/null
+@@ -1,15 +0,0 @@
+-{
+-  "name": "system-theme-defaults",
+-  "publisher": "ingenium",
+-  "version": "1.0.0",
+-  "engines": {
+-    "vscode": "^1.131.0"
+-  },
+-  "contributes": {
+-    "configurationDefaults": {
+-      "window.autoDetectColorScheme": true,
+-      "workbench.preferredDarkColorTheme": "Dark Modern",
+-      "workbench.preferredLightColorTheme": "Light Modern"
+-    }
+-  }
+-}
+diff --git a/nginx/proxy-vscode.conf b/nginx/proxy-vscode.conf
+deleted file mode 100644
+--- a/nginx/proxy-vscode.conf
++++ /dev/null
+@@ -1,39 +0,0 @@
+-# code-server is reachable only through http://vscode.localhost:3000/. Clear
+-# browser-controlled credentials, forwarding, identity, and rewrite headers; the
+-# gateway never injects an Ingenium API bearer token into this administrator-grade
+-# terminal service. The gateway validates WebSocket Origin before this include
+-# forwards the caller-provided value to the loopback upstream.
+-proxy_set_header Authorization "";
+-proxy_set_header Proxy-Authorization "";
+-proxy_set_header X-Ingenium-Authenticated-User "";
+-proxy_set_header X-Client-Identity "";
+-proxy_set_header X-Authenticated-User "";
+-proxy_set_header X-Auth-Request-User "";
+-proxy_set_header X-User "";
+-proxy_set_header X-Forwarded-For "";
+-proxy_set_header X-Forwarded-Host "";
+-proxy_set_header X-Forwarded-Proto "";
+-proxy_set_header X-Forwarded-Port "";
+-proxy_set_header X-Forwarded-Server "";
+-proxy_set_header X-Forwarded-Scheme "";
+-proxy_set_header X-Forwarded-Ssl "";
+-proxy_set_header X-Forwarded-Uri "";
+-proxy_set_header X-Forwarded-Path "";
+-proxy_set_header X-Forwarded-Prefix "";
+-proxy_set_header X-Forwarded-User "";
+-proxy_set_header X-Forwarded-Email "";
+-proxy_set_header X-Forwarded-Preferred-Username "";
+-proxy_set_header X-Forwarded-Client-Cert "";
+-proxy_set_header X-Real-IP "";
+-proxy_set_header X-Remote-User "";
+-proxy_set_header Forwarded "";
+-proxy_set_header X-Original-URL "";
+-proxy_set_header X-Rewrite-URL "";
+-
+-# code-server emits a nonce-bearing workbench CSP that must stay intact. Nginx
+-# sends this second policy only to constrain embedding; X-Frame-Options cannot
+-# express the trusted dashboard origins and would otherwise conflict. 'self'
+-# permits code-server's same-origin worker-host iframe without admitting other
+-# parents.
+-proxy_hide_header X-Frame-Options;
+-add_header Content-Security-Policy "frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000" always;
+diff --git a/scripts/validate-gateway-config.sh b/scripts/validate-gateway-config.sh
+--- a/scripts/validate-gateway-config.sh
++++ b/scripts/validate-gateway-config.sh
+@@ -8,7 +8,6 @@
+ opencode_proxy_path="${config_dir}/proxy-opencode.conf"
+ dashboard_proxy_path="${config_dir}/proxy-dashboard.conf"
+ oauth_callback_proxy_path="${config_dir}/proxy-oauth-callback.conf"
+-vscode_proxy_path="${config_dir}/proxy-vscode.conf"
+ compatibility_aliases_path="${config_dir}/runtime-aliases-compatibility.conf"
+ production_aliases_path="${config_dir}/runtime-aliases-production.conf"
+ unavailable_alias_path="${config_dir}/runtime-alias-unavailable-location.conf"
+@@ -53,10 +52,6 @@
+   echo "ERROR: OAuth callback proxy hardening configuration was not found: $oauth_callback_proxy_path"
+   exit 1
+ fi
+-if [ ! -f "$vscode_proxy_path" ]; then
+-  echo "ERROR: VS Code proxy hardening configuration was not found: $vscode_proxy_path"
+-  exit 1
+-fi
+ for path in "$dashboard_safe_read_map_path" "$dashboard_safe_read_generator" "$dashboard_safe_read_policy"; do
+   if [ ! -f "$path" ]; then
+     echo "ERROR: Dashboard safe-read policy artifact was not found: $path"
+@@ -80,15 +75,12 @@
+ require_literal "$config_path" "limit_req_zone \$dashboard_api_read_limit_key zone=dashboard_api_read:10m rate=60r/s;"
+ require_literal "$config_path" "limit_req_zone \$dashboard_api_strict_limit_key zone=dashboard_api_strict:10m rate=30r/s;"
+ require_literal "$config_path" "limit_req_zone \$opencode_request_limit_key zone=opencode_request:10m rate=30r/s;"
+-require_literal "$config_path" "limit_req_zone \$vscode_request_limit_key zone=vscode_request:10m rate=30r/s;"
+ require_literal "$config_path" "limit_conn_zone \$binary_remote_addr zone=gateway_conn:10m;"
+ require_literal "$config_path" "limit_conn gateway_conn 16;"
+ # Dynamic OpenCode requests use the client bucket; static assets and upgrade
+ # handshakes use an empty key so loading the UI does not exhaust that budget.
+ require_literal "$config_path" "map \$http_upgrade \$opencode_upgrade_rate_limit_key {"
+ require_literal "$config_path" "map \$uri \$opencode_request_limit_key {"
+-require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_rate_limit_key {"
+-require_literal "$config_path" "map \$uri \$vscode_request_limit_key {"
+ require_literal "$config_path" "include /app/nginx/dashboard-safe-reads-map.conf;"
+ require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_read_limit_key {"
+ require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_strict_limit_key {"
+@@ -96,11 +88,6 @@
+ require_literal "$dashboard_safe_read_map_path" "map \"\$request_method|\$uri|\$dashboard_api_raw_path\" \$dashboard_api_limit_class {"
+ require_literal "$dashboard_safe_read_map_path" "default strict;"
+ reject_literal "$dashboard_safe_read_map_path" "GET|HEAD"
+-require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_request {"
+-require_literal "$config_path" "map \"\$vscode_upgrade_request:\$http_origin\" \$vscode_reject_upgrade {"
+-require_literal "$config_path" "default                              1;"
+-require_literal "$config_path" "~^0:"
+-require_literal "$config_path" "\"1:http://vscode.localhost:3000\""
+ require_literal "$config_path" "~^/(?:assets/|_next/|@vite/|node_modules/\\.vite/) \"\";"
+ require_literal "$config_path" "map \$host \$dashboard_ipv6_loopback {"
+ require_literal "$config_path" "\"::1\" 1;"
+@@ -113,7 +100,6 @@
+ require_literal "$config_path" "limit_req zone=dashboard_api_read burst=360 nodelay;"
+ require_literal "$config_path" "limit_req zone=dashboard_api_strict burst=60 nodelay;"
+ require_literal "$compatibility_aliases_path" "limit_req zone=opencode_request burst=60 nodelay;"
+-require_literal "$compatibility_aliases_path" "limit_req zone=vscode_request burst=60 nodelay;"
+ require_literal "$config_path" "location ^~ /_next/static/ {"
+ require_literal "$config_path" "location ^~ /api/v1/ {"
+ reject_literal "$config_path" "location ^~ /_next/ {"
+@@ -153,29 +139,11 @@
+ require_literal "$config_path" "location @dashboard_rate_limited {"
+ require_literal "$config_path" "add_header Retry-After \"1\" always;"
+ require_literal "$config_path" "return 429 '{\"error\":{\"code\":\"RATE_LIMITED\""
+-require_literal "$config_path" "upstream vscode {"
+-require_literal "$config_path" "server 127.0.0.1:4100;"
+ require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
+-require_literal "$compatibility_aliases_path" "proxy_pass http://vscode;"
+-require_literal "$compatibility_aliases_path" "include /app/nginx/proxy-vscode.conf;"
+-require_literal "$compatibility_aliases_path" "if (\$vscode_reject_upgrade) {"
+-require_literal "$compatibility_aliases_path" "proxy_set_header Host \"vscode.localhost:3000\";"
+ require_literal "$compatibility_aliases_path" "proxy_set_header Origin \$http_origin;"
+-require_literal "$config_path" "~^/(?:_static/|static/|stable/) \"\";"
+ reject_literal "$config_path" "3002"
+ reject_literal "$config_path" "proxy_set_header Origin \"http://vscode.localhost:3000\";"
+
+-# Keep the VS Code root on the same dual-stack listener pair as OpenCode. The
+-# bounded context is intentional: these two listen directives immediately
+-# precede the exact server name in the virtual-host declaration.
+-vscode_listener_block="$(grep -B 2 -F 'server_name vscode.localhost;' "$compatibility_aliases_path")"
+-case "$vscode_listener_block" in
+-  *"listen 3000;"*"listen [::]:3000;"*) ;;
+-  *)
+-    echo "ERROR: VS Code gateway must use the shared dual-stack port 3000 listener"
+-    exit 1
+-    ;;
+-esac
+ require_literal "$opencode_proxy_path" "proxy_set_header Authorization \"\";"
+ require_literal "$opencode_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
+ require_literal "$opencode_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
+@@ -188,21 +156,6 @@
+ require_literal "$opencode_proxy_path" "proxy_hide_header X-Frame-Options;"
+ require_literal "$opencode_proxy_path" "add_header Content-Security-Policy \"frame-ancestors http://localhost:3000 http://127.0.0.1:3000\" always;"
+ reject_literal "$opencode_proxy_path" "frame-ancestors http://localhost:3000 http://127.0.0.1:3000 http://[::1]:3000"
+-require_literal "$vscode_proxy_path" "proxy_set_header Authorization \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-For \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-Proto \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-Prefix \"\";"
+-require_literal "$vscode_proxy_path" "proxy_set_header Forwarded \"\";"
+-reject_literal "$vscode_proxy_path" "proxy_set_header Host"
+-reject_literal "$vscode_proxy_path" "proxy_hide_header Content-Security-Policy;"
+-require_literal "$vscode_proxy_path" "proxy_hide_header X-Frame-Options;"
+-require_literal "$vscode_proxy_path" "add_header Content-Security-Policy \"frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000\" always;"
+-reject_literal "$vscode_proxy_path" "frame-ancestors *"
+-reject_literal "$vscode_proxy_path" "http://[::1]:3000"
+-reject_literal "$vscode_proxy_path" "http://192.168."
+-reject_literal "$vscode_proxy_path" "Bearer "
+ require_literal "$dashboard_proxy_path" "proxy_set_header Authorization \"\";"
+ require_literal "$dashboard_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
+ require_literal "$dashboard_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
+@@ -278,11 +231,11 @@
+   esac
+ done
+
+-vscode_servers="$(grep -F -c 'server_name vscode.localhost;' "$compatibility_aliases_path")"
+-if [ "$vscode_servers" -ne 1 ]; then
+-  echo "ERROR: gateway must expose exactly one VS Code root host"
+-  exit 1
+-fi
++reject_literal "$compatibility_aliases_path" "proxy_pass http://vscode;"
++require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
++require_literal "$compatibility_aliases_path" "include /app/nginx/runtime-alias-unavailable-location.conf;"
++reject_literal "$config_path" "server 127.0.0.1:4100;"
++reject_literal "$config_path" "upstream vscode {"
+
+ require_literal "$production_aliases_path" "server_name opencode.localhost cli.localhost vscode.localhost;"
+ production_unavailable_includes="$(grep -F -c 'include /app/nginx/runtime-alias-unavailable-location.conf;' "$production_aliases_path")"
+diff --git a/scripts/validate-deployment-config.sh b/scripts/validate-deployment-config.sh
+--- a/scripts/validate-deployment-config.sh
++++ b/scripts/validate-deployment-config.sh
+@@ -16,12 +16,8 @@
+ opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
+ root_opencode_config="${repo_root}/opencode.json"
+ runtime_entrypoint="${repo_root}/scripts/runtime-entrypoint.sh"
+-vscode_runner="${repo_root}/scripts/start-vscode.sh"
+-vscode_theme_manifest="${repo_root}/config/vscode-extensions/ingenium.system-theme-defaults/package.json"
+-vscode_theme_validator="${repo_root}/scripts/validate-vscode-theme-manifest.mjs"
+ plugin_closure_validator="${repo_root}/packages/ingenium-extension/scripts/plugin-source-closure.mjs"
+ plugin_load_smoke="${repo_root}/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs"
+-vscode_proxy="${repo_root}/nginx/proxy-vscode.conf"
+ vault_secret_root_validator="${repo_root}/scripts/validate-vault-job-secret-root.sh"
+ runtime_gateway="${repo_root}/services/ingenium-api/scripts/runtime-gateway.ts"
+ protected_token_reader="${repo_root}/scripts/read-protected-api-token.mjs"
+@@ -83,7 +79,7 @@
+   fi
+ }
+
+-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_theme_validator" "$plugin_closure_validator" "$plugin_load_smoke" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator" "$cloudflare_runner"; do
++for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$plugin_closure_validator" "$plugin_load_smoke" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator" "$cloudflare_runner"; do
+   require_file "$path"
+ done
+
+@@ -124,38 +120,9 @@
+ require_literal "$dockerfile" 'ln -s "$browser_path" /opt/ingenium-playwright/chromium'
+ reject_literal "$dockerfile" '"mcp":{"playwright"'
+ reject_literal "$dockerfile" '"command":["npx","-y","@playwright/mcp'
+-require_literal "$dockerfile" "https://github.com/coder/code-server/releases/download/v4.143.1/code-server-4.143.1-linux-amd64.tar.gz"
+-require_literal "$dockerfile" "614877cf71005f14ea252bd2d9b1c12237cf7d73681ef150f0dff7f13849fdb5"
+-require_literal "$dockerfile" "tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1"
+-require_literal "$dockerfile" "code-server --version | grep -Eq"
+-require_literal "$dockerfile" "https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix"
+-require_literal "$dockerfile" "e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"
+-require_literal "$dockerfile" "curl --proto '=https' --tlsv1.2 -fsSL"
+-require_literal "$dockerfile" "/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"
+-require_literal "$dockerfile" "install -o root -g root -m 0444"
+-require_literal "$dockerfile" 'code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --install-extension "$extension_file" --force'
+-require_literal "$dockerfile" 'code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --list-extensions --show-versions'
+-require_literal "$dockerfile" 'test "$extension_list" = "sst-dev.opencode@0.0.13"'
+-require_literal "$dockerfile" 'manifest.publisher!=="sst-dev"'
+-require_literal "$dockerfile" 'manifest.name!=="opencode"'
+-require_literal "$dockerfile" 'manifest.version!=="0.0.13"'
+-require_literal "$dockerfile" 'manifest.engines?.vscode'
+-require_literal "$dockerfile" 'rm -rf "$extension_temp_dir"'
+-require_literal "$dockerfile" 'test "$(stat -c '\''%U:%G:%a'\'' "$extension_file")" = "root:root:444"'
+-reject_literal "$dockerfile" "sst-dev/opencode/latest"
+-require_literal "$dockerfile" "scripts/start-vscode.sh"
+-require_literal "$dockerfile" "COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json"
+-require_literal "$dockerfile" 'builtin_manifest="/usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json"'
+-require_literal "$dockerfile" 'builtin_dir="$(dirname "$builtin_manifest")"'
+-require_literal "$dockerfile" 'test -d "/usr/local/lib/code-server/lib/vscode/extensions"'
+-require_literal "$dockerfile" 'chmod 0755 "$builtin_dir"'
+-require_literal "$dockerfile" 'chmod 0444 "$builtin_manifest"'
+-require_literal "$dockerfile" 'runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json'
+-require_literal "$dockerfile" 'scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs'
+-require_literal "$dockerfile" 'node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest"'
+-require_literal "$dockerfile" 'rm /tmp/validate-vscode-theme-manifest.mjs'
+-reject_literal "$dockerfile" "ensure-vscode-settings"
+-require_literal "$dockerfile" "nginx/proxy-vscode.conf"
++reject_literal "$dockerfile" "code-server"
++reject_literal "$dockerfile" "vscode"
++reject_literal "$dockerfile" "open-vsx.org"
+ require_literal "$dockerfile" "scripts/generate-dashboard-safe-read-policy.mjs"
+ require_literal "$dockerfile" "nginx/dashboard-safe-reads-map.conf"
+ require_literal "$dockerfile" "services/ingenium-api/config/dashboard-safe-reads.json ./services/ingenium-api/dist/config/dashboard-safe-reads.json"
+@@ -207,7 +174,6 @@
+ reject_literal "$compose_file" "127.0.0.1:1457:"
+ callback_mapping_count="$(grep -F -c '127.0.0.1:1455:1456' "$compose_file")"
+ [ "$callback_mapping_count" -eq 2 ] || { echo "ERROR: both Compose gateway services must map host callback 1455 to container 1456"; exit 1; }
+-require_literal "$compose_file" "vscode-data:/home/ingenium-vscode/vscode-data"
+ reject_pattern "$compose_file" '(^|[^0-9])4100:4100([^0-9]|$)'
+ reject_literal "$compose_file" "INGENIUM_API_TOKEN=\${INGENIUM_API_TOKEN:-}"
+ require_literal "$compose_file" "INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token"
+@@ -326,7 +292,7 @@
+ reject_literal "$env_example" "INGENIUM_GATEWAY_PASSWORD"
+ reject_literal "$env_example" "INGENIUM_GATEWAY_BCRYPT_COST"
+
+-for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh run-restore-handoff.sh run-restore-maintenance.sh recover-restore-maintenance.sh run-init-project.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
++for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh run-restore-handoff.sh run-restore-maintenance.sh recover-restore-maintenance.sh run-init-project.sh start-opencode-web.sh start-ttyd.sh; do
+   require_file "${repo_root}/scripts/${script}"
+   require_literal "${repo_root}/scripts/${script}" "exec env -i"
+ done
+@@ -371,8 +337,6 @@
+ require_literal "$supervisor_config" "command=/app/scripts/run-gateway.sh"
+ require_literal "$supervisor_config" "command=/app/scripts/start-opencode-web.sh"
+ require_literal "$supervisor_config" "command=/app/scripts/start-ttyd.sh"
+-require_literal "$supervisor_config" "[program:vscode]"
+-require_literal "$supervisor_config" "command=/app/scripts/start-vscode.sh"
+ require_literal "$supervisor_config" "[program:restore-maintenance]"
+ require_literal "$supervisor_config" "command=/app/scripts/run-restore-maintenance.sh"
+ require_literal "$supervisor_config" "command=/app/scripts/run-restore-handoff.sh"
+@@ -463,51 +427,6 @@
+ require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'
+ require_literal "${repo_root}/scripts/start-opencode-web.sh" 'opencode serve --port 4098 --hostname 127.0.0.1'
+ reject_literal "${repo_root}/scripts/start-opencode-web.sh" 'opencode web'
+-require_literal "$vscode_runner" 'compatibility:ingenium-vscode) VSCODE_DATA_DIR="/home/ingenium-vscode/vscode-data"'
+-require_literal "$vscode_runner" 'user-runtime:appuser) VSCODE_DATA_DIR="/home/appuser/vscode-data"'
+-require_literal "$vscode_runner" 'VSCODE_EXTENSION_FILE="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"'
+-require_literal "$vscode_runner" 'VSCODE_EXTENSION_ID="sst-dev.opencode@0.0.13"'
+-require_literal "$vscode_runner" 'VSCODE_EXTENSION_SHA256="e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4"'
+-require_literal "$vscode_runner" '"${1:-}" != "--clean-env"'
+-require_literal "$vscode_runner" '/bin/sh "$0" --clean-env'
+-require_literal "$vscode_runner" 'case "$INGENIUM_DEPLOYMENT_MODE:$(id -un)" in'
+-require_literal "$vscode_runner" '[ ! -f "$VSCODE_EXTENSION_FILE" ] || [ -L "$VSCODE_EXTENSION_FILE" ]'
+-require_literal "$vscode_runner" 'sha256sum "$VSCODE_EXTENSION_FILE"'
+-require_literal "$vscode_runner" 'code_server --list-extensions --show-versions'
+-require_literal "$vscode_runner" 'code_server --install-extension "$VSCODE_EXTENSION_FILE" --force'
+-require_literal "$vscode_runner" 'normalized_extension="$(printf '\''%s'\'' "$extension" | tr '\''[:upper:]'\'' '\''[:lower:]'\'' | tr -d '\''[:space:]'\'')"'
+-require_literal "$vscode_runner" 'case "$normalized_extension" in'
+-require_literal "$vscode_runner" 'sst-dev.opencode@*)'
+-require_literal "$vscode_runner" 'if [ "$extension" != "$VSCODE_EXTENSION_ID" ]; then'
+-require_literal "$vscode_runner" '[ "$found" -eq 1 ]'
+-reject_literal "$vscode_runner" "open-vsx.org"
+-reject_literal "$vscode_runner" "https://"
+-reject_literal "$vscode_runner" "http://"
+-reject_literal "$vscode_runner" '--install-extension sst-dev.opencode'
+-reject_pattern "$vscode_runner" 'rm[[:space:]].*extensions'
+-require_literal "$vscode_runner" '--bind-addr "${INGENIUM_RUNTIME_BIND_HOST:-127.0.0.1}:4100"'
+-require_literal "$vscode_runner" '--auth none'
+-require_literal "$vscode_runner" '--disable-telemetry'
+-require_literal "$vscode_runner" '--disable-update-check'
+-require_literal "$vscode_runner" '--user-data-dir "${VSCODE_DATA_DIR}/user-data"'
+-require_literal "$vscode_runner" '--extensions-dir "${VSCODE_DATA_DIR}/extensions"'
+-require_literal "$vscode_runner" 'administrator-grade'
+-require_literal "$vscode_runner" 'unsupported for LAN, remote, shared, or untrusted users'
+-require_literal "$vscode_runner" 'full-terminal'
+-reject_literal "$vscode_runner" 'INGENIUM_API_TOKEN'
+-reject_literal "$vscode_runner" 'disable-terminal'
+-reject_literal "$vscode_runner" "ensure-vscode-settings"
+-reject_pattern "$vscode_runner" 'settings\.json|VSCODE_SETTINGS'
+-reject_path "${repo_root}/scripts/ensure-vscode-settings.mjs"
+-reject_path "${repo_root}/scripts/ensure-vscode-settings.test.mjs"
+-require_literal "$vscode_theme_manifest" '"name": "system-theme-defaults"'
+-require_literal "$vscode_theme_manifest" '"publisher": "ingenium"'
+-require_literal "$vscode_theme_manifest" '"version": "1.0.0"'
+-  require_literal "$vscode_theme_manifest" '"vscode": "^1.131.0"'
+-require_literal "$vscode_theme_manifest" '"window.autoDetectColorScheme": true'
+-require_literal "$vscode_theme_manifest" '"workbench.preferredDarkColorTheme": "Dark Modern"'
+-require_literal "$vscode_theme_manifest" '"workbench.preferredLightColorTheme": "Light Modern"'
+-reject_pattern "$vscode_theme_manifest" '"(main|browser|activationEvents|scripts|dependencies|devDependencies|permissions|workbench\.colorTheme|security\.workspace\.trust|update\.)"'
+ require_literal "${repo_root}/scripts/run-init-project.sh" 'project="${INGENIUM_PROJECT:-global-default}"'
+ require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="$credential_file"'
+ require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_MCP_AUDIENCE="repository-sync"'
+@@ -539,16 +458,16 @@
+
+ # Gateway plaintext is consumed once by the entrypoint. Every supervised child
+ # clears it; API, boundary, and dashboard consume the protected token-file path.
+-for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
++for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh start-opencode-web.sh start-ttyd.sh; do
+   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_GATEWAY_PASSWORD"
+ done
+-for script in run-gateway.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
++for script in run-gateway.sh start-opencode-web.sh start-ttyd.sh; do
+   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_API_TOKEN="
+ done
+-for script in run-init-project.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
++for script in run-init-project.sh start-opencode-web.sh start-ttyd.sh; do
+   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_API_TOKEN_FILE"
+ done
+-for script in run-dashboard.sh run-gateway.sh run-restore-handoff.sh start-opencode-web.sh start-ttyd.sh start-vscode.sh; do
++for script in run-dashboard.sh run-gateway.sh run-restore-handoff.sh start-opencode-web.sh start-ttyd.sh; do
+   reject_literal "${repo_root}/scripts/${script}" "INGENIUM_EMAIL_ENCRYPTION_KEY"
+   reject_literal "${repo_root}/scripts/${script}" "GOOGLE_OAUTH_CLIENT_SECRET"
+   reject_literal "${repo_root}/scripts/${script}" "MS_OAUTH_CLIENT_SECRET"
+@@ -558,7 +477,7 @@
+ require_literal "${repo_root}/scripts/healthcheck.sh" "exec env -i"
+ require_literal "${repo_root}/scripts/healthcheck.sh" "node /app/scripts/probe-api.mjs"
+ require_literal "${repo_root}/scripts/healthcheck.sh" "validate-vault-job-secret-root.sh verify"
+-require_literal "${repo_root}/scripts/healthcheck.sh" 'programs="$programs opencode-web opencode-internal-proxy ttyd-opencode vscode"'
++require_literal "${repo_root}/scripts/healthcheck.sh" 'programs="$programs opencode-web opencode-internal-proxy ttyd-opencode"'
+ require_literal "${repo_root}/scripts/healthcheck.sh" "require_restore_maintenance_safe"
+ require_literal "$entrypoint" "recover-restore-maintenance.sh"
+ require_literal "$dockerfile" "appuser-gid"
+@@ -571,10 +490,6 @@
+ require_literal "${repo_root}/scripts/run-api.sh" 'INGENIUM_AUTH_ENCRYPTION_KEY_FILE="$auth_encryption_key_file"'
+ require_literal "$dockerfile" 'scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh'
+ require_literal "$entrypoint" 'secure_persistent_path directory "$RESTORE_MAINTENANCE_DIR" "$RESTORE_UID" "$RESTORE_GID" 0700'
+-require_literal "${repo_root}/scripts/healthcheck.sh" "http://127.0.0.1:4100/healthz"
+-require_literal "${repo_root}/scripts/healthcheck.sh" '"VS Code gateway root" "vscode.localhost" "/" "302"'
+-require_literal "${repo_root}/scripts/healthcheck.sh" '"VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"'
+-require_literal "${repo_root}/scripts/healthcheck.sh" "Content-Security-Policy: frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000"
+ reject_literal "${repo_root}/scripts/healthcheck.sh" '"3002"'
+ reject_literal "${repo_root}/scripts/healthcheck.sh" "Authorization: Bearer \${INGENIUM_API_TOKEN"
+ require_literal "$vault_secret_root_validator" '/dev/shm/ingenium-job-secrets'
+@@ -609,5 +524,14 @@
+ node --check "$opencode_global_projector"
+ node "$plugin_closure_validator" --check
+ node --check "$plugin_load_smoke"
+-node "$vscode_theme_validator" "$vscode_theme_manifest" "1.131.0"
++
++# The retired editor is absent from new images and active startup/exposure.
++reject_literal "$supervisor_config" "[program:vscode]"
++reject_literal "$runtime_supervisor_config" "[program:vscode]"
++reject_literal "$compose_file" "vscode-data:"
++reject_literal "$entrypoint" "ingenium-vscode"
++reject_literal "$runtime_entrypoint" "vscode-data"
++reject_path "${repo_root}/scripts/start-vscode.sh"
++reject_path "${repo_root}/nginx/proxy-vscode.conf"
++
+ echo "Deployment static validation passed"
