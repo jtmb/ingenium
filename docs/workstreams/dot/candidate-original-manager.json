@@ -1,0 +1,145 @@
+{
+  "targets": [
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "source": "candidate-original-manager.proposal.mjs",
+      "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "postimageSha256": "3b53980ec1288d21c77911ab852508afc51d660dbda1f139abc593aac906e49b",
+      "bytes": 26084
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "source": "candidate-original-manager.d.mts",
+      "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "postimageSha256": "4cced16b0071ca83916ffa5271f62c649bde5bb72e3620dbd227c7891a6856ba",
+      "bytes": 1312
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "source": "candidate-carrier-readiness.proposal.mjs",
+      "preimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "postimageSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "bytes": 12399
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "source": "candidate-carrier-readiness.d.mts",
+      "preimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "postimageSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "bytes": 2843
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "source": "candidate-loopback-readiness.proposal.mjs",
+      "preimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "postimageSha256": "f435ebda2f555382d7c9e1c34508d4ff1c8747039f7b1adca98ee4d13f745c77",
+      "bytes": 7288
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "source": "candidate-loopback-readiness.d.mts",
+      "preimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "postimageSha256": "bce2607d5962962df4d73a8183f0da4ea968ef2d4907b9fd0b1ac790b5cc2e34",
+      "bytes": 1174
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "source": "candidate-bootstrap-readiness.proposal.mjs",
+      "preimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "postimageSha256": "2bbd3e954e5af493ad8d6c30e8b5b55e9c2d0c5af74a1ea1d03aa0377bb63eea",
+      "bytes": 9954
+    },
+    {
+      "target": "services/ingenium-api/scripts/runtime-manager.ts",
+      "source": "runtime-manager-candidate-waiting.proposal.ts",
+      "preimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "postimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "bytes": 29102
+    },
+    {
+      "target": "scripts/runtime-entrypoint.sh",
+      "source": "runtime-entrypoint-candidate.proposal.sh",
+      "preimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "postimageSha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02",
+      "bytes": 5138
+    }
+  ],
+  "patchSha256": "44166230a52b9760a9f3b8073810ae9a026e2a04716e2ebd43677c8b7b907610",
+  "patchBytes": 47528,
+  "emitted": {
+    "js": 4,
+    "types": 4,
+    "failures": 0
+  },
+  "shellSyntax": 0,
+  "actualRootApplyCheck": {
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "writes": 0,
+  "scope": "SOURCE proposal only; Root owns all canonical application, verifier/auth/manager/Core/issuer/runtime integration",
+  "tests": {
+    "scope": "Model-free isolated VM/source fixtures only; no actual Docker/Core auth/material/native/runtime/18cases",
+    "pass": 17,
+    "fail": 0,
+    "stdoutSha256": "d759d87b36492be5c26b1aeed653d009c79bf1b768d4df75ac195c685ff21a94",
+    "testSourceSha256": "f4b7743a83f34b6312aecad167fcb723e3e7f8e8eb5dec3a625579c635e1b234",
+    "uniqueFailureWitnesses": [
+      {
+        "stage": "fixture VM loader",
+        "initial": "0/12: ERR_VM_MODULE_LINK_FAILURE",
+        "repair": "Link graph once at root; no nested evaluate during linking."
+      },
+      {
+        "stage": "fixture VM globals",
+        "initial": "2/12: missing AbortSignal; then cross-realm Uint8Array strict parser refusal",
+        "repair": "Expose actual AbortSignal and Uint8Array in isolated fixture context; no production guard changed."
+      }
+    ],
+    "cleanup": {
+      "removedPaths": [],
+      "removedBytes": 0,
+      "disposableOutputs": [],
+      "retained": "Small durable proposal source/patch/fixtures/manifests/receipts; Root integration consumer in same existing C-backed WSL task root"
+    }
+  },
+  "missingOwners": [
+    "Root authenticated Core candidate admission/current/control/transition endpoints and fixed HMAC verifier to SQL131 CAS/private opaque brand",
+    "Root independently qualified private-PID-init-reaping+original wait/EOF platform verifier and real descendant/fast-exit cases; no direct cgroup-empty measure or SQL131 retirement emitted by worker",
+    "Candidate-only original credential/frame/material issuer and delivery remain closed",
+    "Unknown/cancellation/restart durable reconciliation with original manager custody; missing process-local handles cannot be restored from JSON",
+    "Exact source/compiler/copier/image closure and fresh independent source/image approval",
+    "Real Docker/native/18protocol/Windows/cluster/phases1-7 acceptance"
+  ],
+  "storage": {
+    "owner": "veyra-bot worker existing legacy dot slice",
+    "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "existing C-backed WSL; no migration or new root",
+    "generatedPaths": [
+      "docs/workstreams/dot/runtime-entrypoint-candidate.proposal.sh",
+      "docs/workstreams/dot/candidate-loopback-readiness.d.mts",
+      "docs/workstreams/dot/candidate-original-manager.patch",
+      "docs/workstreams/dot/candidate-original-manager-freeze.py",
+      "docs/workstreams/dot/candidate-original-manager-preimages.json",
+      "docs/workstreams/dot/runtime-manager-candidate-waiting.proposal.ts",
+      "docs/workstreams/dot/candidate-carrier-readiness.d.mts",
+      "docs/workstreams/dot/candidate-original-manager.proposal.mjs",
+      "docs/workstreams/dot/candidate-original-manager-validation.json",
+      "docs/workstreams/dot/candidate-original-manager.test.mjs",
+      "docs/workstreams/dot/candidate-loopback-readiness.proposal.mjs",
+      "docs/workstreams/dot/candidate-original-manager.d.mts",
+      "docs/workstreams/dot/candidate-carrier-readiness.proposal.mjs",
+      "docs/workstreams/dot/candidate-bootstrap-readiness.proposal.mjs"
+    ],
+    "protected": "Actual Root canonical source, immutable SQL131 inputs, original production credential/auth helpers, previous frozen patch/failure witnesses; none modified",
+    "retainedConsumer": "Root source integration/review; minimal durable source, recipe, emitted patch/preimages, test source and receipts; no full build/dependency/cache outputs",
+    "endCondition": "Root integrates or explicitly supersedes source checkpoint; preserve minimal reproducible source/hash and unique failure notes",
+    "removedPaths": [],
+    "removedBytes": 0,
+    "diskRecoveryClaim": null
+  },
+  "artifactWhitespace": {
+    "sourceDiffCheck": "passed excluding serialized patch wrapper",
+    "wrapperException": "Exactly2 single-space blank context records required by unified diff at lines228/264; preserved for lossless patch application, not emitted source trailing whitespace"
+  }
+}

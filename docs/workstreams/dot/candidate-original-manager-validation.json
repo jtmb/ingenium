@@ -1,0 +1,25 @@
+{
+  "scope": "Model-free isolated VM/source fixtures only; no actual Docker/Core auth/material/native/runtime/18cases",
+  "pass": 17,
+  "fail": 0,
+  "stdoutSha256": "d759d87b36492be5c26b1aeed653d009c79bf1b768d4df75ac195c685ff21a94",
+  "testSourceSha256": "f4b7743a83f34b6312aecad167fcb723e3e7f8e8eb5dec3a625579c635e1b234",
+  "uniqueFailureWitnesses": [
+    {
+      "stage": "fixture VM loader",
+      "initial": "0/12: ERR_VM_MODULE_LINK_FAILURE",
+      "repair": "Link graph once at root; no nested evaluate during linking."
+    },
+    {
+      "stage": "fixture VM globals",
+      "initial": "2/12: missing AbortSignal; then cross-realm Uint8Array strict parser refusal",
+      "repair": "Expose actual AbortSignal and Uint8Array in isolated fixture context; no production guard changed."
+    }
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retained": "Small durable proposal source/patch/fixtures/manifests/receipts; Root integration consumer in same existing C-backed WSL task root"
+  }
+}
