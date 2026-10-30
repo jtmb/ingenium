@@ -1,0 +1,516 @@
+--- a/apps/web/src/features/workbench/VoiceChat.tsx
++++ b/apps/web/src/features/workbench/VoiceChat.tsx
+@@ -1,7 +1,8 @@
++import { LocalCapture, retainUnsubmitted } from "../voice-ui/local-capture.mjs";
+ import { callPresentation } from "../voice-ui/call-presentation.mjs";
+ import "./VoiceCall.css";
+ import { useEffect, useLayoutEffect, useRef, useState } from "react";
+-import { Mic, Square, Volume2, X } from "lucide-react";
++import { Mic, MicOff, Square, Volume2, X } from "lucide-react";
+ import { AttentionDetails } from "../voice-ui/AttentionDetails";
+ import { recordingFrames, selectedVoice, speechCapabilities, type SpeechCapabilities } from "../voice-ui/capabilities";
+ 
+@@ -58,25 +59,26 @@
+   const [session, setSession] = useState<Obj | null>(null), [speech, setSpeech] = useState<Obj>({}), [readReplies, setReadReplies] = useState(true), [voice, setVoice] = useState("");
+   const [replyAudio, setReplyAudio] = useState<{ id: string; data: string } | null>(null);
+   const [monitoring, setMonitoring] = useState(false), [recording, setRecording] = useState(false), [playing, setPlaying] = useState(false), [seconds, setSeconds] = useState(0), [busy, setBusy] = useState(false), [paused, setPaused] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
++  const [micPending, setMicPending] = useState(false), [micIssue, setMicIssue] = useState(""), [micReleaseUnknown, setMicReleaseUnknown] = useState(false);
++  const captureDevice = useRef(new LocalCapture()), retainedSource = useRef<Samples | null>(null);
+   const [voiceProtocol, setVoiceProtocol] = useState<Obj>({});
+   const [retainedCapture, setRetainedCapture] = useState<Samples | null>(null);
+   const capabilities = speechCapabilities(speech);
+   const segmented = voiceProtocol.segmented_capture === true && voiceProtocol.playback_protocol === "voice-child-claim-v1"
+     && voiceProtocol.max_utterance_seconds === 60;
+   const captureCapabilities = segmented ? { ...capabilities, maxTurnMs: 60000 } : capabilities;
+-  const presentationNeeded = monitoring || recording || playing || busy || paused || !!retainedCapture || !!tracking || !!error || session?.state === "uncertain";
++  const presentationNeeded = monitoring || recording || playing || busy || paused || micPending || !!micIssue || !!retainedCapture || !!tracking || !!error || session?.state === "uncertain";
+   useLayoutEffect(() => { onPresentationNeeded?.(presentationNeeded); }, [onPresentationNeeded, presentationNeeded]);
+   useLayoutEffect(() => () => onPresentationNeeded?.(false), [onPresentationNeeded]);
+   const viewCurrent = () => live.current && isCurrent();
+   const micToken = useRef({}), admittedOwner = useRef<VoiceSessionOwner | null>(null), starting = useRef(false);
+   const controlRef = useRef<(kind: "barge" | "stop") => Promise<void>>(async () => {});
+   const tracked = useRef(tracking), observed = useRef(session), live = useRef(true), generation = useRef(0), readLock = useRef(false), writeLock = useRef(false), watching = useRef(false), pausedRef = useRef(false);
+-  const devices = useRef<{ stream: MediaStream; context: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; gain: GainNode } | null>(null);
+   const player = useRef<HTMLAudioElement | null>(null), audioUrl = useRef(""), played = useRef(new Set<string>()), suppressed = useRef(new Set<string>()), hydrated = useRef(false), queued = useRef<Samples | null>(null);
+   const capture = useRef<{ frames: Float32Array[]; count: number; speech: number; quiet: number; confirmed: boolean } | null>(null), refractory = useRef(0);
+   const admissionBlocked = useRef(disabled || !connected); admissionBlocked.current = disabled || !connected;
+   const frameHandler = useRef<(frame: Float32Array, rate: number) => void>(() => {}), flushHandler = useRef<() => void>(() => {});
+-  tracked.current = tracking; observed.current = session;
++  tracked.current = tracking; observed.current = session; retainedSource.current = retainedCapture;
+   const save = (value: Tracking) => {
+     if (!viewCurrent() || tracked.current?.issue) throw new Error("The original voice view or receipt needs recovery.");
+     if (localStorage.getItem(key) !== confirmedStorage.current) throw new Error("The original voice receipt changed in another view. Reopen this task before continuing.");
+@@ -86,19 +88,32 @@
+     confirmedStorage.current = encoded; tracked.current = value; setTracking(value);
+   };
+   const stopPlayback = () => { player.current?.pause(); player.current = null; if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); audioUrl.current = ""; if (live.current) setPlaying(false); if (!watching.current && !starting.current) lease.release(micToken.current); };
++  const releaseCapture = () => {
++    const pending = retainUnsubmitted(queued.current, capture.current, captureDevice.current.resource);
++    if (live.current && pending) {
++      retainedSource.current ||= pending;
++      setRetainedCapture(previous => previous || pending);
++    }
++    queued.current = null; capture.current = null;
++    const result = captureDevice.current.stop();
++    if (!watching.current && !player.current && !starting.current) lease.release(micToken.current);
++    if (live.current) {
++      setMicPending(false); setMonitoring(false); setRecording(false); setSeconds(0);
++      setMicReleaseUnknown(!result.released);
++      if (!result.released) setMicIssue("Microphone release is unconfirmed. Capture is blocked; check the original device without ending or replaying this call.");
++    }
++  };
+   const releaseMic = () => {
+-    const pending = queued.current || (capture.current?.confirmed && devices.current
+-      ? { frames: capture.current.frames, rate: devices.current.context.sampleRate } : null);
+-    if (live.current && pending) setRetainedCapture(previous => previous || pending);
+-    generation.current++; watching.current = false; lease.release(micToken.current); queued.current = null; capture.current = null;
+-    const current = devices.current; devices.current = null;
+-    if (current) { current.processor.onaudioprocess = null; current.source.disconnect(); current.processor.disconnect(); current.gain.disconnect(); current.stream.getTracks().forEach(track => track.stop()); void current.context.close().catch(() => {}); }
+-    if (live.current) { setMonitoring(false); setRecording(false); setSeconds(0); }
++    generation.current++; watching.current = false; releaseCapture();
++  };
++  const muteMic = (reason = "Microphone muted. The original call and reply playback continue.") => {
++    releaseCapture();
++    if (viewCurrent()) setNotice(reason);
+   };
+   const uncertain = (message: string) => { releaseMic(); stopPlayback(); pausedRef.current = true; if (viewCurrent()) { setPaused(true); setError(message); } };
+   const refuseUnsubmittedAudio = (message: string) => {
+     const source = capture.current;
+-    if (source && devices.current) setRetainedCapture({ frames: source.frames, rate: devices.current.context.sampleRate });
++    if (source && captureDevice.current.resource) setRetainedCapture({ frames: source.frames, rate: captureDevice.current.resource.context.sampleRate });
+     else if (queued.current) setRetainedCapture(queued.current);
+     releaseMic(); stopPlayback();
+     if (viewCurrent()) { setError(message); setNotice("No utterance was submitted. The full unsubmitted recording is retained in this view for export or explicit discard. Keep this view open until recovered."); }
+@@ -280,7 +295,7 @@
+   };
+   controlRef.current = control;
+   const flush = async () => {
+-    if (!viewCurrent() || admissionBlocked.current) { queued.current = null; capture.current = null; return; }
++    if (!viewCurrent() || admissionBlocked.current || !captureDevice.current.intent || !captureDevice.current.resource) return;
+     const current = tracked.current, state = observed.current;
+     if (!queued.current || !current || !watching.current || pausedRef.current || writeLock.current || current.utteranceId || current.bargeId || current.stopRequested || current.stopId || state?.state !== "listening" || state.active_utterance_id != null) return;
+     const samples = queued.current; queued.current = null;
+@@ -300,7 +315,7 @@
+   };
+   flushHandler.current = () => { void flush(); };
+   frameHandler.current = (frame, rate) => {
+-    if (!viewCurrent() || admissionBlocked.current) { queued.current = null; capture.current = null; return; }
++    if (!viewCurrent() || admissionBlocked.current || !captureDevice.current.intent || !captureDevice.current.resource) return;
+     if (!watching.current || pausedRef.current || queued.current || refractory.current > Date.now()) return;
+     const current = tracked.current, state = observed.current; if (!current || !state || current.stopRequested || current.stopId) return;
+     let active = capture.current;
+@@ -329,21 +344,75 @@
+       if (active.confirmed) { queued.current = { frames: active.frames, rate }; flushHandler.current(); }
+     }
+   };
+-  const acquireMic = async () => {
+-    if (!lease.claim(micToken.current)) throw new Error("Stop dictation or reply playback before opening continuous voice.");
++  const acquireMic = async (ticket: number, callStamp: number) => {
+     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone capture is unavailable in this browser.");
+-    const stamp = ++generation.current;
+-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false });
+-    if (!viewCurrent() || generation.current !== stamp || admissionBlocked.current) { stream.getTracks().forEach(track => track.stop()); return false; }
+-    let context: AudioContext | null = null;
+-    try {
+-      context = new AudioContext(); await context.resume();
+-      if (!viewCurrent() || generation.current !== stamp || admissionBlocked.current) { stream.getTracks().forEach(track => track.stop()); await context.close(); return false; }
+-      const source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(2048, 1, 1), gain = context.createGain(); gain.gain.value = 0;
+-      processor.onaudioprocess = event => { event.outputBuffer.getChannelData(0).fill(0); frameHandler.current(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate); };
+-      stream.getAudioTracks().forEach(track => { track.onended = () => { if (viewCurrent() && generation.current === stamp) uncertain("Microphone access ended. Resume explicitly; unsubmitted audio was discarded."); }; });
+-      source.connect(processor); processor.connect(gain); gain.connect(context.destination); devices.current = { stream, context, source, processor, gain }; return true;
+-    } catch (cause) { stream.getTracks().forEach(track => track.stop()); if (context) void context.close().catch(() => {}); throw cause; }
++    const opened = await captureDevice.current.open(ticket, {
++      media: navigator.mediaDevices, createContext: () => new AudioContext(),
++      isCurrent: () => viewCurrent() && generation.current === callStamp && !admissionBlocked.current && !retainedSource.current
++        && !!admittedOwner.current && ownerMatches(admittedOwner.current),
++      claim: () => lease.claim(micToken.current),
++      release: () => { if (!watching.current && !player.current && !starting.current) lease.release(micToken.current); },
++      onPcm: (frame, rate) => frameHandler.current(frame, rate),
++      onEnded: () => muteMic("Microphone access ended. The original call remains; recover any retained capture and unmute explicitly."),
++      onProblem: message => { if (viewCurrent()) { setMicIssue(message); setMicReleaseUnknown(true); } },
++    });
++    if (opened && viewCurrent()) { setMonitoring(true); setMicPending(false); setMicReleaseUnknown(false); setMicIssue(""); }
++    return opened;
++  };
++  const unmuteMic = async () => {
++    const original = tracked.current;
++    if (!viewCurrent() || admissionBlocked.current || starting.current || captureDevice.current.intent) return;
++    if (!original || original.issue || original.stopRequested || original.stopId || original.bargeId || pausedRef.current
++      || (original.playback && !player.current) || retainedSource.current) {
++      setMicIssue("Check the original voice request and export or discard any unsubmitted capture before unmuting."); return;
++    }
++    let ticket: number;
++    try { ticket = captureDevice.current.begin(); } catch (cause) { setMicIssue(cause instanceof Error ? cause.message : "Microphone cleanup needs attention."); return; }
++    const stamp = generation.current;
++    starting.current = true; setMicPending(true); setMicIssue("");
++    const current = () => viewCurrent() && generation.current === stamp && captureDevice.current.current(ticket)
++      && !admissionBlocked.current && !pausedRef.current && !retainedSource.current
++      && tracked.current?.sessionId === original.sessionId && !tracked.current.stopRequested && !tracked.current.stopId && !tracked.current.bargeId;
++    try {
++      const owner = await request("GET", `/v1/voice/owner?session_id=${encodeURIComponent(sessionId)}`) as VoiceSessionOwner;
++      if (!current()) return;
++      const originalView = obj(await request("GET", `/v1/voice/sessions/${original.sessionId}`));
++      if (!current()) return;
++      const status = obj(await request("GET", "/v1/speech/status"));
++      if (!current()) return;
++      const protocol = obj(await request("GET", "/v1/voice/status"));
++      if (!current()) return;
++      const caps = speechCapabilities(status);
++      if (originalView.id !== original.sessionId || originalView.project_id !== projectId || originalView.session_id !== sessionId
++        || !["listening", "processing", "awaiting_reply", "speaking"].includes(text(originalView.state))
++        || !ownerMatches(owner) || JSON.stringify(originalView.owner) !== JSON.stringify(owner)
++        || JSON.stringify(observed.current?.owner) !== JSON.stringify(owner)
++        || originalView.voice !== observed.current?.voice || originalView.read_replies !== observed.current?.read_replies
++        || originalView.send_transcripts !== true
++        || (admittedOwner.current && JSON.stringify(admittedOwner.current) !== JSON.stringify(owner)))
++        throw new Error("The original call owner or current configuration changed. Check that original before unmuting.");
++      if (caps.backend !== capabilities.backend || !caps.transcription || (originalView.read_replies === true && !caps.synthesis)
++        || caps.maxRecordingMs !== capabilities.maxRecordingMs || caps.minRecordingMs !== capabilities.minRecordingMs
++        || caps.maxTextChars !== capabilities.maxTextChars || caps.maxTextBytes !== capabilities.maxTextBytes
++        || (caps.backend === "owned-http-cpu" && originalView.read_replies === true
++          && (!text(originalView.voice) || !caps.voices.includes(text(originalView.voice)))))
++        throw new Error("The original voice and fresh speech capabilities are incompatible. They were not replaced.");
++      const freshSegmented = protocol.segmented_capture === true && protocol.playback_protocol === "voice-child-claim-v1" && protocol.max_utterance_seconds === 60;
++      if (freshSegmented !== segmented) throw new Error("The original capture protocol changed. Check the original call before unmuting.");
++      if (!current()) return;
++      admittedOwner.current = owner; setSpeech(status); setVoiceProtocol(protocol);
++      if (!await acquireMic(ticket, stamp) || !current()) return;
++      watching.current = true; setNotice("Microphone on. The same original call continues; no earlier recording was submitted again.");
++    } catch (cause) {
++      // A local permission/configuration refusal is not an unknown agent outcome.
++      releaseCapture();
++      if (viewCurrent()) setMicIssue(cause instanceof Error ? cause.message : "Microphone could not be unmuted. The original call is unchanged.");
++    } finally {
++      if (captureDevice.current.current(ticket) && !captureDevice.current.resource) releaseCapture();
++      starting.current = false;
++      if (!watching.current && !captureDevice.current.resource && !player.current) lease.release(micToken.current);
++      if (viewCurrent()) setMicPending(false);
++    }
+   };
+   const start = async () => {
+     const existing = tracked.current;
+@@ -357,7 +426,9 @@
+       setError("The original session's speech voice cannot be verified against the CPU catalog in this view. Check and stop that original session before explicitly starting a compatible one; its voice was not replaced."); return;
+     }
+     if (existing && (existing.stopId || existing.bargeId || existing.utteranceId || (observed.current?.state !== "stopped" && (existing.stopRequested || pausedRef.current || !observed.current || observed.current.state !== "listening" || observed.current.active_utterance_id != null)))) { setError("Check the retained voice session and wait for its original turn/control to finish before resuming the microphone."); return; }
+-    starting.current = true; setBusy(true); setError(""); setNotice("");
++    let captureTicket: number;
++    try { captureTicket = captureDevice.current.begin(); } catch (cause) { setMicIssue(cause instanceof Error ? cause.message : "Microphone cleanup needs attention."); return; }
++    starting.current = true; setBusy(true); setMicPending(true); setMicIssue(""); setError(""); setNotice("");
+     const stamp = generation.current;
+     try {
+       const owner = await request("GET", `/v1/voice/owner?session_id=${encodeURIComponent(sessionId)}`) as VoiceSessionOwner;
+@@ -365,7 +436,7 @@
+       if (!ownerMatches(owner)) throw new Error("The task or selected model differs from the voice owner. Refresh before starting.");
+       if (existing && observed.current?.state !== "stopped" && JSON.stringify(observed.current?.owner) !== JSON.stringify(owner)) throw new Error("The original voice configuration changed. Stop that session, then explicitly start a new one.");
+       admittedOwner.current = owner;
+-      if (!await acquireMic()) return;
++      if (!await acquireMic(captureTicket, stamp)) return;
+       const micStamp = generation.current;
+       if (!viewCurrent() || admissionBlocked.current) { releaseMic(); setNotice("Voice capture paused before admission. No new spoken turn was sent."); return; }
+       if (!existing || observed.current?.state === "stopped") {
+@@ -391,10 +462,10 @@
+         if (generation.current !== micStamp || tracked.current?.stopRequested) { releaseMic(); if (tracked.current?.stopRequested) await controlRef.current("stop"); return; }
+       }
+       if (!viewCurrent() || admissionBlocked.current) { releaseMic(); setNotice("Voice session retained while workspace admission is paused. No audio was sent; check the original session before resuming the microphone."); return; }
+-      if (!devices.current || observed.current?.state !== "listening") { releaseMic(); setNotice("Voice session retained. Check its state before resuming the microphone."); return; }
+-      pausedRef.current = false; setPaused(false); watching.current = true; setMonitoring(true); setNotice("Microphone listening. Each detected spoken turn is sent to this chat automatically. Stop voice chat releases the microphone and stops its owned work.");
++      if (observed.current?.state !== "listening") { releaseMic(); setNotice("Voice session retained. Check its state before resuming the microphone."); return; }
++      pausedRef.current = false; setPaused(false); watching.current = true; setMonitoring(!!captureDevice.current.resource); setMicPending(false); setNotice(captureDevice.current.intent ? "Microphone listening. Each detected spoken turn is sent to this chat automatically. Stop voice chat releases the microphone and stops its owned work." : "Microphone muted. The original call remains active.");
+     } catch (cause) { if (viewCurrent()) uncertain(`${cause instanceof Error ? cause.message : "Voice chat could not start."} Any saved original request is retained for read-only recovery.`); }
+-    finally { starting.current = false; if (!devices.current && !player.current) lease.release(micToken.current); if (viewCurrent()) setBusy(false); }
++    finally { if (captureDevice.current.current(captureTicket) && !captureDevice.current.resource) releaseCapture(); starting.current = false; if (!watching.current && !captureDevice.current.resource && !player.current) lease.release(micToken.current); if (viewCurrent()) { setBusy(false); setMicPending(false); } }
+   };
+   const stop = () => { releaseMic(); stopPlayback(); if (viewCurrent() && tracked.current) { try { save({ ...tracked.current, stopRequested: true }); } catch { uncertain("The original stop intent could not be saved. Check the voice session before continuing."); return; } } setNotice("Microphone and local playback released. Checking that voice-owned service work stops."); void control("stop"); };
+   const loadReply = async (id: string) => {
+@@ -418,16 +489,16 @@
+     ? "The original session's speech voice is missing or unsupported by this CPU catalog. Check and stop the original before explicitly starting a compatible session. No default is inferred for it." : "";
+   const activeUtterance = rows(session?.utterances).find(item => item.id === session?.active_utterance_id);
+   const callState = callPresentation({ connected, disabled, busy, monitoring, recording, playing, paused,
+-    retainedCapture: !!retainedCapture, sessionState: text(session?.state), utteranceState: text(activeUtterance?.state) });
++    captureBlocked: micReleaseUnknown, retainedCapture: !!retainedCapture, sessionState: text(session?.state), utteranceState: text(activeUtterance?.state) });
+   const noticeNeedsAttention = !monitoring || paused || disabled || !connected;
+   return <section className="wb-voice-chat wb-call" aria-label="Call current working agent" data-phase={callState.phase}>
+     <header className="wb-call-header"><strong>Current agent</strong><span>Live conversation · this chat</span></header>
+     <div className="wb-call-stage">
+       <div className="wb-call-orb" aria-hidden="true"/>
+-      <div className="wb-call-status" role="status" aria-live="polite"><strong>{callState.label}</strong><span>{callState.detail}{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span></div>
++      <div className="wb-call-status" role="status" aria-live="polite"><strong>{callState.label}</strong><span>{micPending ? "Microphone request pending" : callState.detail}{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span></div>
+     </div>
+     <p className="wb-call-consent">Spoken turns are sent automatically to this chat after you start voice.</p>
+-    <div className="wb-voice-actions"><button type="button" className="wb-call-mic" aria-label={monitoring ? "Microphone on" : retained ? "Resume microphone" : "Start voice chat and send spoken turns"} disabled={!connected || disabled || busy || monitoring || !!retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={16}/>{monitoring ? "Mic on" : retained ? "Resume mic" : "Start voice"}</button><button type="button" className="wb-call-end" aria-label="Stop voice chat" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><X size={16}/>End</button><button type="button" aria-label="Interrupt voice turn for spoken steering" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}><Square size={14}/>Interrupt</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" aria-label="Check original voice session and controls" disabled={!connected} onClick={() => void checkRef.current()}>Check original</button>}</div>
++    <div className="wb-voice-actions"><button type="button" className="wb-call-mic" aria-pressed={micReleaseUnknown ? undefined : monitoring} aria-label={micReleaseUnknown ? "Microphone release unconfirmed" : monitoring ? "Mute microphone" : micPending ? "Cancel microphone request" : retained ? "Unmute microphone" : "Start voice chat and send spoken turns"} disabled={micReleaseUnknown || (!monitoring && !micPending && (!connected || disabled || busy || !!retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || !!tracking?.bargeId || !!tracking?.stopId || !!tracking?.stopRequested || (!!tracking?.playback && !playing)))))} onClick={() => { if (monitoring || micPending) muteMic(); else if (retained) void unmuteMic(); else void start(); }}>{monitoring ? <Mic size={16}/> : <MicOff size={16}/>}{micReleaseUnknown ? "Mic unknown" : monitoring ? "Mic on" : micPending ? "Cancel mic" : retained ? "Mic off" : "Start voice"}</button><button type="button" className="wb-call-end" aria-label="Stop voice chat" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><X size={16}/>End</button><button type="button" aria-label="Interrupt voice turn for spoken steering" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}><Square size={14}/>Interrupt</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" aria-label="Check original voice session and controls" disabled={!connected} onClick={() => void checkRef.current()}>Check original</button>}</div>
+     <div className="wb-call-preferences">
+     <label className="wb-voice-check"><input type="checkbox" checked={wantsReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label>
+     {capabilities.backend === "owned-http-cpu" ? <label>Configured speech voice<select value={displayVoice} disabled={busy || retained} onChange={event => setVoice(event.target.value)}>
+@@ -437,6 +508,7 @@
+     </select></label> : <label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>}
+     </div>
+     <div className="wb-call-blockers">
++    {micIssue && <p role="alert">{micIssue}</p>}
+     {!sessionId && <p>Create or select a chat first.</p>}
+     {(!capabilities.transcription || (wantsReplies && !capabilities.synthesis)) && <p>Configure transcription{wantsReplies ? " and speech output" : ""} before starting.</p>}
+     {capabilities.reason && <p role="status">{capabilities.reason}</p>}{!plannedVoice.ok && <p>{plannedVoice.message}</p>}{retainedVoiceIssue && <p role="alert">{retainedVoiceIssue}</p>}
+--- a/apps/web/src/features/voice-ui/call-presentation.mjs
++++ b/apps/web/src/features/voice-ui/call-presentation.mjs
+@@ -1,7 +1,8 @@
+ /** Read-only labels from existing Voice/device observations; owns no readiness,
+  * request, playback, device, transcript, tool or session state. */
+ export function callPresentation({ connected, disabled, busy, monitoring, recording, playing, paused,
+-  retainedCapture, sessionState, utteranceState }) {
++  retainedCapture, sessionState, utteranceState, captureBlocked = false }) {
++  if (captureBlocked) return { phase: 'attention', label: 'Microphone needs attention', detail: 'Release is unconfirmed; check the original device' };
+   if (!connected) return { phase: 'offline', label: 'Service disconnected', detail: monitoring ? 'Microphone release pending' : 'Microphone off' };
+   if (paused || sessionState === 'uncertain' || utteranceState === 'uncertain')
+     return { phase: 'attention', label: 'Check the original voice session', detail: 'Automatic voice activity paused' };
+--- a/apps/web/src/features/voice-ui/call-presentation.d.mts
++++ b/apps/web/src/features/voice-ui/call-presentation.d.mts
+@@ -1,6 +1,6 @@
+ export interface CallObservations {
+   connected: boolean; disabled: boolean; busy: boolean; monitoring: boolean;
+   recording: boolean; playing: boolean; paused: boolean; retainedCapture: boolean;
+-  sessionState: string; utteranceState: string;
++  captureBlocked?: boolean; sessionState: string; utteranceState: string;
+ }
+ export function callPresentation(observations: CallObservations): { phase: string; label: string; detail: string };
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/local-capture.mjs
+@@ -0,0 +1,92 @@
++/** Local device lifetime only. No session, request, agent, playback or receipt API. */
++export class LocalCapture {
++  #epoch = 0;
++  #opening = null;
++  #disposed = new WeakSet();
++  #closing = 0;
++  #problem;
++  intent = false;
++  resource = null;
++  failures = [];
++  get blocked() { return this.failures.length > 0; }
++  get closing() { return this.#closing > 0; }
++  begin() {
++    if (this.blocked) throw new Error('Microphone cleanup needs attention before another capture.');
++    if (this.closing) throw new Error('Microphone cleanup is still pending. Unmute explicitly after it finishes.');
++    if (this.resource || this.intent) throw new Error('Microphone capture is already active or pending.');
++    this.intent = true; return ++this.#epoch;
++  }
++  current(ticket) { return Number.isSafeInteger(ticket) && ticket > 0 && this.intent && ticket === this.#epoch && !this.blocked; }
++  #failed(resource, error) {
++    this.failures.push({ resource, error });
++    this.#problem?.('Microphone release could not be fully confirmed. Capture remains blocked; the original call is unchanged.');
++  }
++  #dispose(resource) {
++    if (!resource || this.#disposed.has(resource)) return;
++    this.#disposed.add(resource);
++    const attempt = action => { try { action(); } catch (error) { this.#failed(resource, error); } };
++    if (resource.processor) resource.processor.onaudioprocess = null;
++    // Stop tracks before potentially slow/failed graph teardown. Keep every failed
++    // original handle; do not open a replacement capture over unknown cleanup.
++    attempt(() => { for (const track of resource.stream.getTracks()) {
++      track.onended = null;
++      attempt(() => { track.stop(); if (track.readyState !== 'ended') throw new Error('Track did not confirm ended'); });
++    } });
++    for (const node of [resource.source, resource.processor, resource.gain]) if (node) attempt(() => node.disconnect());
++    if (resource.context) attempt(() => {
++      this.#closing++;
++      let closing;
++      try { closing = resource.context.close(); }
++      catch (error) { this.#closing--; throw error; }
++      void Promise.resolve(closing).catch(error => this.#failed(resource, error)).finally(() => { this.#closing--; });
++    });
++  }
++  stop() {
++    this.intent = false; this.#epoch++;
++    const resource = this.resource; this.resource = null;
++    this.#dispose(resource); this.#dispose(this.#opening); this.#opening = null;
++    return { released: !this.blocked, pending: this.closing };
++  }
++  async open(ticket, ports) {
++    const valid = () => this.current(ticket) && ports.isCurrent();
++    if (!valid()) return false;
++    if (!ports.claim()) throw new Error('The existing audio lease is unavailable.');
++    this.#problem = ports.onProblem;
++    let candidate;
++    try {
++      const stream = await ports.media.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false });
++      candidate = { stream, context: null, source: null, processor: null, gain: null }; this.#opening = candidate;
++      if (!valid()) { this.#dispose(candidate); return false; }
++      const audioTracks = stream.getAudioTracks();
++      if (!audioTracks.length || audioTracks.some(track => track.readyState !== 'live')) throw new Error('Microphone returned no live audio track.');
++      const context = ports.createContext(); candidate.context = context;
++      await context.resume();
++      if (!valid()) { this.#dispose(candidate); return false; }
++      if (audioTracks.some(track => track.readyState !== 'live')) throw new Error('Microphone ended before capture became active.');
++      const source = context.createMediaStreamSource(stream); candidate.source = source;
++      const processor = context.createScriptProcessor(2048, 1, 1); candidate.processor = processor;
++      const gain = context.createGain(); candidate.gain = gain; gain.gain.value = 0;
++      processor.onaudioprocess = event => {
++        event.outputBuffer.getChannelData(0).fill(0);
++        if (valid() && this.resource === candidate) ports.onPcm(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
++      };
++      for (const track of stream.getAudioTracks()) track.onended = () => { if (valid() && this.resource === candidate) ports.onEnded(); };
++      source.connect(processor); processor.connect(gain); gain.connect(context.destination);
++      if (!valid()) { this.#dispose(candidate); return false; }
++      if (!ports.claim()) throw new Error('The audio lease changed before microphone publication.');
++      this.resource = candidate; return true;
++    } catch (error) {
++      this.#dispose(candidate);
++      if (!valid()) return false;
++      throw error;
++    } finally {
++      if (this.#opening === candidate) this.#opening = null;
++      if (this.resource !== candidate && !this.resource && (ticket === this.#epoch || !this.intent)) ports.release();
++    }
++  }
++}
++
++export function retainUnsubmitted(queued, capture, resource) {
++  const source = queued || (capture?.frames?.length && resource ? { frames: capture.frames, rate: resource.context.sampleRate } : null);
++  return source?.frames?.length ? { frames: [...source.frames], rate: source.rate } : null;
++}
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/local-capture.d.mts
+@@ -0,0 +1,24 @@
++export interface CaptureSamples { frames: Float32Array[]; rate: number }
++export interface CaptureResource { stream: MediaStream; context: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; gain: GainNode }
++export interface CapturePorts {
++  media: Pick<MediaDevices, 'getUserMedia'>;
++  createContext(): AudioContext;
++  isCurrent(): boolean;
++  claim(): boolean;
++  release(): void;
++  onPcm(frame: Float32Array, rate: number): void;
++  onEnded(): void;
++  onProblem(message: string): void;
++}
++export class LocalCapture {
++  readonly intent: boolean;
++  readonly resource: CaptureResource | null;
++  readonly failures: { resource: unknown; error: unknown }[];
++  readonly blocked: boolean;
++  readonly closing: boolean;
++  begin(): number;
++  current(ticket: number): boolean;
++  stop(): { released: boolean; pending: boolean };
++  open(ticket: number, ports: CapturePorts): Promise<boolean>;
++}
++export function retainUnsubmitted(queued: CaptureSamples | null, capture: { frames: Float32Array[] } | null, resource: CaptureResource | null): CaptureSamples | null;
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/LocalMute.test.tsx
+@@ -0,0 +1,96 @@
++// @vitest-environment jsdom
++import { createHash, randomUUID, webcrypto } from "node:crypto";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { VoiceChat } from "../workbench/VoiceChat";
++import type { SpeechRequest } from "../workbench/VoiceWorkspace";
++
++const sessionId="21af783b-b665-43b4-8482-c68606c1c166", turnId="65f38cd4-647a-4dfc-8366-cd3370e38813", childId="0b1c2d3e-4567-4890-abcd-123456789012";
++const cpu={backend:"owned-http-cpu",available:true,transcription_configured:true,synthesis_configured:true,
++  limits:{min_recording_ms:250,max_recording_ms:15000,max_text_chars:600,max_text_utf8_bytes:2400,max_output_ms:15000},voices:["af_sky"],configured_default_voice:"af_sky"};
++const protocol={segmented_capture:true,max_utterance_seconds:60,playback_protocol:"voice-child-claim-v1"};
++const owner={fixture:"original-owner"};
++const node=()=>({connect:vi.fn(),disconnect:vi.fn()});
++class Track { readyState="live";onended:(()=>void)|null=null;stop=vi.fn(()=>{this.readyState="ended";}); }
++class Context {
++  static all:Context[]=[];sampleRate=48000;destination={};source=node();gain={...node(),gain:{value:0}};
++  processor={...node(),onaudioprocess:null as ((event:AudioProcessingEvent)=>void)|null};
++  constructor(){Context.all.push(this);}resume=vi.fn(async()=>{});close=vi.fn(async()=>{});
++  createMediaStreamSource=()=>this.source;createScriptProcessor=()=>this.processor;createGain=()=>this.gain;
++  frame(){const input=new Float32Array(2048).fill(.02);this.processor.onaudioprocess?.({inputBuffer:{sampleRate:48000,getChannelData:()=>input},outputBuffer:{getChannelData:()=>new Float32Array(2048)}} as unknown as AudioProcessingEvent);}
++}
++class Player {
++  static all:Player[]=[];onended:(()=>void)|null=null;onerror:(()=>void)|null=null;
++  constructor(_url:string){Player.all.push(this);}play=vi.fn(async()=>{});pause=vi.fn();
++}
++function setup(audio=false,permission?:Promise<unknown>) {
++  const tracks:Track[]=[];const media=vi.fn(async()=>{if(permission)return permission;const track=new Track();tracks.push(track);return{getTracks:()=>[track],getAudioTracks:()=>[track]};});
++  vi.stubGlobal("navigator",{mediaDevices:{getUserMedia:media}});vi.stubGlobal("AudioContext",Context);vi.stubGlobal("Audio",Player);
++  vi.stubGlobal("crypto",{subtle:webcrypto.subtle,randomUUID});
++  const OriginalURL=URL;vi.stubGlobal("URL",class extends OriginalURL{static createObjectURL=vi.fn(()=>"blob:inert-audio");static revokeObjectURL=vi.fn();});
++  const bytes=new Uint8Array(364), data=new DataView(bytes.buffer);
++  for(const [offset,label] of [[0,"RIFF"],[8,"WAVE"],[12,"fmt "],[36,"data"]] as const) bytes.set(new TextEncoder().encode(label),offset);
++  for(const [offset,value] of [[4,356],[16,16],[24,16000],[28,32000],[40,320]]) data.setUint32(offset,value,true);
++  for(const [offset,value] of [[20,1],[22,1],[32,2],[34,16]]) data.setUint16(offset,value,true);
++  const digest=createHash("sha256").update(bytes).digest("hex");
++  const child={request_id:childId,kind:"tts",generation:1,state:"completed",playback_state:"ready",playback_id:null as string|null,wav_digest:digest};
++  const originalReceipt={sessionId,utteranceId:turnId};localStorage.setItem("veyra.voice-chat.v1:project:working-chat",JSON.stringify(originalReceipt));
++  let freshOwner:unknown=owner;
++  const request=vi.fn<SpeechRequest>(async(method,path,body)=>{
++    if(method==="GET"&&path==="/v1/speech/status")return cpu;
++    if(method==="GET"&&path==="/v1/voice/status")return protocol;
++    if(method==="GET"&&path==="/v1/voice/owner?session_id=working-chat")return freshOwner;
++    const utterance={id:turnId,state:audio?"awaiting_playback":"awaiting_reply",transcript:"Original active prompt",children:audio?[{...child}]:[],speech_operation_id:audio?childId:null,wav_base64:audio?btoa(String.fromCharCode(...bytes)):null};
++    if(method==="GET"&&path===`/v1/voice/sessions/${sessionId}`)return{id:sessionId,project_id:"project",session_id:"working-chat",state:audio?"speaking":"awaiting_reply",owner,voice:"af_sky",send_transcripts:true,read_replies:true,utterances:[utterance],active_utterance_id:turnId};
++    if(method==="GET"&&path===`/v1/voice/sessions/${sessionId}/utterances/${turnId}`)return utterance;
++    if(method==="POST"&&path===`/v1/voice/sessions/${sessionId}/utterances/${turnId}/playback`){
++      const input=body as {claim_id:string;played:boolean};child.playback_id=input.claim_id;child.playback_state=input.played?"played":"claimed";return{...utterance,children:[{...child}]};
++    }
++    throw new Error(`Forbidden device-fixture effect ${method} ${path}`);
++  });
++  const props={request,projectId:"project",sessionId:"working-chat",connected:true,disabled:false,lease:{claim:()=>true,release:vi.fn()},isCurrent:()=>true,ownerMatches:()=>true};
++  return{tracks,media,request,props,originalReceipt,setOwner:(next:unknown)=>{freshOwner=next;}};
++}
++beforeEach(()=>{localStorage.clear();Context.all=[];Player.all=[];});
++afterEach(()=>{cleanup();localStorage.clear();vi.unstubAllGlobals();});
++const enableMic=async()=>{const button=await screen.findByRole<HTMLButtonElement>("button",{name:"Unmute microphone"});await waitFor(()=>expect(button.disabled).toBe(false));fireEvent.click(button);await screen.findByRole("button",{name:"Mute microphone"});};
++describe("local microphone control with inert devices and original active call",()=>{
++  it("releases tracks/graph while keeping the original active agent and poll identity",async()=>{
++    const f=setup();render(<VoiceChat {...f.props}/>);await enableMic();const before=localStorage.getItem("veyra.voice-chat.v1:project:working-chat");
++    fireEvent.click(screen.getByRole("button",{name:"Mute microphone"}));await screen.findByRole("button",{name:"Unmute microphone"});
++    expect(f.tracks[0].stop).toHaveBeenCalledTimes(1);expect(Context.all[0].processor.onaudioprocess).toBeNull();expect(Context.all[0].processor.disconnect).toHaveBeenCalledTimes(1);expect(Context.all[0].close).toHaveBeenCalledTimes(1);
++    expect(screen.getByText("Thinking")).toBeTruthy();expect(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")).toBe(before);
++    fireEvent.click(screen.getByRole("button",{name:"Check original voice session and controls"}));await waitFor(()=>expect(f.request.mock.calls.filter(([,path])=>path===`/v1/voice/sessions/${sessionId}`).length).toBeGreaterThan(1));
++    expect(f.request.mock.calls.some(([method])=>method==="POST")).toBe(false);
++  });
++  it("retains an entire unconfirmed frame, refuses implicit replay, and requires explicit discard before unmute",async()=>{
++    const f=setup();render(<VoiceChat {...f.props}/>);await enableMic();Context.all[0].frame();
++    fireEvent.click(screen.getByRole("button",{name:"Mute microphone"}));await screen.findByRole("button",{name:"Export complete unsubmitted capture"});
++    expect(screen.getByRole<HTMLButtonElement>("button",{name:"Unmute microphone"}).disabled).toBe(true);expect(f.media).toHaveBeenCalledTimes(1);
++    fireEvent.click(screen.getByRole("button",{name:"Discard unsubmitted capture"}));await enableMic();expect(f.media).toHaveBeenCalledTimes(2);
++    expect(f.request.mock.calls.some(([method])=>method==="POST")).toBe(false);expect(JSON.parse(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")!)).toEqual(f.originalReceipt);
++  });
++  it("preserves the exact claimed played ACK through local mute and fresh unmute",async()=>{
++    const f=setup(true);render(<VoiceChat {...f.props}/>);await enableMic();
++    fireEvent.click(screen.getByRole("button",{name:"Check original voice session and controls"}));await waitFor(()=>expect(Player.all).toHaveLength(1));
++    const claim=f.request.mock.calls.find(([method,,body])=>method==="POST"&&(body as {played?:boolean})?.played===false)![2] as {claim_id:string;generation:number;child_request_id:string};
++    fireEvent.click(screen.getByRole("button",{name:"Mute microphone"}));await screen.findByRole("button",{name:"Unmute microphone"});expect(Player.all[0].pause).not.toHaveBeenCalled();
++    await enableMic();Player.all[0].onended?.();
++    await waitFor(()=>expect(f.request.mock.calls.some(([method,,body])=>method==="POST"&&(body as {played?:boolean})?.played===true)).toBe(true));
++    const ack=f.request.mock.calls.find(([method,,body])=>method==="POST"&&(body as {played?:boolean})?.played===true)![2];expect(ack).toEqual({...claim,played:true});
++    expect(f.request.mock.calls.filter(([method])=>method==="POST")).toHaveLength(2);expect(Player.all).toHaveLength(1);
++  });
++  it("does not reacquire after reconnect or owner change without explicit valid consent",async()=>{
++    const f=setup();const view=render(<VoiceChat {...f.props}/>);await enableMic();fireEvent.click(screen.getByRole("button",{name:"Mute microphone"}));await screen.findByRole("button",{name:"Unmute microphone"});
++    view.rerender(<VoiceChat {...f.props} connected={false}/>);view.rerender(<VoiceChat {...f.props}/>);await Promise.resolve();expect(f.media).toHaveBeenCalledTimes(1);
++    f.setOwner({fixture:"changed-owner"});fireEvent.click(screen.getByRole("button",{name:"Unmute microphone"}));await screen.findByText(/original call owner or current configuration changed/);
++    expect(f.media).toHaveBeenCalledTimes(1);expect(f.request.mock.calls.some(([method])=>method==="POST")).toBe(false);
++  });
++  it("cancels pending permission without ending or resubmitting the original call",async()=>{
++    let resolve:(value:unknown)=>void=()=>{};const permission=new Promise<unknown>(yes=>{resolve=yes;});const f=setup(false,permission);render(<VoiceChat {...f.props}/>);
++    const button=await screen.findByRole<HTMLButtonElement>("button",{name:"Unmute microphone"});await waitFor(()=>expect(button.disabled).toBe(false));fireEvent.click(button);
++    await waitFor(()=>expect(f.media).toHaveBeenCalledTimes(1));fireEvent.click(screen.getByRole("button",{name:"Cancel microphone request"}));const late=new Track();resolve({getTracks:()=>[late],getAudioTracks:()=>[late]});
++    await waitFor(()=>expect(late.stop).toHaveBeenCalledTimes(1));expect(Context.all).toHaveLength(0);expect(f.request.mock.calls.some(([method])=>method==="POST")).toBe(false);
++    expect(JSON.parse(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")!)).toEqual(f.originalReceipt);
++  });
++});
+--- a/apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx
++++ b/apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx
+@@ -83,7 +83,7 @@
+     const request = gateway(voice);
+     render(<VoiceWorkspace {...common} request={request} compact/>);
+     await screen.findByText(/original session's speech voice is missing or unsupported/);
+-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Resume microphone" }).disabled).toBe(true);
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Unmute microphone" }).disabled).toBe(true);
+     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Stop voice chat" }).disabled).toBe(false);
+     expect(screen.getByRole("button", { name: "Check original voice session and controls" })).toBeTruthy();
+     expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Configured speech voice" }).value).toBe(voice || "");
+@@ -95,7 +95,7 @@
+     const request = gateway("af_sky");
+     render(<VoiceWorkspace {...common} request={request} compact/>);
+     await waitFor(() => expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Configured speech voice" }).value).toBe("af_sky"));
+-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Resume microphone" }).disabled).toBe(false);
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Unmute microphone" }).disabled).toBe(false);
+     expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
+   });
+   it("keeps malformed original storage visible without replacement", async () => {

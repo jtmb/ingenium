@@ -1,0 +1,42 @@
+{
+  "baseTree": "4e8e29436cfe42c81cc6401599cf8d224357a928",
+  "precondition": "presentation patch4b29dacb1a5edcde8b3a4175d0983f54b5c5a477e02ad2329344e35e3777475f applied",
+  "files": [
+    {
+      "path": "apps/web/src/features/workbench/VoiceChat.tsx",
+      "beforeSha256": "8917e7ed36c1486b2a0a8b0fcb71184c5ec1568bfb5d7f021fca4f8f980cd9e5",
+      "afterSha256": "266a921de3e448f67c69cba66892534c137cc327da3bde3485e8156985ab24c0"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/call-presentation.mjs",
+      "beforeSha256": "c21fd46cf9f801c148f1cfcefccf02e10b16adab74901581d7ec913b6d7b071d",
+      "afterSha256": "334f9f26330ecccdb4984af8da0ffbd324125f9605afa6fd98e7119ac164ee8e"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/call-presentation.d.mts",
+      "beforeSha256": "cb628c6c7846c3e87a600108b997f39e8a3a7157f9c0e8d155411c4cfb7002ba",
+      "afterSha256": "40cd8a5469e9e275b368306d5feb8604a98582bc2d5a55f6194c67a9f0283e39"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/local-capture.mjs",
+      "beforeSha256": null,
+      "afterSha256": "a63cc26d18ac7f8b6d8b47ec2aa909f440526848cb4edc9336a543b1e9554d6a"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/local-capture.d.mts",
+      "beforeSha256": null,
+      "afterSha256": "beb8e6e6b0ffb1bb47d56c182bca7c15d3c69f36ab7cd9dacad59b756d15f1a6"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/LocalMute.test.tsx",
+      "beforeSha256": null,
+      "afterSha256": "9580062f114de4a42a5229fbe03c31d2e6443c2224f14d171f5d989ccae6ecb5"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx",
+      "beforeSha256": "fb78f728a65164988691e3ac7409b003e0350299dd2c5de4d8edb07338d8bd79",
+      "afterSha256": "2a959031743209363a465e43e20fb05384ae401f8943935a07f87f4dfbf3a120"
+    }
+  ],
+  "patchSha256": "3bc0523dc11e018f89c544d631ec739b6106d3ac4dc45052e509b1bdecdcff46"
+}
