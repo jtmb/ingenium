@@ -87,7 +87,7 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
     scopeKey(scope);
     if (authorizeOperation({ request, principal, scope, execution, permission, chatId }) !== true) denied();
     if (chatId !== null) {
-      const chat = resolveChatBinding({ request, principal, scope, execution, chatId });
+      const chat = resolveChatBinding({ request, principal, scope, execution, chatId, permission });
       if (!chat || chat.chatId !== chatId || chat.runtimeId !== execution.runtimeId || chat.available !== true || chat.visibility !== 'private'
         || ['organizationId', 'ownerUserId', 'projectId', 'workspaceId', 'hostId', 'environmentId', 'bindingHash', 'bindingEpoch'].some((field) => chat[field] !== scope[field])) denied();
     }
@@ -114,8 +114,10 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
     const state = resolveSourceState({ request, principal: current.principal, scope, execution: current.execution, chatId,
       messageId, conversationId: row.conversation_id, role: row.role, contentHash: row.content_hash });
     if (!state || ['active', 'excluded', 'uncertain', 'idleEligible'].some((field) => typeof state[field] !== 'boolean') || state.excluded || state.uncertain) return null;
+    if (state.eligibilityVersion !== undefined && (typeof state.eligibilityVersion !== 'string' || !state.eligibilityVersion.trim() || state.eligibilityVersion.length > 128)) return null;
     return { content: row.content, role: row.role, contentHash: row.content_hash, kind: row.role === 'tool' ? 'tool' : 'transcript',
       active: state.active, excluded: state.excluded, uncertain: state.uncertain, idleEligible: state.idleEligible,
+      ...(state.eligibilityVersion === undefined ? {} : { eligibilityVersion: state.eligibilityVersion }),
       contentKind: 'untrusted_context_data', instructionAuthority: false };
   }
   const memory = new MemoryLifecycle({ db, clock,

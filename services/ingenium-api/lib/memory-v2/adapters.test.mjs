@@ -28,7 +28,7 @@ function fixture() {
   db.prepare('INSERT INTO context_messages VALUES (?,?,?,?,?,?)').run('message-a','project-a','conversation-a',content,sha(content),'user');
   let activeTransaction = false, currentDb = db;
   Object.defineProperty(db,'inTransaction',{ get: () => activeTransaction });
-  const state = { principal: { type: 'user', id: 'user-a', scopes: ['memory:*'] }, attestation: null, allowed: true, chatAllowed: true,
+  const state = { principal: { type: 'user', id: 'user-a', scopes: ['memory:*'] }, attestation: null, allowed: true, chatAllowed: true, archivedSource: false,
     source: { active: false, excluded: false, uncertain: false, idleEligible: true }, calls: [], resolveLegacy: 0 };
   const ports = {
     core: { getDb: () => currentDb, execTransaction: (work,retries) => {
@@ -42,7 +42,7 @@ function fixture() {
     authenticate: () => ({ principal: state.principal, attestation: state.attestation }),
     resolveExistingScope: (input) => { state.resolveLegacy++; assert.equal(input.allowProjectVisibility,false); return { ...ownership }; },
     resolveExecution: ({ ownership: row,runtimeId }) => ({ ...row, mode: 'runtime', runtimeId, hostId: 'actual-host', environmentId: 'actual-env', available: true }),
-    resolveChatBinding: ({ scope,execution,chatId }) => state.chatAllowed ? { ...scope, runtimeId: execution.runtimeId, chatId, available: true } : null,
+    resolveChatBinding: ({ scope,execution,chatId,permission }) => state.chatAllowed && (!state.archivedSource || chatId !== 'chat-a' || permission === 'read-source') ? { ...scope, runtimeId: execution.runtimeId, chatId, available: true } : null,
     authorizeOperation: () => state.allowed,
     resolveSourceState: () => state.source,
   };
@@ -209,4 +209,29 @@ test('legacy scope denial becomes FORBIDDEN while an unexpected core failure rem
       assert.equal(JSON.stringify(result).includes('unexpected core fixture failure'),false);
     }
   } finally { f.db.close(); }
+});
+
+test('archived readable source remains recallable while active chat operations stay denied and forget remains final', () => {
+  const f=fixture();
+  try {
+    const scope=f.session.resolveScope('generate','chat-a');
+    f.session.memory.setPolicy(scope,{operationId:'archive-enable',expectedRevision:0,enabled:true,generate:true,useMemory:true,externalContext:false});
+    f.session.memory.setChatPolicy(scope,'chat-a',{operationId:'archive-contribute',expectedRevision:0,useMemory:true,contribute:true});
+    const refs=[{id:'message-a',contentHash:sha(f.content)}];
+    const saved=f.session.memory.commitRecall(scope,{operationId:'before-archive',admission:f.session.memory.admit(scope,'chat-a',refs),content:'Qualified recall',model:'fixture'});
+    f.state.archivedSource=true;
+    assert.equal(f.session.memory.recall(scope,'fresh-active-chat').items.length,1);
+    assert.throws(()=>f.session.memory.policy(scope,'chat-a'),code('FORBIDDEN'));
+    assert.throws(()=>f.session.memory.setChatPolicy(scope,'chat-a',{operationId:'archived-control',expectedRevision:1,useMemory:false,contribute:false}),code('FORBIDDEN'));
+    assert.throws(()=>f.session.memory.admit(scope,'chat-a',refs),code('FORBIDDEN'));
+    f.state.source.excluded=true;
+    assert.equal(f.session.memory.recall(scope,'fresh-active-chat').items.length,0);
+    f.state.source.excluded=false;
+    assert.equal(f.session.memory.recall(scope,'fresh-active-chat').items.length,1);
+    f.session.memory.forget(scope,{operationId:'forget-archived',memoryId:saved.receipt.memoryId,expectedVersion:1});
+    assert.equal(f.session.memory.recall(scope,'fresh-active-chat').items.length,0);
+    f.state.archivedSource=false;
+    assert.throws(()=>f.session.memory.admit(scope,'chat-a',refs),code('SOURCE_FORGOTTEN'));
+    assert.throws(()=>createApiMemorySession({...f.ports,selected:{...selected,purpose:'history'}}),code('INVALID_INPUT'));
+  } finally {f.db.close();}
 });

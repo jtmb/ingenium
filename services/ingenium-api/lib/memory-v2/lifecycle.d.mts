@@ -5,8 +5,8 @@ export interface MemoryScope {
 export type MemoryPermission = "read" | "write-policy" | "generate" | "read-source" | "forget" | "backup" | "restore";
 export interface HostPolicy { revision: number; enabled: boolean; generate: boolean; useMemory: boolean; externalContext: boolean }
 export interface ChatPolicy { revision: number; useMemory: boolean; contribute: boolean }
-export interface SourceRef { id: string; contentHash: string }
-export interface SourceState { contentHash: string; active: boolean; excluded: boolean; uncertain: boolean; idleEligible: boolean; kind: "transcript" | "tool" | "external" }
+export interface SourceRef { id: string; contentHash: string; eligibilityVersion?: string }
+export interface SourceState { contentHash: string; active: boolean; excluded: boolean; uncertain: boolean; idleEligible: boolean; kind: "transcript" | "tool" | "external"; eligibilityVersion?: string }
 export interface Admission {
   schemaVersion: 1; scopeHash: string; chatId: string; policyRevision: number; chatRevision: number;
   sources: (SourceRef & { kind: SourceState["kind"]; chatId: string })[]; inputHash: string;

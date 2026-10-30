@@ -6,6 +6,7 @@ export class MemoryError extends Error {
 const fail = (code) => { throw new MemoryError(code); };
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const hash = (value) => digest(JSON.stringify(value));
+const sourceInputHash = (sources) => hash(sources.map(({ eligibilityVersion, ...source }) => source));
 const text = (value, max = 256) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max) fail('INVALID_INPUT');
   return value;
@@ -126,14 +127,16 @@ export class MemoryLifecycle {
       if (source.kind !== 'transcript' && !externalContext) fail('EXTERNAL_CONTEXT_EXCLUDED');
       // Suppress the source identity, including revised versions, after forget.
       if (this.suppressed(key, 'source', id)) fail('SOURCE_FORGOTTEN');
-      return { id, contentHash, kind: source.kind, chatId };
+      if (source.eligibilityVersion !== undefined && (typeof source.eligibilityVersion !== 'string' || !source.eligibilityVersion.trim() || source.eligibilityVersion.length > 128)) fail('SOURCE_UNAVAILABLE');
+      if (ref.eligibilityVersion !== undefined && ref.eligibilityVersion !== source.eligibilityVersion) fail('STALE_ADMISSION');
+      return { id, contentHash, kind: source.kind, chatId, ...(source.eligibilityVersion === undefined ? {} : { eligibilityVersion: source.eligibilityVersion }) };
     }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   }
   admit(scope, chatId, sourceRefs) {
     const key = this.access(scope, 'generate', chatId);
     const { policy, chat } = this.generationState(key, chatId);
     const sources = this.validateSources(scope, key, chatId, sourceRefs, policy.externalContext);
-    return { schemaVersion: 1, scopeHash: digest(key), chatId, policyRevision: policy.revision, chatRevision: chat.revision, sources, inputHash: hash(sources) };
+    return { schemaVersion: 1, scopeHash: digest(key), chatId, policyRevision: policy.revision, chatRevision: chat.revision, sources, inputHash: sourceInputHash(sources) };
   }
   processedExtraction(scope, admission) {
     const key = this.access(scope, 'generate', admission?.chatId);
@@ -152,7 +155,7 @@ export class MemoryLifecycle {
       const { policy, chat } = this.generationState(key, admission.chatId);
       if (admission.scopeHash !== digest(key) || admission.policyRevision !== policy.revision || admission.chatRevision !== chat.revision) fail('STALE_ADMISSION');
       const sources = this.validateSources(scope, key, admission.chatId, admission.sources, policy.externalContext);
-      if (hash(sources) !== admission.inputHash) fail('STALE_ADMISSION');
+      if (sourceInputHash(sources) !== admission.inputHash) fail('STALE_ADMISSION');
       const contentHash = digest(content);
       if (this.suppressed(key, 'content', contentHash)) fail('CONTENT_FORGOTTEN');
       if (this.db.prepare('SELECT 1 FROM veyra_memory_extraction WHERE scope_key=? AND input_hash=?').get(key, admission.inputHash)) fail('INPUT_ALREADY_PROCESSED');

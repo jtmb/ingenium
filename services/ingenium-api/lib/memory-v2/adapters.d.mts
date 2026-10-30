@@ -20,9 +20,9 @@ export interface MemoryApiPorts<RequestContext = unknown> {
   resolveExistingScope: (input: { projectId: string; workspaceId: string; allowProjectVisibility: false;
     principal: { type: 'user'; userId: string } | { type: 'service'; servicePrincipalId: string; credentialId: string; storageMappingHash: string } }) => { organizationId: string; projectId: string; workspaceId: string; ownerUserId: string };
   resolveExecution: (input: { request: RequestContext; principal: MemoryActor; ownership: WorkspaceOwnership; runtimeId: string }) => AuthenticatedExecution | null;
-  resolveChatBinding: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string }) => ChatBinding | null;
+  resolveChatBinding: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string; permission: MemoryPermission }) => ChatBinding | null;
   authorizeOperation: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; permission: MemoryPermission; chatId: string | null }) => boolean;
-  resolveSourceState: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string; messageId: string; conversationId: string; role: 'user' | 'assistant' | 'tool'; contentHash: string }) => Pick<SourceState,'active' | 'excluded' | 'uncertain' | 'idleEligible'> | null;
+  resolveSourceState: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string; messageId: string; conversationId: string; role: 'user' | 'assistant' | 'tool'; contentHash: string }) => Pick<SourceState,'active' | 'excluded' | 'uncertain' | 'idleEligible' | 'eligibilityVersion'> | null;
   resolveProjectlessScope?: (input: { request: RequestContext; principal: MemoryActor; workspaceId: string }) => (WorkspaceOwnership & { projectId: null; visibility: 'private' }) | null;
   clock?: () => string;
 }
