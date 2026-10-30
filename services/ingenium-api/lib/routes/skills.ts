@@ -1,7 +1,8 @@
-import { Router } from "express";
-import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations } from "ingenium-core";
+import { Router, type Request, type Response } from "express";
+import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations, authorization } from "ingenium-core";
 import type { Skill, SkillVersion, SkillLineage, SkillProposal, SkillProposalSummary } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { toAuthorizationPrincipal } from "../authorization-policy.js";
 import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 import fs from "fs";
 import path from "path";
@@ -19,6 +20,32 @@ const SKILL_PROPOSAL_LIST_RETIRED_ERROR = {
     message: "Use /api/v1/skills/proposals/page and /api/v1/skills/proposals/counts instead.",
   },
 } as const;
+
+/** A target-project grant never grants the separate source project. These
+ * handlers are synchronous through their Core transaction, so the original
+ * middleware principal and current membership are checked immediately before
+ * the source read/write. Legacy direct-router fixtures retain their old mode. */
+function requireSkillSource(req: Request, res: Response, sourceProjectId: string, permission: authorization.AuthorizationPermission): boolean {
+  if (!req.authorizationPolicy) return true;
+  const decision = req.principal
+    ? authorization.requireProjectPermission(toAuthorizationPrincipal(req.principal), sourceProjectId, "skills", permission)
+    : { allowed: false, visible: false };
+  if (decision.allowed) return true;
+  res.status(decision.visible ? 403 : 404).json({ error: {
+    code: decision.visible ? "FORBIDDEN" : "NOT_FOUND",
+    message: decision.visible ? "The authenticated principal cannot perform this action" : "Resource not found",
+  } });
+  return false;
+}
+
+function requireMergeMutationSource(req: Request, res: Response, projectId: string, proposalId: string): boolean {
+  const proposal = skillGovernance.getProposal(projectId, proposalId);
+  if (proposal?.proposal_type !== "merge" || !proposal.source_project_id) return true;
+  // Archive/restore use the existing admin mutation policy on both projects.
+  if (!requireSkillSource(req, res, proposal.source_project_id, "admin")) return false;
+  return checkSkillLock(req, res, proposal.source_project_id,
+    proposal.source_project_id === projectId ? "x-ingenium-lock-token" : "x-ingenium-source-lock-token");
+}
 
 //
 // Skill rows (list / get / create / update / archive / restore / rollback / sync)
@@ -322,6 +349,7 @@ skillsRouter.get("/proposals/:proposalId", (req, res) => {
 
       // sourceSkill: for merge proposals, fetch the source skill
       if (p.proposal_type === "merge" && p.source_project_id && p.source_name) {
+        if (!requireSkillSource(req, res, p.source_project_id, "read")) return;
         const source = skills.getSkill(p.source_project_id, p.source_name);
         if (source) {
           (dto as any).sourceSkill = {
@@ -396,6 +424,9 @@ skillsRouter.post("/proposals", (req, res) => {
   }
   const proposedStateJson = JSON.stringify(coreProposedState);
 
+  if (proposalType === "merge" && typeof sourceProjectId === "string"
+    && !requireSkillSource(req, res, sourceProjectId, "read")) return;
+
   try {
     const proposal = skillGovernance.createProposal(
       projectId, proposalType, targetName, proposedStateJson,
@@ -456,6 +487,7 @@ skillsRouter.post("/proposals/:proposalId/approve", (req, res) => {
   }
 
   try {
+    if (!requireMergeMutationSource(req, res, projectId, req.params.proposalId!)) return;
     const result = skillGovernance.approveProposal(projectId, req.params.proposalId!, reviewer.trim(), reason);
     res.json({ data: proposalToDto(result) });
   } catch (err) {
@@ -504,6 +536,7 @@ skillsRouter.post("/proposals/:proposalId/rollback", (req, res) => {
   }
 
   try {
+    if (!requireMergeMutationSource(req, res, projectId, req.params.proposalId!)) return;
     const result = skillGovernance.rollbackProposal(projectId, req.params.proposalId!, reviewer.trim(), reason);
     res.json({ data: proposalToDto(result) });
   } catch (err) {
@@ -536,6 +569,7 @@ skillsRouter.post("/lineage", (req, res) => {
   }
 
   try {
+    if (!requireSkillSource(req, res, sourceProjectId, "read")) return;
     const lineage = skillGovernance.createLineage(
       projectId, sourceProjectId, sourceName, targetSkillId,
       sourceHash, mergedFilePaths, tombstonePath, reason,
@@ -778,12 +812,12 @@ skillsRouter.get("/:name", (req, res) => {
  *
  * 🔴 423 response DTO must NOT expose owner_token.
  */
-function checkSkillLock(req: any, res: any, projectId: string): boolean {
+function checkSkillLock(req: any, res: any, projectId: string, tokenHeader = "x-ingenium-lock-token"): boolean {
   const activeLock = maintenanceLocks.getLockStatus(LOCK_RESOURCE, projectId);
 
   if (!activeLock) return true;
 
-  const requestToken = (req.headers["x-ingenium-lock-token"] as string) || "";
+  const requestToken = (req.headers[tokenHeader] as string) || "";
 
   if (requestToken === activeLock.owner_token) {
     return true;
@@ -793,7 +827,7 @@ function checkSkillLock(req: any, res: any, projectId: string): boolean {
   res.status(423).json({
     error: {
       code: "LOCKED",
-      message: `Resource '${LOCK_RESOURCE}' is locked. Provide a valid x-ingenium-lock-token header or retry after ${Math.ceil(retryAfterMs / 1000)}s.`,
+      message: `Resource '${LOCK_RESOURCE}' is locked. Provide a valid ${tokenHeader} header or retry after ${Math.ceil(retryAfterMs / 1000)}s.`,
       retryAfterMs: Math.ceil(retryAfterMs),
       lock: lockToDto(activeLock),
     },

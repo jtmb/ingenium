@@ -5,13 +5,14 @@ import { createServer,type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from "vitest";
-import { authentication,contextConversations,getDb,identity,mcpCredentials,organizations,projects,resetDbForTest,runtimes } from "ingenium-core";
+import { authentication,contextConversations,getDb,identity,mcpCredentials,organizations,projects,resetDbForTest,runtimes,skills,skillGovernance,maintenanceLocks } from "ingenium-core";
 import { config } from "../config/index.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { createMemoryLifecycleRouter } from "../lib/routes/memory-lifecycle.js";
+import { skillsRouter } from "../lib/routes/skills.js";
 import { observeManagedRuntime } from "../lib/runtime-placement-contract.js";
 import { createRequestMemorySession } from "../lib/memory-v2/request-session.js";
 import { positionalCoreConnection } from "../lib/memory-v2/core-session.js";
@@ -45,12 +46,50 @@ beforeAll(async()=>{
  const configured=process.env.VEYRA_MEMORY_HTTP_TEST_ROOT;if(!configured||!isAbsolute(configured))throw Error("Explicit task-owned HTTP fixture root required");root=realpathSync(configured);if(!statSync(root).isDirectory())throw Error("Fixture root unavailable");
  directory=mkdtempSync(join(root,"memory-http-"));if(relative(root,realpathSync(directory)).startsWith(".."))throw Error("Fixture escaped root");const key=join(directory,"fixture-auth-key");writeFileSync(key,Buffer.alloc(32,29).toString("base64url"),{flag:"wx",mode:0o600});
  vi.stubEnv("INGENIUM_HOME",directory);vi.stubEnv("INGENIUM_CORE_DB_PATH",join(directory,"data.db"));vi.stubEnv("INGENIUM_GLOBAL_CONFIG_PATH",join(directory,"opencode-global"));vi.stubEnv("INGENIUM_AUTH_ENCRYPTION_KEY_FILE",key);vi.stubEnv("INGENIUM_API_TOKEN","fixture-installation-key-".repeat(3));vi.stubEnv("INGENIUM_API_TOKEN_FILE","");vi.stubEnv("INGENIUM_DEPLOYMENT_MODE","control-plane");resetDbForTest();getDb();
- const app=express();app.use(express.json());app.use(authMiddleware);app.use((req,_res,next)=>{admittedRequest=req;next();});app.use(csrfMiddleware);app.use(authorizationMiddleware);app.use("/api/v1/memory/lifecycle",createMemoryLifecycleRouter());app.use(errorHandler);
+ const app=express();app.use(express.json());app.use(authMiddleware);app.use((req,_res,next)=>{admittedRequest=req;next();});app.use(csrfMiddleware);app.use(authorizationMiddleware);app.use("/api/v1/memory/lifecycle",createMemoryLifecycleRouter());app.use("/api/v1/skills",skillsRouter);app.use(errorHandler);
  server=createServer(app);await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 beforeEach(()=>{vi.restoreAllMocks();fixture=setup();vi.spyOn(manager,"inspectManagedRuntimePlacement").mockImplementation(async()=>fixture.observation());});
 afterAll(async()=>{vi.restoreAllMocks();if(server)await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));resetDbForTest();vi.unstubAllEnvs();if(directory)writeFileSync(join(root,`${basename(directory)}-fixture.json`),JSON.stringify({owner:"01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",directory,databaseClosed:true,httpServerClosed:true,containsRealUserData:false,regeneration:"Run memory-lifecycle-http.test.ts with existing task-owned root",consumer:"Review first result then safety-checked exact fixture cleanup"},null,2),{flag:"wx"});});
 describe("real HTTP, authentication, CSRF and memory ownership composition",()=>{
+ it("requires current source mutation permission and its original maintenance lock for merge approve and rollback",async()=>{
+  const sourceOrg=organizations.createOrganization("Merge mutation source fixture",`merge-mutation-${sequence}`);
+  const sourceProject=projects.createProject(`http-merge-mutation-${sequence}`,false,sourceOrg);
+  skills.createSkill(sourceProject.id,"merge-origin","Fixture description","Retained original fixture");
+  const proposal=skillGovernance.createProposal(fixture.project.id,"merge","merge-result",JSON.stringify({description:"Candidate",content:"Merged fixture"}),{sourceProjectId:sourceProject.id,sourceName:"merge-origin"});
+  skillGovernance.submitProposal(fixture.project.id,proposal.id);
+  const endpoint=`${origin}/api/v1/skills/proposals/${proposal.id}`;
+  const act=(action:string,extra:Record<string,string>={})=>fetch(`${endpoint}/${action}?project=${fixture.project.name}`,{method:"POST",headers:{...browser(fixture.session,true),...extra},body:JSON.stringify({reviewer:"Fixture reviewer"})});
+  const before=skills.getSkill(sourceProject.id,"merge-origin");
+  expect((await act("approve")).status).toBe(404);expect(skills.getSkill(sourceProject.id,"merge-origin")).toEqual(before);expect(skillGovernance.getProposal(fixture.project.id,proposal.id)?.status).toBe("pending");
+  organizations.addOrganizationMember(sourceOrg,fixture.owner.id,"admin");
+  const token="fixture-source-maintenance-owner";expect(maintenanceLocks.acquireLock("skills",sourceProject.id,token,300000)).toBe(true);
+  try {
+   const locked=await act("approve");expect(locked.status).toBe(423);expect((await locked.json()).error.lock.projectId).toBe(sourceProject.id);expect(skills.getSkill(sourceProject.id,"merge-origin")).toEqual(before);
+   expect((await act("approve",{"x-ingenium-source-lock-token":token})).status).toBe(200);expect(skillGovernance.getProposal(fixture.project.id,proposal.id)?.status).toBe("applied");
+   const archived=skills.getSkill(sourceProject.id,"merge-origin");expect(archived?.archived_at).toBeTruthy();
+   organizations.removeOrganizationMember(sourceOrg,fixture.owner.id);
+   expect((await act("rollback",{"x-ingenium-source-lock-token":token})).status).toBe(404);expect(skills.getSkill(sourceProject.id,"merge-origin")).toEqual(archived);
+   organizations.addOrganizationMember(sourceOrg,fixture.owner.id,"admin");
+   expect((await act("rollback")).status).toBe(423);
+   expect((await act("rollback",{"x-ingenium-source-lock-token":token})).status).toBe(200);expect(skills.getSkill(sourceProject.id,"merge-origin")?.archived_at).toBeNull();
+  } finally {maintenanceLocks.releaseLock("skills",sourceProject.id,token);}
+ });
+ it("checks current source-project permission before merge skill enrichment",async()=>{
+  const sourceOrg=organizations.createOrganization("Foreign source fixture",`merge-source-${sequence}`);
+  const sourceProject=projects.createProject(`http-merge-source-${sequence}`,false,sourceOrg);
+  skills.createSkill(sourceProject.id,"source-only","Fixture description","Private source fixture bytes");
+  const proposal=skillGovernance.createProposal(fixture.project.id,"merge","merged-fixture",JSON.stringify({description:"Reviewed candidate",content:"Candidate fixture"}),{sourceProjectId:sourceProject.id,sourceName:"source-only"});
+  const endpoint=`${origin}/api/v1/skills/proposals/${proposal.id}?project=${fixture.project.name}`;
+  const reads=vi.spyOn(skills,"getSkill");
+  const denied=await fetch(endpoint,{headers:browser()});expect(denied.status).toBe(404);expect(await denied.json()).toEqual({error:{code:"NOT_FOUND",message:"Resource not found"}});
+  expect(reads.mock.calls.some(([project])=>project===sourceProject.id)).toBe(false);
+  const plain=await fetch(endpoint+"&enrich=false",{headers:browser()});expect(plain.status).toBe(200);expect((await plain.json()).data).not.toHaveProperty("sourceSkill");
+  organizations.addOrganizationMember(sourceOrg,fixture.owner.id,"admin");
+  const allowed=await fetch(endpoint,{headers:browser()});expect(allowed.status).toBe(200);expect((await allowed.json()).data.sourceSkill).toMatchObject({projectId:sourceProject.id,name:"source-only",content:"Private source fixture bytes"});
+  reads.mockClear();organizations.removeOrganizationMember(sourceOrg,fixture.owner.id);
+  expect((await fetch(endpoint,{headers:browser()})).status).toBe(404);expect(reads.mock.calls.some(([project])=>project===sourceProject.id)).toBe(false);
+ });
  it("primes actual-owner canonical source reads before fresh-chat recall and preserves a later incomplete tail",async()=>{
   expect((await fetch(url("/scope-policy"),{headers:browser()})).status).toBe(200);
   const request=admittedRequest!;
