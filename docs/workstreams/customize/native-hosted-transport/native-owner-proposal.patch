@@ -822,7 +822,7 @@ new file mode 100644
 +#[serde(rename_all="camelCase",deny_unknown_fields)]
 +pub struct Reviewed {
 + pub status:String,pub updated_at:String,pub target_skill_id:Option<String>,pub source_project_id:Option<String>,pub source_name:Option<String>,
-+ pub expected_revision:Option<u32>,pub expected_source_revision:Option<u32>,pub current_target:Option<Target>,pub current_source:Option<Source>,
++ pub expected_revision:Option<u32>,pub expected_source_revision:Option<u32>,pub current_target:Option<Target>,pub current_source:Option<Source>,pub proposal_hash:String,
 +}
 +#[derive(Clone,Serialize,Deserialize,PartialEq)]
 +#[serde(deny_unknown_fields)]
@@ -870,23 +870,109 @@ new file mode 100644
 +   Self::Save{name:n,file_path,target:t,extra,..}=>name(n)&&target(t)&&!file_path.is_empty()&&!file_path.contains('\\')&&file_path.split('/').all(|p|!["",".",".."].contains(&p))&&[0,1].contains(&extra.always_apply),
 +   Self::Archive{name:n,target:t}|Self::Restore{name:n,target:t}|Self::Enable{name:n,target:t}|Self::Disable{name:n,target:t}=>name(n)&&target(t),
 +   Self::Approve{id,reviewed,reviewer,..}|Self::Reject{id,reviewed,reviewer,..}|Self::Rollback{id,reviewed,reviewer,..}=>{
-+    !id.is_empty()&&!reviewer.trim().is_empty()&&reviewer.len()<=256&&!reviewed.status.is_empty()&&!reviewed.updated_at.is_empty()&&
++    reviewed.proposal_hash.len()==64&&reviewed.proposal_hash.bytes().all(|b|b.is_ascii_hexdigit())&&!id.is_empty()&&!reviewer.trim().is_empty()&&reviewer.len()<=256&&!reviewed.status.is_empty()&&!reviewed.updated_at.is_empty()&&
 +    reviewed.current_target.as_ref().is_none_or(|t|target(t)&&reviewed.target_skill_id.as_ref()==Some(&t.id))&&
 +    (reviewed.target_skill_id.is_none()||reviewed.current_target.is_some())&&
 +    match (&reviewed.source_project_id,&reviewed.source_name,&reviewed.current_source){
 +     (None,None,None)=>true,(Some(project),Some(n),Some(source))=>!source.id.is_empty()&&source.project_id==*project&&source.name==*n,_=>false
 +    }},
-+   Self::Submit{id,reviewed,..}=>!id.is_empty()&&!reviewed.updated_at.is_empty()&&(reviewed.source_project_id.is_none()||reviewed.current_source.is_some()),
++   Self::Submit{id,reviewed,..}=>reviewed.proposal_hash.len()==64&&reviewed.proposal_hash.bytes().all(|b|b.is_ascii_hexdigit())&&!id.is_empty()&&!reviewed.updated_at.is_empty()&&(reviewed.source_project_id.is_none()||reviewed.current_source.is_some()),
 +   Self::SynthesisRun{session_id,model}=>session_id.as_ref().is_none_or(|id|!id.is_empty()&&id.len()<=256)&&model.as_ref().is_none_or(|m|!m.provider_id.is_empty()&&!m.model_id.is_empty())
 +  }
 + }
 +}
 +impl Read {pub fn capability(&self)->Capability{match self{Self::Catalog{..}=>Capability::Catalog,Self::Skill{..}=>Capability::Skill,Self::Archived=>Capability::Archived,Self::ProposalCounts=>Capability::ProposalCounts,Self::ProposalPage{..}=>Capability::ProposalPage,Self::Proposal{..}=>Capability::Proposal,Self::SynthesisStatus=>Capability::SynthesisStatus,Self::SynthesisModels=>Capability::SynthesisModels,Self::Pipeline=>Capability::Pipeline}}}
+diff --git a/crates/adapters/src/remote_control/hosted/official-vectors.json b/crates/adapters/src/remote_control/hosted/official-vectors.json
+new file mode 100644
+--- /dev/null
++++ b/crates/adapters/src/remote_control/hosted/official-vectors.json
+@@ -0,0 +1,81 @@
++{
++  "schemaVersion": 1,
++  "note": "Synthetic originals only. Hash UTF-8 canonical of whole original; private headers excluded.",
++  "vectors": [
++    {
++      "original": {
++        "id": "original-create-fixture",
++        "binding": {
++          "authorityId": "veyra-hosted-governance:installation-fixture",
++          "connectionId": "connection-fixture",
++          "grantId": "grant-fixture",
++          "grantRevision": 1,
++          "epoch": "epoch-fixture",
++          "nativeLibraryId": "library-fixture",
++          "nativeServiceInstanceId": "native-fixture",
++          "hostedServiceInstanceId": "installation-fixture",
++          "nativeProjectId": "native-project",
++          "nativeProjectRevision": 4,
++          "actorId": "actor-fixture",
++          "installationId": "installation-fixture",
++          "hostedProjectId": "project-fixture",
++          "apiProject": "project-fixture",
++          "visibility": "project"
++        },
++        "command": {
++          "op": "create",
++          "reviewedAbsent": true,
++          "name": "release",
++          "description": "Exact Unicode α",
++          "content": "# Draft  \r\n"
++        }
++      },
++      "canonical": "{\"binding\":{\"actorId\":\"actor-fixture\",\"apiProject\":\"project-fixture\",\"authorityId\":\"veyra-hosted-governance:installation-fixture\",\"connectionId\":\"connection-fixture\",\"epoch\":\"epoch-fixture\",\"grantId\":\"grant-fixture\",\"grantRevision\":1,\"hostedProjectId\":\"project-fixture\",\"hostedServiceInstanceId\":\"installation-fixture\",\"installationId\":\"installation-fixture\",\"nativeLibraryId\":\"library-fixture\",\"nativeProjectId\":\"native-project\",\"nativeProjectRevision\":4,\"nativeServiceInstanceId\":\"native-fixture\",\"visibility\":\"project\"},\"command\":{\"content\":\"# Draft  \\r\\n\",\"description\":\"Exact Unicode α\",\"name\":\"release\",\"op\":\"create\",\"reviewedAbsent\":true},\"id\":\"original-create-fixture\"}",
++      "payloadHash": "06a9ba5281acb7a331855e4895d133a96b8fc9d24e6d9eb0370ede90acbe9314"
++    },
++    {
++      "original": {
++        "id": "original-approve-fixture",
++        "binding": {
++          "authorityId": "veyra-hosted-governance:installation-fixture",
++          "connectionId": "connection-fixture",
++          "grantId": "grant-fixture",
++          "grantRevision": 1,
++          "epoch": "epoch-fixture",
++          "nativeLibraryId": "library-fixture",
++          "nativeServiceInstanceId": "native-fixture",
++          "hostedServiceInstanceId": "installation-fixture",
++          "nativeProjectId": "native-project",
++          "nativeProjectRevision": 4,
++          "actorId": "actor-fixture",
++          "installationId": "installation-fixture",
++          "hostedProjectId": "project-fixture",
++          "apiProject": "project-fixture",
++          "visibility": "project"
++        },
++        "command": {
++          "op": "approve",
++          "id": "proposal-fixture",
++          "reviewer": "Display label",
++          "reviewed": {
++            "status": "pending",
++            "updatedAt": "2026-10-30T00:00:00.000Z",
++            "targetSkillId": "target-fixture",
++            "sourceProjectId": null,
++            "sourceName": null,
++            "expectedRevision": 3,
++            "expectedSourceRevision": null,
++            "currentTarget": {
++              "id": "target-fixture",
++              "revision": 3
++            },
++            "currentSource": null,
++            "proposalHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++          }
++        }
++      },
++      "canonical": "{\"binding\":{\"actorId\":\"actor-fixture\",\"apiProject\":\"project-fixture\",\"authorityId\":\"veyra-hosted-governance:installation-fixture\",\"connectionId\":\"connection-fixture\",\"epoch\":\"epoch-fixture\",\"grantId\":\"grant-fixture\",\"grantRevision\":1,\"hostedProjectId\":\"project-fixture\",\"hostedServiceInstanceId\":\"installation-fixture\",\"installationId\":\"installation-fixture\",\"nativeLibraryId\":\"library-fixture\",\"nativeProjectId\":\"native-project\",\"nativeProjectRevision\":4,\"nativeServiceInstanceId\":\"native-fixture\",\"visibility\":\"project\"},\"command\":{\"id\":\"proposal-fixture\",\"op\":\"approve\",\"reviewed\":{\"currentSource\":null,\"currentTarget\":{\"id\":\"target-fixture\",\"revision\":3},\"expectedRevision\":3,\"expectedSourceRevision\":null,\"proposalHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceName\":null,\"sourceProjectId\":null,\"status\":\"pending\",\"targetSkillId\":\"target-fixture\",\"updatedAt\":\"2026-10-30T00:00:00.000Z\"},\"reviewer\":\"Display label\"},\"id\":\"original-approve-fixture\"}",
++      "payloadHash": "da707d206e5581dd00556dadc3665742df8327ebd0c07c0c3976af791c330a47"
++    }
++  ]
++}
 diff --git a/crates/adapters/src/remote_control/hosted/wire.rs b/crates/adapters/src/remote_control/hosted/wire.rs
 new file mode 100644
 --- /dev/null
 +++ b/crates/adapters/src/remote_control/hosted/wire.rs
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,138 @@
 +//! Frozen Worker5 /api/v1/native-customize v1 only. No legacy API/PATCH proxy.
 +use super::*;
 +use crate::account_vault::node_hosted::Session;
@@ -1010,6 +1096,19 @@ new file mode 100644
 + #[test]fn actual_core_whole_original_canonical_vectors(){
 +  let vectors:Value=serde_json::from_str(include_str!("canonical-vectors.json")).unwrap();
 +  for vector in vectors.as_array().unwrap(){let text=canonical(&vector["value"]).unwrap();assert_eq!(text,vector["canonical"].as_str().unwrap());assert_eq!(hash(text.as_bytes()),vector["sha256"].as_str().unwrap());}
++ }
++}
++
++#[cfg(test)]mod official_whole_originals {
++ use super::*;
++ #[test]fn frozen34351_typed_original_roundtrip_and_hash(){
++  let file:Value=serde_json::from_str(include_str!("official-vectors.json")).unwrap();
++  for vector in file["vectors"].as_array().unwrap(){
++   let original:Original=serde_json::from_value(vector["original"].clone()).unwrap();
++   let serialized=serde_json::to_value(&original).unwrap();assert_eq!(serialized,vector["original"]);
++   assert_eq!(canonical(&serialized).unwrap(),vector["canonical"].as_str().unwrap());
++   assert_eq!(payload_hash(&original).unwrap(),vector["payloadHash"].as_str().unwrap());
++  }
 + }
 +}
 diff --git a/crates/adapters/src/utility_operations/hosted.rs b/crates/adapters/src/utility_operations/hosted.rs

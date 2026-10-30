@@ -38,7 +38,7 @@ pub struct Source {pub id:String,pub project_id:String,pub name:String,pub revis
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Reviewed {
  pub status:String,pub updated_at:String,pub target_skill_id:Option<String>,pub source_project_id:Option<String>,pub source_name:Option<String>,
- pub expected_revision:Option<u32>,pub expected_source_revision:Option<u32>,pub current_target:Option<Target>,pub current_source:Option<Source>,
+ pub expected_revision:Option<u32>,pub expected_source_revision:Option<u32>,pub current_target:Option<Target>,pub current_source:Option<Source>,pub proposal_hash:String,
 }
 #[derive(Clone,Serialize,Deserialize,PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -86,13 +86,13 @@ impl Write {
    Self::Save{name:n,file_path,target:t,extra,..}=>name(n)&&target(t)&&!file_path.is_empty()&&!file_path.contains('\\')&&file_path.split('/').all(|p|!["",".",".."].contains(&p))&&[0,1].contains(&extra.always_apply),
    Self::Archive{name:n,target:t}|Self::Restore{name:n,target:t}|Self::Enable{name:n,target:t}|Self::Disable{name:n,target:t}=>name(n)&&target(t),
    Self::Approve{id,reviewed,reviewer,..}|Self::Reject{id,reviewed,reviewer,..}|Self::Rollback{id,reviewed,reviewer,..}=>{
-    !id.is_empty()&&!reviewer.trim().is_empty()&&reviewer.len()<=256&&!reviewed.status.is_empty()&&!reviewed.updated_at.is_empty()&&
+    reviewed.proposal_hash.len()==64&&reviewed.proposal_hash.bytes().all(|b|b.is_ascii_hexdigit())&&!id.is_empty()&&!reviewer.trim().is_empty()&&reviewer.len()<=256&&!reviewed.status.is_empty()&&!reviewed.updated_at.is_empty()&&
     reviewed.current_target.as_ref().is_none_or(|t|target(t)&&reviewed.target_skill_id.as_ref()==Some(&t.id))&&
     (reviewed.target_skill_id.is_none()||reviewed.current_target.is_some())&&
     match (&reviewed.source_project_id,&reviewed.source_name,&reviewed.current_source){
      (None,None,None)=>true,(Some(project),Some(n),Some(source))=>!source.id.is_empty()&&source.project_id==*project&&source.name==*n,_=>false
     }},
-   Self::Submit{id,reviewed,..}=>!id.is_empty()&&!reviewed.updated_at.is_empty()&&(reviewed.source_project_id.is_none()||reviewed.current_source.is_some()),
+   Self::Submit{id,reviewed,..}=>reviewed.proposal_hash.len()==64&&reviewed.proposal_hash.bytes().all(|b|b.is_ascii_hexdigit())&&!id.is_empty()&&!reviewed.updated_at.is_empty()&&(reviewed.source_project_id.is_none()||reviewed.current_source.is_some()),
    Self::SynthesisRun{session_id,model}=>session_id.as_ref().is_none_or(|id|!id.is_empty()&&id.len()<=256)&&model.as_ref().is_none_or(|m|!m.provider_id.is_empty()&&!m.model_id.is_empty())
   }
  }

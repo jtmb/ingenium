@@ -13,7 +13,7 @@ diff --git a/apps/web/src/features/customize/hosted-governance/contracts.ts b/ap
    last_synthesis_at: string | null; incompleteBatch: null | {stage: string; observationCount: number; hasStoredProposalPlan: boolean;
      errorCount: number; lastErrorCode: string | null; createdAt: string; updatedAt: string; leaseState: string}};
  export type ModelProvider = {providerId: string; label: string; models: {id: string; label: string}[]; defaultModel?: string};
-+export type Reviewed = {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null;currentTarget:{id:string;revision:number}|null;currentSource:{id:string;projectId:string;name:string;revision:number}|null};
++export type Reviewed = {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null;currentTarget:{id:string;revision:number}|null;currentSource:{id:string;projectId:string;name:string;revision:number}|null;proposalHash:string};
  export type Binding = Readonly<{
    authorityId: string; connectionId: string; grantId: string; grantRevision: number; epoch: string;
    nativeLibraryId: string; nativeServiceInstanceId: string; hostedServiceInstanceId: string; nativeProjectId: string | null; nativeProjectRevision: number | null;
@@ -49,7 +49,7 @@ diff --git a/apps/web/src/features/customize/hosted-governance/client.ts b/apps/
    if(!obj(c)||!Object.hasOwn(fields,c.op)||Object.keys(c).some(key=>!fields[c.op].includes(key)))throw new Error("This governance operation is not allowlisted.");
    const exactSubset=(value:unknown,keys:string[])=>obj(value)&&Object.keys(value).every(key=>keys.includes(key));
    if("target" in c&&!exactSubset(c.target,["id","revision"])||"extra" in c&&!exactSubset(c.extra,["tags","always_apply","files"])
-+    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision","currentTarget","currentSource"])
++    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision","currentTarget","currentSource","proposalHash"])
 -    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision"])
      ||"model" in c&&c.model!==undefined&&!exactSubset(c.model,["providerId","modelId"]))throw new Error("Original command metadata is not allowlisted.");
    const q = new URLSearchParams({project:b.apiProject}), esc=encodeURIComponent;
@@ -57,7 +57,7 @@ diff --git a/apps/web/src/features/customize/hosted-governance/client.ts b/apps/
    const id = (v: string) => {if(!text(v)||v.length>256||!/^[-A-Za-z0-9_]+$/.test(v))throw new Error("Invalid proposal identity.");return esc(v);};
    if("target" in c&&(!obj(c.target)||!text(c.target.id)||!int(c.target.revision)))throw new Error("The reviewed skill identity and revision are required.");
    if("reviewed" in c&&(!obj(c.reviewed)||!text(c.reviewed.status)||!text(c.reviewed.updatedAt)||!nullable(c.reviewed.targetSkillId)||!nullable(c.reviewed.sourceProjectId)||!nullable(c.reviewed.sourceName)||!(c.reviewed.expectedRevision===null||int(c.reviewed.expectedRevision))||!(c.reviewed.expectedSourceRevision===null||int(c.reviewed.expectedSourceRevision))))throw new Error("The original reviewed proposal metadata is required.");
-+  if("reviewed" in c){const r=c.reviewed;const target=(v:unknown)=>v===null||obj(v)&&exactSubset(v,["id","revision"])&&text(v.id)&&int(v.revision);const source=(v:unknown)=>v===null||obj(v)&&exactSubset(v,["id","projectId","name","revision"])&&text(v.id)&&text(v.projectId)&&text(v.name)&&int(v.revision);if(!Object.hasOwn(r,"currentTarget")||!Object.hasOwn(r,"currentSource")||!target(r.currentTarget)||!source(r.currentSource))throw new Error("Actual current-row comparisons are required.");}
++  if("reviewed" in c){const r=c.reviewed;const target=(v:unknown)=>v===null||obj(v)&&exactSubset(v,["id","revision"])&&text(v.id)&&int(v.revision);const source=(v:unknown)=>v===null||obj(v)&&exactSubset(v,["id","projectId","name","revision"])&&text(v.id)&&text(v.projectId)&&text(v.name)&&int(v.revision);if(typeof r.proposalHash!=="string"||!/^[a-f0-9]{64}$/.test(r.proposalHash)||!Object.hasOwn(r,"currentTarget")||!Object.hasOwn(r,"currentSource")||!target(r.currentTarget)||!source(r.currentSource))throw new Error("Actual current-row comparisons and proposal fingerprint are required.");}
    switch(c.op) {
      case "catalog": if(!["skill","plugin"].includes(c.kind)||!int(c.offset)||!int(c.limit)||c.limit<1||c.limit>100)throw new Error("Invalid catalog page.");q.set("kind",c.kind);q.set("visibility",b.visibility);q.set("offset",String(c.offset));q.set("limit",String(c.limit));return {method:"GET",path:"/api/v1/customize?"+q};
      case "skill": return {method:"GET",path:"/api/v1/skills/"+name(c.name)+"?"+q};
@@ -78,8 +78,8 @@ diff --git a/apps/web/src/features/customize/hosted-governance/decoders.ts b/app
    if(v.sourceSkill!==undefined&&v.sourceSkill!==null&&(!record(v.sourceSkill)||v.sourceSkill.projectId!==v.sourceProjectId||typeof v.sourceSkill.content!=="string"||!integer(v.sourceSkill.revision)||typeof v.sourceSkill.name!=="string"))throw new Error("Invalid source skill comparison.");
    if(v.observations!==undefined&&(!Array.isArray(v.observations)||v.observations.some(o=>!record(o)||!integer(o.id)||o.contentPreview!==undefined&&typeof o.contentPreview!=="string")))throw new Error("Invalid enriched observations.");
 +  if(v.reviewed!==undefined){
-+    const r=v.reviewed,keys=["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision","currentTarget","currentSource"];
-+    if(!record(r)||Object.keys(r).length!==keys.length||Object.keys(r).some(k=>!keys.includes(k)))throw new Error("Invalid actual-row review.");
++    const r=v.reviewed,keys=["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision","currentTarget","currentSource","proposalHash"];
++    if(!record(r)||Object.keys(r).length!==keys.length||Object.keys(r).some(k=>!keys.includes(k))||typeof r.proposalHash!=="string"||!/^[a-f0-9]{64}$/.test(r.proposalHash))throw new Error("Invalid actual-row review.");
 +    const expected={status:v.status==="rolledBack"?"rolled_back":v.status,updatedAt:v.updatedAt,targetSkillId:v.targetSkillId,sourceProjectId:v.sourceProjectId,sourceName:v.sourceName,expectedRevision:v.expectedRevision,expectedSourceRevision:v.expectedSourceRevision};
 +    if(Object.entries(expected).some(([k,value])=>r[k]!==value))throw new Error("Review differs from proposal baselines.");
 +    if(r.currentTarget===null){if(v.currentSkill!==null)throw new Error("Target absence was not returned by owner.");}

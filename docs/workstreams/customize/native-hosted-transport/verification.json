@@ -12,9 +12,10 @@
       "database": "node:sqlite in-memory; exact Rust SQL constants"
     },
     "compatibilityAndActualCoreCanonical": {
-      "passed": 8,
+      "passed": 10,
       "failed": 0,
-      "skipped": 0
+      "skipped": 0,
+      "official34351Vectors": 2
     },
     "portableWebStrict": {
       "files": 9,
@@ -25,10 +26,12 @@
     "privateNodeStandalone": {
       "ownFiles": 3,
       "ownDiagnostics": 0,
-      "combinedPass": false,
-      "externalDiagnostics": 3,
-      "externalSource": "Worker5 proposed hosted-governance.ts:61",
-      "reason": "Unknown narrowing at Object.keys(value) and value[key]; Root/Worker5 must resolve, never suppress"
+      "combinedPass": true,
+      "diagnostics": 0,
+      "emitted": 0,
+      "frozenCommit": "34351ff2d3c7795709925b48fec81246432908ea",
+      "priorExternalDiagnostics": 3,
+      "priorCorrectedBy": "Final frozen canonical return-fail and explicit Row narrowing"
     },
     "nativeOwnerPatch": {
       "passed": true,
@@ -44,8 +47,10 @@
     },
     "rust": {
       "compiled": false,
-      "suppliedUnitCases": 6,
-      "actualCoreGoldenVectors": 6
+      "suppliedUnitCases": 7,
+      "actualCoreGoldenVectors": 8,
+      "officialTypedRoundtripVectors": 2,
+      "comparator": "UTF16 code-unit lexicographic; exact strings preserved"
     },
     "fullApiTypes": false,
     "composedNativeUI": false,
@@ -58,9 +63,15 @@
     },
     "canonicalProvenance": {
       "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts",
-      "sourceSha256": "54f2d84988e3f9754c114fbe337a6ef73f201e8e5eea57231689564418265993",
+      "sourceSha256": "783738c32984d1b6021acbec2ef57de8e7b70a3f5c80708b7eaeab8cbbf0634c",
       "vectors": 6,
-      "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original"
+      "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original",
+      "finalFrozenCommit": "34351ff2d3c7795709925b48fec81246432908ea",
+      "officialVectors": {
+        "source": "docs/workstreams/rust-api/hosted-governance/canonical-vectors.json",
+        "sha256": "80e8f39222ea7caad729e6a23deed656e9834bd0fa14f5ef2776153473aec069",
+        "count": 2
+      }
     }
   },
   "integrationGates": [
@@ -95,7 +106,13 @@
   },
   "observedRepairs": [
     "Compatibility strict checker caught additive submit verification signature; corrected and portable strict check passed",
-    "Expanded exact-SQL fixture extractor initially required declaration whitespace; source declarations formatted without SQL behavior change;20 cases passed"
+    "Expanded exact-SQL fixture extractor initially required declaration whitespace; source declarations formatted without SQL behavior change;20 cases passed",
+    "Final34351 schema includes proposalHash; compatibility and Rust Reviewed updated; official committed vectors copied without byte normalization and typed Rust roundtrip supplied"
   ],
-  "overallCompletionClaimed": false
+  "overallCompletionClaimed": false,
+  "frozenReviewContract": {
+    "currentTarget": "Actual permission-checked DTO snapshot or explicit null",
+    "currentSource": "Actual permission-checked source UUID/project/name/revision or explicit null",
+    "proposalHash": "Exact server-issued full-proposal fingerprint; no client recomputation/fallback"
+  }
 }

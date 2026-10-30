@@ -123,3 +123,16 @@ pub(super) fn site_identity(target:&Target<'_>,s:&Session<'_>)->Result<SiteIdent
   for vector in vectors.as_array().unwrap(){let text=canonical(&vector["value"]).unwrap();assert_eq!(text,vector["canonical"].as_str().unwrap());assert_eq!(hash(text.as_bytes()),vector["sha256"].as_str().unwrap());}
  }
 }
+
+#[cfg(test)]mod official_whole_originals {
+ use super::*;
+ #[test]fn frozen34351_typed_original_roundtrip_and_hash(){
+  let file:Value=serde_json::from_str(include_str!("official-vectors.json")).unwrap();
+  for vector in file["vectors"].as_array().unwrap(){
+   let original:Original=serde_json::from_value(vector["original"].clone()).unwrap();
+   let serialized=serde_json::to_value(&original).unwrap();assert_eq!(serialized,vector["original"]);
+   assert_eq!(canonical(&serialized).unwrap(),vector["canonical"].as_str().unwrap());
+   assert_eq!(payload_hash(&original).unwrap(),vector["payloadHash"].as_str().unwrap());
+  }
+ }
+}

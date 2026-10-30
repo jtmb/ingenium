@@ -56,16 +56,24 @@
       "realm": "Native",
       "target": "crates/adapters/src/remote_control/hosted/contracts.rs",
       "precondition": "absent",
-      "postSha256": "5e932575138714afb44505f778a22c2018cd42e7fd1fa841d49c1b5c8ef11c55",
-      "bytes": 7972
+      "postSha256": "9b5139182ea8a54ddffe62876f987ea69753e04a489740424ba9413483b7c47d",
+      "bytes": 8189
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/official-vectors.json",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted/official-vectors.json",
+      "precondition": "absent",
+      "postSha256": "80e8f39222ea7caad729e6a23deed656e9834bd0fa14f5ef2776153473aec069",
+      "bytes": 4733
     },
     {
       "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/wire.rs",
       "realm": "Native",
       "target": "crates/adapters/src/remote_control/hosted/wire.rs",
       "precondition": "absent",
-      "postSha256": "a9dff7795f470abf48243f60bd45a6a61ac54c06bca808fff4fee506ed2b5d5b",
-      "bytes": 9581
+      "postSha256": "41da6166a451cb7335441fa4c960d19cf4d311f6d88dc0da6d67c370540d4a0e",
+      "bytes": 10212
     },
     {
       "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/utility_operations/hosted.rs",
@@ -154,17 +162,17 @@
     {
       "target": "apps/web/src/features/customize/hosted-governance/contracts.ts",
       "preSha256": "16a0b24125a8e5fd9853b35bde53ff184f1202be0306406cfb8c4ebd3e2266b2",
-      "postSha256": "07ae0d7da5c3d40ba9ed94851e8b9982d668850079c285ee694cbd603072d437"
+      "postSha256": "07d6ee163193a95f2f96d217e25584d8090bbee925c74b81fa753be1c7511057"
     },
     {
       "target": "apps/web/src/features/customize/hosted-governance/client.ts",
       "preSha256": "93558bb194760b27c93a6fc4d856af301aba671860dd6d33990b845ed9ce7b4b",
-      "postSha256": "993b42ecda77d444d057cc0bb49a06eb6b8c4bc58d67e37486ec43ae1228aa6a"
+      "postSha256": "dcbd57d93a4c1e099882b58880e3637e6cb9c069e09c57ca492b62655ef4305e"
     },
     {
       "target": "apps/web/src/features/customize/hosted-governance/decoders.ts",
       "preSha256": "accf94239e733f16e2e90f68d275ee3506e56157ad0850376237a1229976c747",
-      "postSha256": "64d87c10eaae365607da462e04f83135b87c384d2a1095cb01af9c18eb64aaef"
+      "postSha256": "c8cc74b580cac1c35217cc276531ded61be5636f76a9622a824fbb279754e10c"
     },
     {
       "target": "apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx",
@@ -182,9 +190,9 @@
     "sha256": "74b8df2d6519f030d813668551ebeb3e6b22ca899ce25e6318f9ea32576b42d6"
   },
   "patches": {
-    "native-owner-proposal.patch": "6a47860c91e53894e04c9016be417607744aa1d83a54022c5f4366a27b28c945",
+    "native-owner-proposal.patch": "94098e000ee1e59defa99d6918679312693efc66c4177a1e29c5cfb3b426968b",
     "node-proof-proposal.patch": "ec539d707a863290252ea0b038d4aa361bbb05ba24dbb72cc8fdcf760e0c8c26",
-    "portable-compat.patch": "7abf53d2d35bc97cd2e0a5d324af5b60c2fd56dbf4d4ebd53b9c3ac950b92807"
+    "portable-compat.patch": "0e2afe89af2393ce391f02b338de11c3da288a9f66385fdee0bb326fd43cedee"
   },
   "generatedDisposableOutputs": [],
   "removedPaths": [],

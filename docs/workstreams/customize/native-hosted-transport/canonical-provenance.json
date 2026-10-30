@@ -1,6 +1,12 @@
 {
   "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts",
-  "sourceSha256": "54f2d84988e3f9754c114fbe337a6ef73f201e8e5eea57231689564418265993",
+  "sourceSha256": "783738c32984d1b6021acbec2ef57de8e7b70a3f5c80708b7eaeab8cbbf0634c",
   "vectors": 6,
-  "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original"
+  "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original",
+  "finalFrozenCommit": "34351ff2d3c7795709925b48fec81246432908ea",
+  "officialVectors": {
+    "source": "docs/workstreams/rust-api/hosted-governance/canonical-vectors.json",
+    "sha256": "80e8f39222ea7caad729e6a23deed656e9834bd0fa14f5ef2776153473aec069",
+    "count": 2
+  }
 }
