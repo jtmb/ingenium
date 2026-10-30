@@ -1,0 +1,64 @@
+{
+  "compiled": false,
+  "applied": false,
+  "appendInsideClass": "attachment-bootstrap.additions.mjs",
+  "preimageSha256": "4e4edf50f80cad413a486d9e96af650860b8dfa9111127eddd2f04977a41245f",
+  "kind": "attachment-bootstrap-exact-splices-v1",
+  "edits": [
+    {
+      "after": "  #attachmentBootstraps = new WeakMap();\n  #attachmentLeases = new WeakMap(); #originalProfile;",
+      "before": "  #attachmentLeases = new WeakMap(); #originalProfile;"
+    },
+    {
+      "after": "  openScope(input) { try { return this.#queueScope(input); } catch(error) { return Promise.reject(error); } }\n  #queueScope(input, bootstrap = null) {\n    input.signal?.throwIfAborted();\n    if (this.#opening) return this.#opening.then(() => this.#queueScope(input, bootstrap));\n    const original = this.#open(input, bootstrap); this.#opening = original;",
+      "before": "  openScope(input) {\n    if (this.#opening) return this.#opening.then(() => this.openScope(input));\n    const original = this.#open(input); this.#opening = original;"
+    },
+    {
+      "after": "  async #open({ context, scope: requested, sessionId, deadlineAt, signal }, bootstrap = null) {",
+      "before": "  async #open({ context, scope: requested, sessionId, deadlineAt, signal }) {"
+    },
+    {
+      "after": "      this.#current.sessions.add(sessionId); if(bootstrap)bootstrap.scope=this.#current; return this.status();",
+      "before": "      this.#current.sessions.add(sessionId); return this.status();"
+    },
+    {
+      "after": "    signal?.throwIfAborted();\n    const scope = this.#scope(context, requestedScope, deadlineAt);\n    if(bootstrap)bootstrap.scope=scope; // publish exact original before any recovery/admission await\n    scope.sessions.add(sessionId);\n    let openingPhase=\"unallocated\";\n    try {",
+      "before": "    const scope = this.#scope(context, requestedScope, deadlineAt);\n    scope.sessions.add(sessionId);"
+    },
+    {
+      "after": "    for (const control of controls) if (!control.resourceRetired) {\n      signal?.throwIfAborted(); openingPhase=\"recovering\";\n      await this.#recoverControl(context, control, Math.min(deadlineAt, Date.now() + 20000));\n      openingPhase=\"unallocated\"; signal?.throwIfAborted();\n    }",
+      "before": "    for (const control of controls) if (!control.resourceRetired) await this.#recoverControl(context, control, Math.min(deadlineAt, Date.now() + 20000));"
+    },
+    {
+      "after": "    signal?.throwIfAborted(); openingPhase=\"admitting\";\n    scope.admission = await this.admitCpu({",
+      "before": "    scope.admission = await this.admitCpu({"
+    },
+    {
+      "after": "    openingPhase=\"admitted\"; signal?.throwIfAborted();\n    this.requireCpuAdmission(scope.admission, scope);",
+      "before": "    try {\n    this.requireCpuAdmission(scope.admission, scope);"
+    },
+    {
+      "after": "    signal?.throwIfAborted(); const controlContext=scope.contextFor(context); scope.controlReservationAttempted=true;\n    const reserved = this.ledger.reserveControl(controlContext, { original, owner: scope.owner, control: scope.control });",
+      "before": "    const reserved = this.ledger.reserveControl(scope.contextFor(context), { original, owner: scope.owner, control: scope.control });"
+    },
+    {
+      "after": "    signal?.throwIfAborted();\n    scope.started = true;\n    scope.child = this.launch",
+      "before": "    scope.started = true;\n    scope.child = this.launch"
+    },
+    {
+      "after": "      else if (!scope.started && [\"recovering\",\"admitting\"].includes(openingPhase)) {\n        // A rejecting external original may retain an effect without returning\n        // its handle. Keep this exact scope unknown; do not invent retirement.\n        scope.cleanupFailure=Object.assign(Error(\"CPU_OPEN_EXTERNAL_CLEANUP_UNKNOWN\"),{code:\"CPU_OPEN_EXTERNAL_CLEANUP_UNKNOWN\",cause:error});\n      }\n      else if (!scope.started) {",
+      "before": "      else if (!scope.started) {"
+    },
+    {
+      "after": "        if(scope.controlReservationAttempted) {\n          try { this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof }); }\n          catch (retentionError) { scope.retentionFailure ??= retentionError; }\n        } // No attempt means no Core row and no manufactured no-start receipt.\n        if(scope.admission && !scope.retentionFailure) {\n          try { await this.releaseCpu(scope.admission, proof, this); } catch (releaseError) { scope.releaseFailure ??= releaseError; }\n        }",
+      "before": "        try { this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof }); }\n        catch (retentionError) { scope.retentionFailure ??= retentionError; }\n        try { await this.releaseCpu(scope.admission, proof, this); } catch (releaseError) { scope.releaseFailure ??= releaseError; }"
+    },
+    {
+      "before": "      throw error;\n    }\n  }\n  #environment() {",
+      "after": "      if(scope.physicalRetired && !scope.cleanupFailure && !scope.retentionFailure && !scope.releaseFailure) {\n        if(this.#current===scope)this.#current=null;\n        if(!scope.busy && !scope.sessions.size)this.#scopes.delete(scope.owner.ownerId);\n      }\n      throw error;\n    }\n  }\n  #environment() {"
+    }
+  ],
+  "declarations": "attachment-bootstrap.additions.d.mts",
+  "target": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+  "anchorEncoding": "Compare anchors after CRLF to LF in memory; preserve canonical file conventions when applying"
+}

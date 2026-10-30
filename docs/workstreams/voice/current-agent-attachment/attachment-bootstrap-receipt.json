@@ -1,0 +1,15 @@
+{
+  "kind": "attachment-bootstrap-proposal-receipt-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parent": "a8babe1a",
+  "applied": false,
+  "compiled": false,
+  "testsAuthored": 7,
+  "testsExecuted": 0,
+  "validation": "Sequential exact source anchors matched once in memory only; manual review and git diff checks",
+  "remaining": "Root real supervisor cancellation/recovery/admission/reservation ACK-loss/spawn tests; Core134/config/router/runtime/audio",
+  "removedPaths": [],
+  "removedBytes": 0,
+  "retained": "Unique source/fixtures/splices/review/receipt; no generated bulk/cache/temp",
+  "sourceBudget": 393216
+}

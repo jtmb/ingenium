@@ -49,6 +49,36 @@
       "sha256": "e1ce337a0f296893b1e6a36afba1f2cb2d56fc454b96289f90a109526dbd51cd"
     },
     {
+      "path": "attachment-bootstrap-receipt.json",
+      "bytes": 634,
+      "sha256": "27dddc306660aecf15009b5c8e8a39897b7629e6d2ec51db50f3ccfe9e456c61"
+    },
+    {
+      "path": "attachment-bootstrap-review.md",
+      "bytes": 4326,
+      "sha256": "6aebca71d6605d087f29163c5ac9584b0712fbfc436520b54e016f326ae1aa45"
+    },
+    {
+      "path": "attachment-bootstrap-splices.json",
+      "bytes": 5650,
+      "sha256": "e1d591a54c9d99f3bfdd34c79f9d78c01207a2e401d81eb7d5b92dac23455e0b"
+    },
+    {
+      "path": "attachment-bootstrap.additions.d.mts",
+      "bytes": 620,
+      "sha256": "d8b565d030212a2efe47bffaa623893c94a60baf3500322c7b6cafd3b59ac370"
+    },
+    {
+      "path": "attachment-bootstrap.additions.mjs",
+      "bytes": 4249,
+      "sha256": "507b0edf99dd21f7d1960b7193b470425ee34b9ee754712a262fc6e168513245"
+    },
+    {
+      "path": "attachment-bootstrap.test.mjs",
+      "bytes": 5410,
+      "sha256": "2f5c4a87d68894f60986d7f8f09a95316a0ba4a256b629a69d635f93d237a76a"
+    },
+    {
       "path": "attachment.mjs",
       "bytes": 17211,
       "sha256": "c033338361bc1630d5d8c5e74de21a7206a4e32a7320cf5ef880918c87a83dbb"
@@ -354,5 +384,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 353613.0
+  "totalContentBytes": 374502.0
 }
