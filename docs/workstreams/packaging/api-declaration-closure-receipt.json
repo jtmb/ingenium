@@ -1,0 +1,817 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-original-api-copier-declaration-closure-proposal",
+  "productBotName": "veyra-bot",
+  "rootHead": "394e61b324a0cf20263dfc63ebe55d51c0d184f3",
+  "canonicalEdits": [
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "beforeBytes": 15173,
+      "beforeSha256": "d7e7145bc530fdf71f81d00bae36dc74c5e2c79ce69ec8fd41bdce3c34f2d69b",
+      "afterBytes": 42785,
+      "afterSha256": "005d1fe82c243981ff3aed9c35cc8c9d13d3316b286a2d9933a302f2e5bad9a2"
+    }
+  ],
+  "patch": {
+    "bytes": 34808,
+    "sha256": "84bba7a00c5e0951878645d2c0dfb24bf814a89b2c18a63623f269bf930dacc9"
+  },
+  "selection": {
+    "rawDeclarations": 68,
+    "concreteRuntimeCounterparts": 65,
+    "typeOnlyModules": [
+      "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "packages/veyra-automation/contracts.d.ts",
+      "packages/veyra-projects/contracts.d.ts"
+    ],
+    "omittedUnreachable": "services/ingenium-api/lib/selected-state-admission.d.mts",
+    "existingRuntimeMjs": 85,
+    "preservedCompiledRuntimeRelocations": 6,
+    "addedDeclarationOnlyCompilerInputs": 10,
+    "plannedOutputRows": 175,
+    "oneManifest": "veyra-runtime-closure.json",
+    "runtimeTypeStubs": 0,
+    "newCopierRoots": [],
+    "newCompilerIncludes": [],
+    "newWildcards": []
+  },
+  "declarations": [
+    {
+      "source": "packages/veyra-automation/contracts.d.ts",
+      "target": "veyra-packages/veyra-automation/contracts.d.ts",
+      "sourceBytes": 2617,
+      "sourceSha256": "864f1ccff6bc79086741ec6040706119db3168fca466ae94179f573d9239742b",
+      "plannedEmittedBytes": 2617,
+      "plannedEmittedSha256": "864f1ccff6bc79086741ec6040706119db3168fca466ae94179f573d9239742b",
+      "runtimeCounterpart": null
+    },
+    {
+      "source": "packages/veyra-memory/context.d.mts",
+      "target": "veyra-packages/veyra-memory/context.d.mts",
+      "sourceBytes": 1654,
+      "sourceSha256": "6252d911260c2c8829d3aacbee13f930dca1e21e745dcafbc04f8b33bb8b28a2",
+      "plannedEmittedBytes": 1654,
+      "plannedEmittedSha256": "6252d911260c2c8829d3aacbee13f930dca1e21e745dcafbc04f8b33bb8b28a2",
+      "runtimeCounterpart": "packages/veyra-memory/context.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-agent-material.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-agent-material.d.mts",
+      "sourceBytes": 2621,
+      "sourceSha256": "e7b39ab7c65eb4de09d9c751f5a69a4df91f142e072c56d3d78ef7ce5ac84922",
+      "plannedEmittedBytes": 2621,
+      "plannedEmittedSha256": "e7b39ab7c65eb4de09d9c751f5a69a4df91f142e072c56d3d78ef7ce5ac84922",
+      "runtimeCounterpart": "packages/veyra-operations/core126-agent-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-material.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-candidate-material.d.mts",
+      "sourceBytes": 375,
+      "sourceSha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420",
+      "plannedEmittedBytes": 375,
+      "plannedEmittedSha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420",
+      "runtimeCounterpart": "packages/veyra-operations/core126-candidate-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-candidate-observation.d.mts",
+      "sourceBytes": 1129,
+      "sourceSha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d",
+      "plannedEmittedBytes": 1129,
+      "plannedEmittedSha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d",
+      "runtimeCounterpart": "packages/veyra-operations/core126-candidate-observation.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-contract.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-image-contract.d.mts",
+      "sourceBytes": 1698,
+      "sourceSha256": "a0c6de96e2b2b6c911cd58fee2a7a94103137e7c9dbbda5488bf8afabd717358",
+      "plannedEmittedBytes": 1698,
+      "plannedEmittedSha256": "a0c6de96e2b2b6c911cd58fee2a7a94103137e7c9dbbda5488bf8afabd717358",
+      "runtimeCounterpart": "packages/veyra-operations/core126-image-contract.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-owner.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-image-owner.d.mts",
+      "sourceBytes": 5869,
+      "sourceSha256": "b16847ab048991fd702f67d7d33b9d2e230150a905cd22fd8e82b96bc2ae18ce",
+      "plannedEmittedBytes": 5875,
+      "plannedEmittedSha256": "4df22564f78792a71571a3d0e51b8b2626035640c7ddc8ab7bc6a7835da31ab2",
+      "runtimeCounterpart": "packages/veyra-operations/core126-image-owner.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-bootstrap.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-job-bootstrap.d.mts",
+      "sourceBytes": 895,
+      "sourceSha256": "c937944285fd85002d53fae5ed5d786bfab471b1cb60f5cc748f75699e1f1862",
+      "plannedEmittedBytes": 895,
+      "plannedEmittedSha256": "c937944285fd85002d53fae5ed5d786bfab471b1cb60f5cc748f75699e1f1862",
+      "runtimeCounterpart": "packages/veyra-operations/core126-job-bootstrap.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-plugin.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-job-plugin.d.mts",
+      "sourceBytes": 1572,
+      "sourceSha256": "d7fb9ef671c2f61e47dd0a191d9c494a6c999239b60b1a633898279602602789",
+      "plannedEmittedBytes": 1572,
+      "plannedEmittedSha256": "d7fb9ef671c2f61e47dd0a191d9c494a6c999239b60b1a633898279602602789",
+      "runtimeCounterpart": "packages/veyra-operations/core126-job-plugin.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-manager-proof.d.mts",
+      "target": "veyra-packages/veyra-operations/core126-manager-proof.d.mts",
+      "sourceBytes": 377,
+      "sourceSha256": "c02fa810b882b4edb350f4ceb3344b57e234c5ebe0b574977b91ab76a9c323a1",
+      "plannedEmittedBytes": 377,
+      "plannedEmittedSha256": "c02fa810b882b4edb350f4ceb3344b57e234c5ebe0b574977b91ab76a9c323a1",
+      "runtimeCounterpart": "packages/veyra-operations/core126-manager-proof.mjs"
+    },
+    {
+      "source": "packages/veyra-projects/context.d.mts",
+      "target": "veyra-packages/veyra-projects/context.d.mts",
+      "sourceBytes": 448,
+      "sourceSha256": "79811ec55feff1afd4e874e9f2b03fd8279105bf7328daa8d5669dddb5fc9804",
+      "plannedEmittedBytes": 448,
+      "plannedEmittedSha256": "79811ec55feff1afd4e874e9f2b03fd8279105bf7328daa8d5669dddb5fc9804",
+      "runtimeCounterpart": "packages/veyra-projects/context.mjs"
+    },
+    {
+      "source": "packages/veyra-projects/contracts.d.ts",
+      "target": "veyra-packages/veyra-projects/contracts.d.ts",
+      "sourceBytes": 2008,
+      "sourceSha256": "80f1f4eaa6f90c3c8381ed74d7087ab9f49f388d7fc50ae75a3827701fd174f4",
+      "plannedEmittedBytes": 2008,
+      "plannedEmittedSha256": "80f1f4eaa6f90c3c8381ed74d7087ab9f49f388d7fc50ae75a3827701fd174f4",
+      "runtimeCounterpart": null
+    },
+    {
+      "source": "packages/veyra-projects/domain.d.mts",
+      "target": "veyra-packages/veyra-projects/domain.d.mts",
+      "sourceBytes": 1541,
+      "sourceSha256": "ae7d61e0bc60ed311e010ca81d217cd2e3f94e1874a2fd173a4fa72068ddd263",
+      "plannedEmittedBytes": 1541,
+      "plannedEmittedSha256": "ae7d61e0bc60ed311e010ca81d217cd2e3f94e1874a2fd173a4fa72068ddd263",
+      "runtimeCounterpart": "packages/veyra-projects/domain.mjs"
+    },
+    {
+      "source": "packages/veyra-voice/session.d.mts",
+      "target": "veyra-packages/veyra-voice/session.d.mts",
+      "sourceBytes": 3925,
+      "sourceSha256": "2798ce5b88eef987ae552cd6313fff00db6fc72f63622b69f66589cbb95c3579",
+      "plannedEmittedBytes": 3925,
+      "plannedEmittedSha256": "2798ce5b88eef987ae552cd6313fff00db6fc72f63622b69f66589cbb95c3579",
+      "runtimeCounterpart": "packages/veyra-voice/session.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "target": "lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "sourceBytes": 667,
+      "sourceSha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7",
+      "plannedEmittedBytes": 667,
+      "plannedEmittedSha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "target": "lib/dot-v2/candidate-carrier.d.mts",
+      "sourceBytes": 2611,
+      "sourceSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "plannedEmittedBytes": 2611,
+      "plannedEmittedSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "target": "lib/dot-v2/candidate-docker-stream.d.mts",
+      "sourceBytes": 290,
+      "sourceSha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126",
+      "plannedEmittedBytes": 290,
+      "plannedEmittedSha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "target": "lib/dot-v2/candidate-loopback.d.mts",
+      "sourceBytes": 1117,
+      "sourceSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "plannedEmittedBytes": 1117,
+      "plannedEmittedSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "target": "lib/dot-v2/candidate-original-invocation.d.mts",
+      "sourceBytes": 434,
+      "sourceSha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29",
+      "plannedEmittedBytes": 434,
+      "plannedEmittedSha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts",
+      "target": "lib/dot-v2/candidate-private-plugin.d.mts",
+      "sourceBytes": 189,
+      "sourceSha256": "5e083615accd16b2f9cf49ba4b452bf6ee71f174993c48c97119fffb0e6b326d",
+      "plannedEmittedBytes": 189,
+      "plannedEmittedSha256": "5e083615accd16b2f9cf49ba4b452bf6ee71f174993c48c97119fffb0e6b326d",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.d.mts",
+      "target": "lib/dot-v2/core126-broker.d.mts",
+      "sourceBytes": 1005,
+      "sourceSha256": "ca4b6bd0211d53cfeb75cd6fe683d998b9e26a90c41d1ffbd283c7f04a7e8cdd",
+      "plannedEmittedBytes": 1005,
+      "plannedEmittedSha256": "ca4b6bd0211d53cfeb75cd6fe683d998b9e26a90c41d1ffbd283c7f04a7e8cdd",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/core126-broker.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-http.d.mts",
+      "target": "lib/dot-v2/core126-http.d.mts",
+      "sourceBytes": 1189,
+      "sourceSha256": "f45caba30d49c0fa34afcee3660a54acb3f7218a917e38eb4c7879904ddb88eb",
+      "plannedEmittedBytes": 1189,
+      "plannedEmittedSha256": "f45caba30d49c0fa34afcee3660a54acb3f7218a917e38eb4c7879904ddb88eb",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/core126-http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+      "target": "lib/dot-v2/core126-owner.d.mts",
+      "sourceBytes": 256,
+      "sourceSha256": "6c6c4e00e6435d17f2a381ea38f2f2275736f429008977aec273d41e09f58064",
+      "plannedEmittedBytes": 256,
+      "plannedEmittedSha256": "6c6c4e00e6435d17f2a381ea38f2f2275736f429008977aec273d41e09f58064",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/core126-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-purpose.d.mts",
+      "target": "lib/dot-v2/core126-purpose.d.mts",
+      "sourceBytes": 510,
+      "sourceSha256": "65c7532ee2c786bec8c6664ad3d2f27305435221578f1df3f85bcc57b5b8bb4c",
+      "plannedEmittedBytes": 510,
+      "plannedEmittedSha256": "65c7532ee2c786bec8c6664ad3d2f27305435221578f1df3f85bcc57b5b8bb4c",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts",
+      "target": "lib/dot-v2/dot-approved-scope.d.mts",
+      "sourceBytes": 2532,
+      "sourceSha256": "9752a7b4f9fe36402e7d639fca5e78cf9508d999bbffb5542e7e4b6f5bb3fe43",
+      "plannedEmittedBytes": 2532,
+      "plannedEmittedSha256": "85d2496b2925b4beb7894ac53f965f226d4ab1cacabe7d28be8a66ade74dd112",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts",
+      "target": "lib/dot-v2/dot-job-policy.d.mts",
+      "sourceBytes": 466,
+      "sourceSha256": "fd8d7042ecaa02c77a746b64bda8a0b40755822b7c63b748fb1c21ea9954c27f",
+      "plannedEmittedBytes": 466,
+      "plannedEmittedSha256": "fd8d7042ecaa02c77a746b64bda8a0b40755822b7c63b748fb1c21ea9954c27f",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.d.mts",
+      "target": "lib/dot-v2/job-bootstrap-frame.d.mts",
+      "sourceBytes": 374,
+      "sourceSha256": "e4502af1f218bdd624808fec94c57b6fd533e069f3ab0a2ae1e2ecb0e8b5c6f7",
+      "plannedEmittedBytes": 374,
+      "plannedEmittedSha256": "e4502af1f218bdd624808fec94c57b6fd533e069f3ab0a2ae1e2ecb0e8b5c6f7",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts",
+      "target": "lib/dot-v2/job-bootstrap-runtime.d.mts",
+      "sourceBytes": 367,
+      "sourceSha256": "37ded5725c5869d8d5f55ae75d60958e392ce57111444dff69f02e6574cc2794",
+      "plannedEmittedBytes": 367,
+      "plannedEmittedSha256": "37ded5725c5869d8d5f55ae75d60958e392ce57111444dff69f02e6574cc2794",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-original-authority.d.mts",
+      "target": "lib/dot-v2/job-original-authority.d.mts",
+      "sourceBytes": 436,
+      "sourceSha256": "626dc2bc8fa51020ef5aeb5a68c86d9db7e82e8ad57f6096307b615ad288af13",
+      "plannedEmittedBytes": 436,
+      "plannedEmittedSha256": "626dc2bc8fa51020ef5aeb5a68c86d9db7e82e8ad57f6096307b615ad288af13",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-dot-execution.d.mts",
+      "target": "lib/dot-v2/managed-dot-execution.d.mts",
+      "sourceBytes": 317,
+      "sourceSha256": "597d80ae07d69bb72da630be7717efa11ff2adf7dcf56ac6efb55f0d80caad7e",
+      "plannedEmittedBytes": 317,
+      "plannedEmittedSha256": "597d80ae07d69bb72da630be7717efa11ff2adf7dcf56ac6efb55f0d80caad7e",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-child.d.mts",
+      "target": "lib/dot-v2/managed-job-child.d.mts",
+      "sourceBytes": 203,
+      "sourceSha256": "c864627692cc90cc921c2475f4bc2e312d13a983673ee18c036175a1c91466c8",
+      "plannedEmittedBytes": 203,
+      "plannedEmittedSha256": "c864627692cc90cc921c2475f4bc2e312d13a983673ee18c036175a1c91466c8",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "target": "lib/dot-v2/managed-job-contracts.d.mts",
+      "sourceBytes": 13087,
+      "sourceSha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b",
+      "plannedEmittedBytes": 13087,
+      "plannedEmittedSha256": "9884bf264efc29595e6e366fd19ac0b0acdf9bb46342c9f6d1fcc9123cca123f",
+      "runtimeCounterpart": null
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-core-client.d.mts",
+      "target": "lib/dot-v2/managed-job-core-client.d.mts",
+      "sourceBytes": 212,
+      "sourceSha256": "768675482e3acff452ff7cb415c9a4cbecb4eb83e6562e287cb5c07926c022be",
+      "plannedEmittedBytes": 212,
+      "plannedEmittedSha256": "768675482e3acff452ff7cb415c9a4cbecb4eb83e6562e287cb5c07926c022be",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-owner.d.mts",
+      "target": "lib/dot-v2/managed-job-owner.d.mts",
+      "sourceBytes": 213,
+      "sourceSha256": "8ade4e93029ed370cf81df7e9f0a4c759e507c7c093ffae2e90642d3f8cee3f3",
+      "plannedEmittedBytes": 213,
+      "plannedEmittedSha256": "8ade4e93029ed370cf81df7e9f0a4c759e507c7c093ffae2e90642d3f8cee3f3",
+      "runtimeCounterpart": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/adapters.d.mts",
+      "target": "lib/memory-v2/adapters.d.mts",
+      "sourceBytes": 3914,
+      "sourceSha256": "d3b4067cbcfd40ddbb90904f7e1f331849c8ea1d81a0e7fc4d304ac804f501e6",
+      "plannedEmittedBytes": 3914,
+      "plannedEmittedSha256": "d3b4067cbcfd40ddbb90904f7e1f331849c8ea1d81a0e7fc4d304ac804f501e6",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/adapters.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/bounded-snapshot.d.mts",
+      "target": "lib/memory-v2/bounded-snapshot.d.mts",
+      "sourceBytes": 2087,
+      "sourceSha256": "6d6cdf347e9a48edd1ca69d8374df9d826c90147a311d3f63f6960665f10a981",
+      "plannedEmittedBytes": 2087,
+      "plannedEmittedSha256": "6d6cdf347e9a48edd1ca69d8374df9d826c90147a311d3f63f6960665f10a981",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/bounded-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/http.d.mts",
+      "target": "lib/memory-v2/http.d.mts",
+      "sourceBytes": 654,
+      "sourceSha256": "2815fe842fbaace4ede9d1729bd29eea90ae70ca4d7bd7312c62caba24d75dd1",
+      "plannedEmittedBytes": 654,
+      "plannedEmittedSha256": "2815fe842fbaace4ede9d1729bd29eea90ae70ca4d7bd7312c62caba24d75dd1",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/inspection.d.mts",
+      "target": "lib/memory-v2/inspection.d.mts",
+      "sourceBytes": 694,
+      "sourceSha256": "b389ab000f3c0c29b0f380ade92e9dc5cc4305674206a4e4aec40d390f80877f",
+      "plannedEmittedBytes": 694,
+      "plannedEmittedSha256": "b389ab000f3c0c29b0f380ade92e9dc5cc4305674206a4e4aec40d390f80877f",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/inspection.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/jobs.d.mts",
+      "target": "lib/memory-v2/jobs.d.mts",
+      "sourceBytes": 965,
+      "sourceSha256": "28627588a87ea67de00aca61b638975a6e141e5ffb588757b16d171d92388cc1",
+      "plannedEmittedBytes": 965,
+      "plannedEmittedSha256": "28627588a87ea67de00aca61b638975a6e141e5ffb588757b16d171d92388cc1",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/jobs.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/lifecycle.d.mts",
+      "target": "lib/memory-v2/lifecycle.d.mts",
+      "sourceBytes": 6627,
+      "sourceSha256": "c406e62b47b31e6f2604eeaf5266bf36cd4a91ebe0f0288bc67778cf5855959a",
+      "plannedEmittedBytes": 6627,
+      "plannedEmittedSha256": "c406e62b47b31e6f2604eeaf5266bf36cd4a91ebe0f0288bc67778cf5855959a",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/lifecycle.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-context-pair.d.mts",
+      "target": "lib/memory-v2/opencode-context-pair.d.mts",
+      "sourceBytes": 819,
+      "sourceSha256": "bcca61622bb4d8bad5f92d7a6a22e0b4127a242332d8d931399d61f191a3d5f5",
+      "plannedEmittedBytes": 819,
+      "plannedEmittedSha256": "bcca61622bb4d8bad5f92d7a6a22e0b4127a242332d8d931399d61f191a3d5f5",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/opencode-context-pair.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-snapshot.d.mts",
+      "target": "lib/memory-v2/opencode-snapshot.d.mts",
+      "sourceBytes": 2434,
+      "sourceSha256": "8c67d39cced965a81d62ff179cdb9c4e4c890c2b0f6c9f43b31ba7477e52bf35",
+      "plannedEmittedBytes": 2434,
+      "plannedEmittedSha256": "8c67d39cced965a81d62ff179cdb9c4e4c890c2b0f6c9f43b31ba7477e52bf35",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/opencode-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/recall-availability.d.mts",
+      "target": "lib/memory-v2/recall-availability.d.mts",
+      "sourceBytes": 2256,
+      "sourceSha256": "b641734fd0d7e13f881b1c2a76e423e942c6f25e1827c29dcc93a41cf70a342d",
+      "plannedEmittedBytes": 2256,
+      "plannedEmittedSha256": "b641734fd0d7e13f881b1c2a76e423e942c6f25e1827c29dcc93a41cf70a342d",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/recall-availability.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-policy.d.mts",
+      "target": "lib/memory-v2/request-policy.d.mts",
+      "sourceBytes": 516,
+      "sourceSha256": "a395b8fe5d829e837bd810131c52021ea913771683e4e70dd6a454415cd226d4",
+      "plannedEmittedBytes": 516,
+      "plannedEmittedSha256": "a395b8fe5d829e837bd810131c52021ea913771683e4e70dd6a454415cd226d4",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/request-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/source-state.d.mts",
+      "target": "lib/memory-v2/source-state.d.mts",
+      "sourceBytes": 1297,
+      "sourceSha256": "80bcf7a9772a2aa238f0ff0565b42cb42ae244e4d3d06edacfdcf1f855ee3954",
+      "plannedEmittedBytes": 1297,
+      "plannedEmittedSha256": "80bcf7a9772a2aa238f0ff0565b42cb42ae244e4d3d06edacfdcf1f855ee3954",
+      "runtimeCounterpart": "services/ingenium-api/lib/memory-v2/source-state.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts",
+      "target": "lib/projects-v2/canonical-chat-binding.d.mts",
+      "sourceBytes": 776,
+      "sourceSha256": "6e9c87011670135732bca7e2157adc633e3dd2fe5549a74f5e32a7971896d967",
+      "plannedEmittedBytes": 776,
+      "plannedEmittedSha256": "6e9c87011670135732bca7e2157adc633e3dd2fe5549a74f5e32a7971896d967",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/catalog.d.mts",
+      "target": "lib/projects-v2/catalog.d.mts",
+      "sourceBytes": 1171,
+      "sourceSha256": "e63ddb8244c423b0d714eb50e64f24b040679c7a883845b6471272f566d945ea",
+      "plannedEmittedBytes": 1171,
+      "plannedEmittedSha256": "839d5ea05ff22bf388e99161ba3e0aec06884ff4b09287f06d6be55e6b1b4f30",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/catalog.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/execution.d.mts",
+      "target": "lib/projects-v2/execution.d.mts",
+      "sourceBytes": 1849,
+      "sourceSha256": "9c6cd25997b4ad98ad9e9d60cc5e7d0e32a7c6ddc5997eab10cddd78d33ee873",
+      "plannedEmittedBytes": 1849,
+      "plannedEmittedSha256": "9b1efee0fe369fcc9c7a1845a07cfd5759819d947005489289f9fc99cec720d7",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/execution.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/handlers.d.mts",
+      "target": "lib/projects-v2/handlers.d.mts",
+      "sourceBytes": 974,
+      "sourceSha256": "88eb33c64a74ef4c68e83f63224f3241b8eb5ac1da0f3f8ef91731d3c98d3537",
+      "plannedEmittedBytes": 974,
+      "plannedEmittedSha256": "82e6f7b8789c6a172de9c8fa72b1b28ec0903b735011c8614e3f8353ac62e638",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/handlers.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/installation.d.mts",
+      "target": "lib/projects-v2/installation.d.mts",
+      "sourceBytes": 721,
+      "sourceSha256": "3866f8649c360f9c72591f368fc4f175717413b21d1082814349de21576307ff",
+      "plannedEmittedBytes": 721,
+      "plannedEmittedSha256": "fd942f950f8217d5038b2a7a8ede2fde017b6cef3a188cd72264c7d1669c172f",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/installation.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/migration.d.mts",
+      "target": "lib/projects-v2/migration.d.mts",
+      "sourceBytes": 870,
+      "sourceSha256": "14740f2ec617dfe13555dd03359342e357793bb5f6fcfb30a4154e8195d863b8",
+      "plannedEmittedBytes": 870,
+      "plannedEmittedSha256": "a96aad072bb24bc383d56f22816d5fa791a87569d9118d58e3a8659bd64c1ea4",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/migration.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/native-catalog.d.mts",
+      "target": "lib/projects-v2/native-catalog.d.mts",
+      "sourceBytes": 1989,
+      "sourceSha256": "2765242488c6e01310052f2fd79b39a97a93cee93e4d88ca2bca54ae04b066cf",
+      "plannedEmittedBytes": 1989,
+      "plannedEmittedSha256": "3ea00cf2e505d880b235da28ac8eca8f1ab260bdace3e56ca2d2e023d1c4ae01",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/native-catalog.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/native-handlers.d.mts",
+      "target": "lib/projects-v2/native-handlers.d.mts",
+      "sourceBytes": 633,
+      "sourceSha256": "245ef214f16f1c1098b1a34780cf6f63dddfdcbf8a6fea64c37dcc00efa28a15",
+      "plannedEmittedBytes": 633,
+      "plannedEmittedSha256": "d4a108cf9dd1a838d0f61bc2e8843855c15cef546e037d0d159ee2ffb8d60274",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/native-handlers.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/native-transport.d.mts",
+      "target": "lib/projects-v2/native-transport.d.mts",
+      "sourceBytes": 2070,
+      "sourceSha256": "65cf22f2e04c8bceda5b1e6bee14c768fa7c0d54ccad4cc476ba0af77c15bf75",
+      "plannedEmittedBytes": 2070,
+      "plannedEmittedSha256": "7ab0133e75d3de3c4fbfc6819c659118361bc89e00c2e7876196404624ec109f",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/native-transport.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/private-workspace-policy.d.mts",
+      "target": "lib/projects-v2/private-workspace-policy.d.mts",
+      "sourceBytes": 4085,
+      "sourceSha256": "eca53b3cd5e307316c55210986ad79e4f907acb7983c490d245e2c04a53f7522",
+      "plannedEmittedBytes": 4085,
+      "plannedEmittedSha256": "eca53b3cd5e307316c55210986ad79e4f907acb7983c490d245e2c04a53f7522",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/private-workspace-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/reads.d.mts",
+      "target": "lib/projects-v2/reads.d.mts",
+      "sourceBytes": 636,
+      "sourceSha256": "b433acb5529861fc8768111485cca1c1277f0194bee2c727852d67ead0150d35",
+      "plannedEmittedBytes": 636,
+      "plannedEmittedSha256": "6eb530d00f1f217361a91f851ba6340103edd98262de0da5e4dbc8549c3479a4",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/reads.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-chat-source.d.mts",
+      "target": "lib/projects-v2/request-chat-source.d.mts",
+      "sourceBytes": 493,
+      "sourceSha256": "f241a42a917ae606d9053550370404886da8b600b1f1222bcee55cf3dc88926c",
+      "plannedEmittedBytes": 493,
+      "plannedEmittedSha256": "f241a42a917ae606d9053550370404886da8b600b1f1222bcee55cf3dc88926c",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts",
+      "target": "lib/projects-v2/request-execution-owner.d.mts",
+      "sourceBytes": 2927,
+      "sourceSha256": "fe3a0a1031381e65aa408bf08d90d871110343017a1957a747b4698908531b54",
+      "plannedEmittedBytes": 2927,
+      "plannedEmittedSha256": "fe3a0a1031381e65aa408bf08d90d871110343017a1957a747b4698908531b54",
+      "runtimeCounterpart": "services/ingenium-api/lib/projects-v2/request-execution-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts",
+      "target": "lib/voice-v2/attachment-delivery-owner.d.mts",
+      "sourceBytes": 1236,
+      "sourceSha256": "20fced402153992b3c195a10c5027e5b329e341bb696016dfcd032e4689d132f",
+      "plannedEmittedBytes": 1236,
+      "plannedEmittedSha256": "20fced402153992b3c195a10c5027e5b329e341bb696016dfcd032e4689d132f",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/core-operations.d.mts",
+      "target": "lib/voice-v2/core-operations.d.mts",
+      "sourceBytes": 1929,
+      "sourceSha256": "eabb0036413b6017137b713f51910781d312e295c8928aa2ee0a1ea67c4dcb3b",
+      "plannedEmittedBytes": 1929,
+      "plannedEmittedSha256": "40b987be0f7a73650aed8bc0266979be2adccd449944e7f5e19f6b6d5e83dcc8",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/core-operations.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/current-agent.d.mts",
+      "target": "lib/voice-v2/current-agent.d.mts",
+      "sourceBytes": 3539,
+      "sourceSha256": "85ff39d5b44c906a1cf0258778d56b0c642dc3d98c442447dc1d1cd6f7d41d50",
+      "plannedEmittedBytes": 3539,
+      "plannedEmittedSha256": "1e89321cdae6f720ee113fd12c14341a4be0002f249f2e66186f4aeb2bb90831",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/current-agent.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/hosted-lifecycle.d.mts",
+      "target": "lib/voice-v2/hosted-lifecycle.d.mts",
+      "sourceBytes": 332,
+      "sourceSha256": "cddb7d23efe1ab830ef141e55b35eb2d115848f0e4efcb065fe10a82216e73e1",
+      "plannedEmittedBytes": 332,
+      "plannedEmittedSha256": "cddb7d23efe1ab830ef141e55b35eb2d115848f0e4efcb065fe10a82216e73e1",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/hosted-lifecycle.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts",
+      "target": "lib/voice-v2/linux-cpu-admission.d.mts",
+      "sourceBytes": 1727,
+      "sourceSha256": "439b5b2459065ad488bc99420a6723f4abebb1a911d1251896087c5e982de061",
+      "plannedEmittedBytes": 1727,
+      "plannedEmittedSha256": "439b5b2459065ad488bc99420a6723f4abebb1a911d1251896087c5e982de061",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-cpu-speech.d.mts",
+      "target": "lib/voice-v2/managed-cpu-speech.d.mts",
+      "sourceBytes": 1405,
+      "sourceSha256": "ba9e394e7b8da8ef1ef11dc79240a6210b120c1851b334163427d387d0cb2082",
+      "plannedEmittedBytes": 1405,
+      "plannedEmittedSha256": "b4cbe121520571af2f62a8eb1a56e6ccfc6644a8ebdbe37b350d063e9a780e04",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/managed-cpu-speech.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-profile.d.mts",
+      "target": "lib/voice-v2/managed-profile.d.mts",
+      "sourceBytes": 1303,
+      "sourceSha256": "235f4421d763aaaef00658b2aaf501b32882fe35d38dcdb79517d5a83da8e604",
+      "plannedEmittedBytes": 1303,
+      "plannedEmittedSha256": "235f4421d763aaaef00658b2aaf501b32882fe35d38dcdb79517d5a83da8e604",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/managed-profile.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "target": "lib/voice-v2/managed-supervisor.d.mts",
+      "sourceBytes": 3811,
+      "sourceSha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1",
+      "plannedEmittedBytes": 3811,
+      "plannedEmittedSha256": "da5b3395b6a8ab8ead10ae3eca6fbb861dbcc5a1eb3f9f8d4247a26049575c4c",
+      "runtimeCounterpart": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs"
+    },
+    {
+      "source": "tools/veyra-release/core126-candidate-intent.d.mts",
+      "target": "veyra-tools/veyra-release/core126-candidate-intent.d.mts",
+      "sourceBytes": 1746,
+      "sourceSha256": "eba8d947516daf06df9b7351f92114082346161fdde1c0f1843c4abdd1b09f78",
+      "plannedEmittedBytes": 1746,
+      "plannedEmittedSha256": "eba8d947516daf06df9b7351f92114082346161fdde1c0f1843c4abdd1b09f78",
+      "runtimeCounterpart": "tools/veyra-release/core126-candidate-intent.mjs"
+    },
+    {
+      "source": "tools/veyra-release/core126-docker-binary.d.mts",
+      "target": "veyra-tools/veyra-release/core126-docker-binary.d.mts",
+      "sourceBytes": 2069,
+      "sourceSha256": "6f179910f10e60aa8faf04bf99fd504b63799a754e9251f11a0a01ad73d7a610",
+      "plannedEmittedBytes": 2069,
+      "plannedEmittedSha256": "6f179910f10e60aa8faf04bf99fd504b63799a754e9251f11a0a01ad73d7a610",
+      "runtimeCounterpart": "tools/veyra-release/core126-docker-binary.mjs"
+    }
+  ],
+  "compilerInputs": [
+    {
+      "source": "services/ingenium-api/lib/dot-v2/commands.ts",
+      "target": "lib/dot-v2/commands.d.ts",
+      "sourceSha256": "c3cebd2d18c4159d7e8e38c26750c8395bad58bf577603f00af2db31a36d8803"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+      "target": "lib/dot-v2/core-binding.d.ts",
+      "sourceSha256": "a77ae5304ab90f7f68599c90b1dfc6ad9d9cf9855c15294bcc20e5e12f69b87f"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "target": "lib/dot-v2/existing-jobs.d.ts",
+      "sourceSha256": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "target": "lib/dot-v2/installed-dot-scheduler.d.ts",
+      "sourceSha256": "38af882cd69c2bdd90e149eb24ec97c404d57290018270019cda8a9d5187cea3"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/proactive.ts",
+      "target": "lib/dot-v2/proactive.d.ts",
+      "sourceSha256": "bb120999cd0d9c71758b8c2421cdc8756c89e842fc206fa4f4bfdc0b08bd741a"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "target": "lib/dot-v2/repository.d.ts",
+      "sourceSha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "target": "lib/dot-v2/request-binding.d.ts",
+      "sourceSha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/router.ts",
+      "target": "lib/dot-v2/router.d.ts",
+      "sourceSha256": "362b9f027fd866da35fbd8ae3b3efc271cbfadea31ba4f036df4baf1f3ff584e"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "target": "lib/dot-v2/schedule.d.ts",
+      "sourceSha256": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/service.ts",
+      "target": "lib/dot-v2/service.d.ts",
+      "sourceSha256": "1d8af5c2fb93c30b1d214acb0cc37a30f556ad69aa4712b944e283ce8cbdffbd"
+    }
+  ],
+  "externalTypePackages": [
+    "better-sqlite3",
+    "express",
+    "ingenium-core",
+    "ingenium-core/lib/tools/voice-operation-ledger",
+    "node:buffer",
+    "node:child_process",
+    "node:http",
+    "node:stream"
+  ],
+  "compilerTypeDependencies": [
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "target": "lib/dot-v2/request-binding.d.ts",
+      "sourceSha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "target": "lib/dot-v2/repository.d.ts",
+      "sourceSha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "target": "lib/runtime-manager-client.d.ts",
+      "sourceSha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "target": "lib/runtime-placement-contract.d.ts",
+      "sourceSha256": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+      "target": "lib/dot-v2/core-binding.d.ts",
+      "sourceSha256": "a77ae5304ab90f7f68599c90b1dfc6ad9d9cf9855c15294bcc20e5e12f69b87f"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "target": "lib/runtime-manager-contract.d.ts",
+      "sourceSha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "target": "lib/dot-v2/dot-original-context.d.ts",
+      "sourceSha256": "c6fd4d762622dda2bd9f8b81d6e93ce989d20c7ae4e0a02e92b84aa1aa3c250f"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "target": "lib/opencode-client.d.ts",
+      "sourceSha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "target": "lib/runtime-opencode-context.d.ts",
+      "sourceSha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth.ts",
+      "target": "lib/middleware/auth.d.ts",
+      "sourceSha256": "a62e7b82011525b14c15c2f54c2cab423c3145f2fc11ca328fd52ca53d6a158e"
+    }
+  ],
+  "tests": {
+    "windows": {
+      "node": "24.18.0",
+      "passed": 9,
+      "failed": 0
+    },
+    "wsl": {
+      "node": "22.23.1",
+      "passed": 9,
+      "failed": 0
+    },
+    "class": "Actual source/AST/read-only planner; explicit synthetic compiler-output/virtual-FS materializer and refusal tests; NO real compiler output/materialization",
+    "realBuild": false,
+    "realMaterialization": false,
+    "applicationRuntime": false,
+    "actualPackageQualification": false
+  },
+  "corrections": {
+    "priorAuditProseRuntimeCount": "Prior7d9d guide/messages incorrectly said82 MJS; its unchanged frozenJSON correctly records85. This proposal/test uses actual originalplan85, preserves runtime mappings/hashes and does not alter prior evidence."
+  },
+  "remaining": [
+    "Root apply exact same-copier postimage and run actual API/compiler/declaration/package validation",
+    "Actual compiler may produce additional inferred package/reference forms; unknown references refuse and require exact owned review, never permissive fallback",
+    "Final actual110/86 source/image metadata refresh after all integrated source and actual artifacts; no existing snapshot is approval",
+    "Root SQL131/coordinator/private readiness/egress/retirement, all18actualcases and independentprotectedapproval/fullrelease acceptance remain open"
+  ],
+  "cleanup": {
+    "owner": "packaging worker01a18935-1a8b-7eb3-a709-d874f70095e8",
+    "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "Existing C-backed WSL Ubuntu VHDX; root unchanged",
+    "generatedPaths": [
+      "docs/workstreams/packaging/api-declaration-closure-inventory.mjs",
+      "docs/workstreams/packaging/api-declaration-copier-source.mjs",
+      "docs/workstreams/packaging/api-declaration-closure-proposal.mjs",
+      "docs/workstreams/packaging/api-declaration-closure.test.mjs",
+      "docs/workstreams/packaging/api-declaration-closure-freeze.mjs",
+      "docs/workstreams/packaging/api-declaration-closure.patch",
+      "docs/workstreams/packaging/api-declaration-closure-receipt.json",
+      "docs/workstreams/packaging/api-declaration-closure.md"
+    ],
+    "newDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "actualSourceOrDependencyTreeCopies": false,
+    "actualOutputsWritten": false,
+    "protected": "All shared source/original outputs/user/runtime/editor/workspace/backup data, Native/Cargo/cache/failure evidence and priorfrozenproposals",
+    "retention": "Eight minimal source/inventory/proposal/regression/patch/receipt/guide artifacts for Root integration and realAPIpackage acceptance",
+    "regeneration": "Existing TEMP/TMP/TMPDIR=coordination/packaging; NODE_COMPILE_CACHE empty; VEYRA_DECLARATION_ROOT actualRoot source; Node --experimental-vm-modules api-declaration-closure-freeze.mjs in WSL; Node --experimental-vm-modules --test ./api-declaration-closure.test.mjs",
+    "WindowsRecoveryClaimed": false,
+    "LinuxRecoveryClaimed": false
+  }
+}

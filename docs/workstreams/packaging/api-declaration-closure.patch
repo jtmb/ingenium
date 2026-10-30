@@ -1,0 +1,176 @@
+diff --git a/services/ingenium-api/scripts/copy-domain-runtime.mjs b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+--- a/services/ingenium-api/scripts/copy-domain-runtime.mjs
++++ b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+@@ -22,7 +22,7 @@
+   for(const name of requiredCandidateRuntimeSources)if(!files.has(path.join(sourceRoot,...name.split('/'))))throw Error('Required original candidate module missing: '+name);
+   const rows=[];
+   for(const name of reviewedCompiledRuntimeSources){
+-    const source=path.join(sourceRoot,...name.split('/')),raw=fs.readFileSync(source),syntax=ts.createSourceFile(source,raw.toString('utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
++    const source=path.join(sourceRoot,...name.split('/')),raw=readStablePackagingFile(source,fs.statSync(sourceRoot).uid),syntax=ts.createSourceFile(source,raw.toString('utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+     if(syntax.parseDiagnostics.length)throw Error('Invalid reviewed compiler input: '+name);
+     const target=path.join(destination,...name.slice('services/ingenium-api/'.length,-3).split('/'))+'.js',references=[];
+     function add(specifier,runtimeRequired){
+@@ -66,13 +66,93 @@
+     for(const [target,runtime]of[[row.target,true],[row.declarationTarget,false]]){
+       if(!within(plan.destination,target)||fs.realpathSync(target)!==target)throw Error('Reviewed compiler output aliases another location');
+       const stat=fs.lstatSync(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size<1||stat.size>4*1024*1024)throw Error('Unsafe reviewed compiler output');
+-      const before=fs.readFileSync(target,'utf8'),emitted=rewriteReviewedCompiledModule(before,row.references,{runtime});
++      const before=readStablePackagingFile(target,fs.statSync(plan.sourceRoot).uid).toString('utf8'),emitted=rewriteReviewedCompiledModule(before,row.references,{runtime});
+       result.push({source:row.source,target,sourceSha256:row.sourceSha256,emittedSha256:digest(emitted),emitted,kind:runtime?'reviewed-ts-runtime-relocation':'reviewed-ts-declaration-relocation'});
+     }
+   }
+   return result;
+ }
+
++
++const reviewedDeclarationInputs=[{"source":"packages/veyra-automation/contracts.d.ts","target":"veyra-packages/veyra-automation/contracts.d.ts","runtimeSource":null,"consumer":"transitive shared type contract"},{"source":"packages/veyra-memory/context.d.mts","target":"veyra-packages/veyra-memory/context.d.mts","runtimeSource":"packages/veyra-memory/context.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-agent-material.d.mts","target":"veyra-packages/veyra-operations/core126-agent-material.d.mts","runtimeSource":"packages/veyra-operations/core126-agent-material.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-candidate-material.d.mts","target":"veyra-packages/veyra-operations/core126-candidate-material.d.mts","runtimeSource":"packages/veyra-operations/core126-candidate-material.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-candidate-observation.d.mts","target":"veyra-packages/veyra-operations/core126-candidate-observation.d.mts","runtimeSource":"packages/veyra-operations/core126-candidate-observation.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-image-contract.d.mts","target":"veyra-packages/veyra-operations/core126-image-contract.d.mts","runtimeSource":"packages/veyra-operations/core126-image-contract.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-image-owner.d.mts","target":"veyra-packages/veyra-operations/core126-image-owner.d.mts","runtimeSource":"packages/veyra-operations/core126-image-owner.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-job-bootstrap.d.mts","target":"veyra-packages/veyra-operations/core126-job-bootstrap.d.mts","runtimeSource":"packages/veyra-operations/core126-job-bootstrap.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-job-plugin.d.mts","target":"veyra-packages/veyra-operations/core126-job-plugin.d.mts","runtimeSource":"packages/veyra-operations/core126-job-plugin.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-operations/core126-manager-proof.d.mts","target":"veyra-packages/veyra-operations/core126-manager-proof.d.mts","runtimeSource":"packages/veyra-operations/core126-manager-proof.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-projects/context.d.mts","target":"veyra-packages/veyra-projects/context.d.mts","runtimeSource":"packages/veyra-projects/context.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-projects/contracts.d.ts","target":"veyra-packages/veyra-projects/contracts.d.ts","runtimeSource":null,"consumer":"transitive shared type contract"},{"source":"packages/veyra-projects/domain.d.mts","target":"veyra-packages/veyra-projects/domain.d.mts","runtimeSource":"packages/veyra-projects/domain.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"packages/veyra-voice/session.d.mts","target":"veyra-packages/veyra-voice/session.d.mts","runtimeSource":"packages/veyra-voice/session.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts","target":"lib/dot-v2/candidate-bootstrap-runtime.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts","target":"lib/dot-v2/candidate-carrier.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-carrier.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts","target":"lib/dot-v2/candidate-docker-stream.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts","target":"lib/dot-v2/candidate-loopback.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-loopback.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts","target":"lib/dot-v2/candidate-original-invocation.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts","target":"lib/dot-v2/candidate-private-plugin.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/core126-broker.d.mts","target":"lib/dot-v2/core126-broker.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/core126-broker.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/core126-http.d.mts","target":"lib/dot-v2/core126-http.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/core126-http.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/core126-owner.d.mts","target":"lib/dot-v2/core126-owner.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/core126-owner.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/core126-purpose.d.mts","target":"lib/dot-v2/core126-purpose.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/core126-purpose.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts","target":"lib/dot-v2/dot-approved-scope.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts","target":"lib/dot-v2/dot-job-policy.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/dot-job-policy.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/job-bootstrap-frame.d.mts","target":"lib/dot-v2/job-bootstrap-frame.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts","target":"lib/dot-v2/job-bootstrap-runtime.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/job-original-authority.d.mts","target":"lib/dot-v2/job-original-authority.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/job-original-authority.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/managed-dot-execution.d.mts","target":"lib/dot-v2/managed-dot-execution.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/managed-job-child.d.mts","target":"lib/dot-v2/managed-job-child.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/managed-job-child.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts","target":"lib/dot-v2/managed-job-contracts.d.mts","runtimeSource":null,"consumer":"15 actual direct type references"},{"source":"services/ingenium-api/lib/dot-v2/managed-job-core-client.d.mts","target":"lib/dot-v2/managed-job-core-client.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/dot-v2/managed-job-owner.d.mts","target":"lib/dot-v2/managed-job-owner.d.mts","runtimeSource":"services/ingenium-api/lib/dot-v2/managed-job-owner.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/adapters.d.mts","target":"lib/memory-v2/adapters.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/adapters.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/bounded-snapshot.d.mts","target":"lib/memory-v2/bounded-snapshot.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/bounded-snapshot.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/http.d.mts","target":"lib/memory-v2/http.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/http.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/inspection.d.mts","target":"lib/memory-v2/inspection.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/inspection.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/jobs.d.mts","target":"lib/memory-v2/jobs.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/jobs.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/lifecycle.d.mts","target":"lib/memory-v2/lifecycle.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/lifecycle.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/opencode-context-pair.d.mts","target":"lib/memory-v2/opencode-context-pair.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/opencode-context-pair.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/opencode-snapshot.d.mts","target":"lib/memory-v2/opencode-snapshot.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/opencode-snapshot.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/recall-availability.d.mts","target":"lib/memory-v2/recall-availability.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/recall-availability.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/request-policy.d.mts","target":"lib/memory-v2/request-policy.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/request-policy.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/memory-v2/source-state.d.mts","target":"lib/memory-v2/source-state.d.mts","runtimeSource":"services/ingenium-api/lib/memory-v2/source-state.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts","target":"lib/projects-v2/canonical-chat-binding.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/catalog.d.mts","target":"lib/projects-v2/catalog.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/catalog.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/execution.d.mts","target":"lib/projects-v2/execution.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/execution.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/handlers.d.mts","target":"lib/projects-v2/handlers.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/handlers.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/installation.d.mts","target":"lib/projects-v2/installation.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/installation.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/migration.d.mts","target":"lib/projects-v2/migration.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/migration.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/native-catalog.d.mts","target":"lib/projects-v2/native-catalog.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/native-catalog.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/native-handlers.d.mts","target":"lib/projects-v2/native-handlers.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/native-handlers.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/native-transport.d.mts","target":"lib/projects-v2/native-transport.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/native-transport.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/private-workspace-policy.d.mts","target":"lib/projects-v2/private-workspace-policy.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/private-workspace-policy.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/reads.d.mts","target":"lib/projects-v2/reads.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/reads.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/request-chat-source.d.mts","target":"lib/projects-v2/request-chat-source.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/request-chat-source.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts","target":"lib/projects-v2/request-execution-owner.d.mts","runtimeSource":"services/ingenium-api/lib/projects-v2/request-execution-owner.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts","target":"lib/voice-v2/attachment-delivery-owner.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/attachment-delivery-owner.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/core-operations.d.mts","target":"lib/voice-v2/core-operations.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/core-operations.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/current-agent.d.mts","target":"lib/voice-v2/current-agent.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/current-agent.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/hosted-lifecycle.d.mts","target":"lib/voice-v2/hosted-lifecycle.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/hosted-lifecycle.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts","target":"lib/voice-v2/linux-cpu-admission.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/managed-cpu-speech.d.mts","target":"lib/voice-v2/managed-cpu-speech.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/managed-cpu-speech.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/managed-profile.d.mts","target":"lib/voice-v2/managed-profile.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/managed-profile.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts","target":"lib/voice-v2/managed-supervisor.d.mts","runtimeSource":"services/ingenium-api/lib/voice-v2/managed-supervisor.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"tools/veyra-release/core126-candidate-intent.d.mts","target":"veyra-tools/veyra-release/core126-candidate-intent.d.mts","runtimeSource":"tools/veyra-release/core126-candidate-intent.mjs","consumer":"declaration of concrete original copier MJS output"},{"source":"tools/veyra-release/core126-docker-binary.d.mts","target":"veyra-tools/veyra-release/core126-docker-binary.d.mts","runtimeSource":"tools/veyra-release/core126-docker-binary.mjs","consumer":"declaration of concrete original copier MJS output"}];
++const reviewedDeclarationCompilerInputs=["services/ingenium-api/lib/dot-v2/commands.ts","services/ingenium-api/lib/dot-v2/core-binding.ts","services/ingenium-api/lib/dot-v2/existing-jobs.ts","services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts","services/ingenium-api/lib/dot-v2/proactive.ts","services/ingenium-api/lib/dot-v2/repository.ts","services/ingenium-api/lib/dot-v2/request-binding.ts","services/ingenium-api/lib/dot-v2/router.ts","services/ingenium-api/lib/dot-v2/schedule.ts","services/ingenium-api/lib/dot-v2/service.ts"];
++const reviewedDeclarationPackages=["better-sqlite3","express","ingenium-core","ingenium-core/lib/tools/voice-operation-ledger","node:buffer","node:child_process","node:http","node:stream"];
++const packagingStat=file=>{try{return fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')return null;throw error;}};
++function readStablePackagingFile(file,owner){
++ let fd;try{
++  if(fs.realpathSync(file)!==file)throw Error('Packaging input aliases another path');
++  fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
++  const first=fs.fstatSync(fd);if(!first.isFile()||first.nlink!==1||first.uid!==owner||first.size<1||first.size>4*1024*1024)throw Error('Unsafe packaging input');
++  const raw=fs.readFileSync(fd),last=fs.fstatSync(fd),named=fs.lstatSync(file);
++  if(raw.length!==first.size||!Buffer.from(raw.toString('utf8')).equals(raw)||fs.realpathSync(file)!==file||['dev','ino','size','mtimeMs','ctimeMs','uid','gid','mode','nlink'].some(k=>first[k]!==last[k]||first[k]!==named[k]))throw Error('Packaging input changed');
++  return raw;
++ }finally{if(fd!==undefined)fs.closeSync(fd);}
++}
++const declarationModule=file=>file.endsWith('.d.mts')?file.slice(0,-6)+'.mjs':file.endsWith('.d.ts')?file.slice(0,-5)+'.js':file;
++export function planReviewedDeclarations({sourceRoot,destination,runtimeEntries}){
++ const owner=fs.statSync(sourceRoot).uid,runtime=new Map(runtimeEntries.map(r=>[r.source,r])),types=new Map(),outputs=new Map(),compilerTypes=new Map(),packageTypes=new Map();
++ const sourceFile=name=>path.join(sourceRoot,...name.split('/'));
++ for(const row of reviewedDeclarationInputs){
++  const source=sourceFile(row.source),target=path.join(destination,...row.target.split('/'));
++  if(!within(destination,target)||types.has(source)||outputs.has(declarationModule(target)))throw Error('Duplicate or escaped reviewed declaration');
++  if(row.runtimeSource){const original=runtime.get(sourceFile(row.runtimeSource));if(!original||declarationModule(target)!==original.target)throw Error('Declaration differs from original runtime target');}
++  else if(row.source==='services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts'){if(row.target!=='lib/dot-v2/managed-job-contracts.d.mts')throw Error('Type-only contract target changed');}
++  else if(!['packages/veyra-automation/contracts.d.ts','packages/veyra-projects/contracts.d.ts'].includes(row.source)||row.target!=='veyra-packages/'+row.source.slice('packages/'.length))throw Error('Undeclared type-only module');
++  const raw=readStablePackagingFile(source,owner),entry={source,target,sourceSha256:digest(raw),raw,kind:'reviewed-raw-declaration'};types.set(source,entry);outputs.set(declarationModule(target),entry);
++ }
++ const context={sourceRoot,destination,owner,runtime,types,outputs,compilerTypes,packageTypes};
++ const entries=[...types.values()].map(row=>{const emitted=rewriteReviewedDeclaration(row.raw.toString('utf8'),row,context);return{...row,emitted,emittedSha256:digest(emitted)};});
++ const compilerInputs=reviewedDeclarationCompilerInputs.map(name=>{const source=sourceFile(name),raw=readStablePackagingFile(source,owner);return{source,target:path.join(destination,...name.slice('services/ingenium-api/'.length,-3).split('/'))+'.d.ts',sourceSha256:digest(raw),kind:'reviewed-compiler-declaration'};});
++ return{entries,context,compilerInputs};
++}
++function resolveReviewedDeclaration(specifier,row,context){
++ const {sourceRoot,destination,owner,runtime,types,outputs,compilerTypes,packageTypes}=context;
++ if(!specifier.startsWith('.')){
++  if(!reviewedDeclarationPackages.includes(specifier))throw Error('Undeclared declaration package: '+specifier);
++  return specifier;
++ }
++ const existing=outputs.get(path.resolve(path.dirname(row.target),specifier));if(existing)return specifier;
++ const base=path.resolve(path.dirname(row.source),specifier),candidates=[base];
++ if(base.endsWith('.mjs'))candidates.push(base.slice(0,-4)+'.d.mts');if(base.endsWith('.js'))candidates.push(base.slice(0,-3)+'.ts',base.slice(0,-3)+'.d.ts');
++ let target;
++ for(const source of candidates){
++  const declared=types.get(source);if(declared){target=declarationModule(declared.target);break;}
++  const original=runtime.get(source);if(original){const typed=types.get(source.slice(0,-4)+'.d.mts');if(!typed)throw Error('Missing transitive MJS declaration: '+specifier);target=original.target;break;}
++  if(source.startsWith(path.join(sourceRoot,'services/ingenium-api')+path.sep)&&source.endsWith('.ts')&&!source.endsWith('.d.ts')&&packagingStat(source)?.isFile()){
++   const raw=readStablePackagingFile(source,owner),artifact=path.join(destination,path.relative(path.join(sourceRoot,'services/ingenium-api'),source).slice(0,-3)+'.d.ts');
++   const dependency={source,target:artifact,sourceSha256:digest(raw)};compilerTypes.set(artifact,dependency);target=declarationModule(artifact);break;
++  }
++ }
++ if(!target)throw Error('Missing transitive declaration: '+specifier);
++ let relative=path.relative(path.dirname(row.target),target).split(path.sep).join('/');if(!relative.startsWith('.'))relative='./'+relative;return relative;
++}
++export function rewriteReviewedDeclaration(text,row,context){
++ const syntax=ts.createSourceFile(row.source,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);if(syntax.parseDiagnostics.length)throw Error('Invalid declaration output');
++ const changes=[];
++ function reference(node){if(!node||!ts.isStringLiteralLike(node))throw Error('Nonliteral declaration reference');const next=resolveReviewedDeclaration(node.text,row,context);if(next!==node.text)changes.push({start:node.getStart(syntax),end:node.getEnd(),next});}
++ function visit(node){
++  if((ts.isImportDeclaration(node)||ts.isExportDeclaration(node))&&node.moduleSpecifier)reference(node.moduleSpecifier);
++  if(ts.isImportTypeNode(node)&&ts.isLiteralTypeNode(node.argument))reference(node.argument.literal);
++  if(ts.isCallExpression(node)&&node.expression.kind===ts.SyntaxKind.ImportKeyword)throw Error('Runtime import in declaration');
++  ts.forEachChild(node,visit);
++ }
++ visit(syntax);let emitted=text;for(const r of changes.sort((a,b)=>b.start-a.start))emitted=emitted.slice(0,r.start)+JSON.stringify(r.next)+emitted.slice(r.end);return emitted;
++}
++export function prepareDomainRuntimePostimages(plan){
++ const current=planDomainRuntime({sourceRoot:plan.sourceRoot,destination:plan.destination});
++ const identity=p=>JSON.stringify({entries:p.entries.map(r=>[r.source,r.target,r.sourceSha256,r.emittedSha256]),compiled:p.compiledRelocations,declarationCompiler:p.declarations.compilerInputs,dependencies:[...p.declarations.context.compilerTypes.values()]});
++ if(identity(current)!==identity(plan))throw Error('Packaging plan/source changed before write');
++ const compiled=planOriginalCompilerPostimages(current),context=current.declarations.context;
++ for(const row of compiled.filter(r=>r.target.endsWith('.d.ts'))){row.emitted=rewriteReviewedDeclaration(row.emitted,row,context);row.emittedSha256=digest(row.emitted);}
++ for(const row of current.declarations.compilerInputs){const before=readStablePackagingFile(row.target,context.owner).toString('utf8'),emitted=rewriteReviewedDeclaration(before,row,context);compiled.push({...row,emitted,emittedSha256:digest(emitted)});}
++ const files=[...current.entries,...compiled],seen=new Set();
++ for(const row of files){if(!within(current.destination,row.target)||seen.has(row.target))throw Error('Duplicate/escaped packaging output');seen.add(row.target);}
++ const typeDependencies=[];
++ for(const row of context.compilerTypes.values()){const output=files.find(f=>f.target===row.target),raw=output?Buffer.from(output.emitted):readStablePackagingFile(row.target,context.owner);typeDependencies.push({...row,emittedSha256:digest(raw)});}
++ const manifest={schemaVersion:1,files:files.map(row=>({source:path.relative(repository,row.source).split(path.sep).join('/'),path:path.relative(current.destination,row.target).split(path.sep).join('/'),sourceSha256:row.sourceSha256,emittedSha256:row.emittedSha256,kind:row.kind??'runtime-mjs'})),typeDependencies:typeDependencies.map(row=>({source:path.relative(repository,row.source).split(path.sep).join('/'),path:path.relative(current.destination,row.target).split(path.sep).join('/'),sourceSha256:row.sourceSha256,emittedSha256:row.emittedSha256}))};
++ return{...current,files,manifest};
++}
++
+ /** Compile-time closure only: never reads runtime data or discovers arbitrary files. */
+ export function planDomainRuntime({ sourceRoot = repository, destination = path.join(apiRoot, 'dist') } = {}) {
+   sourceRoot = fs.realpathSync(sourceRoot);
+@@ -122,7 +202,7 @@
+   }
+   const planned = [];
+   for (const entry of files.values()) {
+-    const raw = entry.singleton ? readSingleton(entry) : fs.readFileSync(entry.source);
++    const raw = entry.singleton ? readSingleton(entry) : readStablePackagingFile(entry.source, sourceOwner);
+     const text = raw.toString('utf8');
+     const syntax = ts.createSourceFile(entry.source, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+     const replacements = [];
+@@ -152,33 +232,36 @@
+     planned.push({ ...entry, sourceSha256: digest(raw), emittedSha256: digest(emitted), emitted });
+   }
+   const compiledRelocations = planReviewedCompiledRelocations({sourceRoot,destination,entries:planned});
+-  return { destination, entries: planned, compiledRelocations };
++  const declarations=planReviewedDeclarations({sourceRoot,destination,runtimeEntries:planned});
++  return { sourceRoot, destination, entries: [...planned,...declarations.entries], compiledRelocations, declarations };
+ }
+
+ export function materializeDomainRuntime(plan) {
+-  const root = plan.destination;
+-  if (fs.existsSync(root) && fs.lstatSync(root).isSymbolicLink()) throw new Error('Runtime destination is a symlink');
+-  fs.mkdirSync(root, { recursive: true });
+-  if (fs.realpathSync(root) !== root) throw new Error('Runtime destination aliases another directory');
+-  // Plan exact compiler postimages before writing any output. No tsc or module execution here.
+-  const compiled = planOriginalCompilerPostimages(plan);
+-  for (const entry of plan.entries) {
+-    if (!within(root, entry.target)) throw new Error('Runtime output escaped declared destination');
+-    const parents = [];
+-    for (let dir = path.dirname(entry.target); dir !== root; dir = path.dirname(dir)) parents.push(dir);
+-    for (const parent of parents.reverse()) {
+-      if (fs.existsSync(parent) && fs.lstatSync(parent).isSymbolicLink()) throw new Error('Runtime output parent is a symlink');
+-      fs.mkdirSync(parent, { recursive: true });
+-    }
+-    if (fs.existsSync(entry.target) && (!fs.lstatSync(entry.target).isFile() || fs.lstatSync(entry.target).nlink !== 1)) throw new Error('Unsafe existing runtime output');
+-    fs.writeFileSync(entry.target, entry.emitted);
++  const prepared=prepareDomainRuntimePostimages(plan),root=prepared.destination,owner=prepared.declarations.context.owner;
++  const rootStat=packagingStat(root);if(rootStat&&(!rootStat.isDirectory()||rootStat.isSymbolicLink()||fs.realpathSync(root)!==root))throw Error('Unsafe runtime destination');
++  const outputs=[...prepared.files.map(row=>({target:row.target,raw:Buffer.from(row.emitted)})),{target:path.join(root,'veyra-runtime-closure.json'),raw:Buffer.from(JSON.stringify(prepared.manifest,null,2)+'\n')}];
++  // Validate every target and ancestor before mkdir, truncation or content writes.
++  for(const row of outputs){
++    if(!within(root,row.target))throw Error('Output escaped original destination');
++    for(let parent=path.dirname(row.target);parent!==root;parent=path.dirname(parent)){if(!within(root,parent))throw Error('Output parent escaped original destination');const stat=packagingStat(parent);if(stat&&(!stat.isDirectory()||stat.isSymbolicLink()||fs.realpathSync(parent)!==parent))throw Error('Unsafe runtime output parent');}
++    const stat=packagingStat(row.target);if(stat){row.prior=stat;row.priorSha256=digest(readStablePackagingFile(row.target,owner));}
+   }
+-  for (const entry of compiled) fs.writeFileSync(entry.target, entry.emitted);
+-  const manifest = { schemaVersion: 1, files: [...plan.entries,...compiled].map(entry => ({ source: path.relative(repository, entry.source).split(path.sep).join('/'), path: path.relative(root, entry.target).split(path.sep).join('/'), sourceSha256: entry.sourceSha256, emittedSha256: entry.emittedSha256 })) };
+-  const manifestPath = path.join(root, 'veyra-runtime-closure.json');
+-  if (fs.existsSync(manifestPath) && (!fs.lstatSync(manifestPath).isFile() || fs.lstatSync(manifestPath).nlink !== 1)) throw new Error('Unsafe existing runtime manifest');
+-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+-  return manifest;
++  for(const row of prepared.files)if(digest(readStablePackagingFile(row.source,owner))!==row.sourceSha256)throw Error('Source changed before packaging writes');
++  for(const dependency of prepared.declarations.context.compilerTypes.values()){
++    if(digest(readStablePackagingFile(dependency.source,owner))!==dependency.sourceSha256)throw Error('Type dependency source changed before writes');
++    if(!prepared.files.some(row=>row.target===dependency.target)){const expected=prepared.manifest.typeDependencies.find(row=>row.path===path.relative(root,dependency.target).split(path.sep).join('/'));if(!expected||digest(readStablePackagingFile(dependency.target,owner))!==expected.emittedSha256)throw Error('Type dependency artifact changed before writes');}
++  }
++  for(const row of outputs){const stat=packagingStat(row.target);if(row.prior?(!stat||stat.dev!==row.prior.dev||stat.ino!==row.prior.ino||digest(readStablePackagingFile(row.target,owner))!==row.priorSha256):!!stat)throw Error('Output changed before packaging writes');}
++  for(const row of outputs){
++    fs.mkdirSync(path.dirname(row.target),{recursive:true});let fd;
++    try{
++      fd=fs.openSync(row.target,fs.constants.O_RDWR|fs.constants.O_NOFOLLOW|(row.prior?0:fs.constants.O_CREAT|fs.constants.O_EXCL),0o644);
++      const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.nlink!==1||stat.uid!==owner||(row.prior&&(stat.dev!==row.prior.dev||stat.ino!==row.prior.ino)))throw Error('Unsafe runtime output descriptor');
++      fs.ftruncateSync(fd,0);let at=0;while(at<row.raw.length){const count=fs.writeSync(fd,row.raw,at,row.raw.length-at,at);if(!Number.isSafeInteger(count)||count<1)throw Error('Runtime output write incomplete');at+=count;}fs.fchmodSync(fd,0o644);
++    }finally{if(fd!==undefined)fs.closeSync(fd);}
++    if(digest(readStablePackagingFile(row.target,owner))!==digest(row.raw))throw Error('Runtime output hash mismatch');
++  }
++  return prepared.manifest;
+ }
+
+ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
