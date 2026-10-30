@@ -1592,6 +1592,7 @@ export async function executeJobRun(
   _prompt: string,
   eventContext?: EventExecutionContext,
 ): Promise<void> {
+  if(jobs.isManagedJobRun(job.project_id,runId))throw Error("Managed original JobRun requires its selected container owner");
   const prompt = job.prompt_template;
 
   if (activeRunCount >= MAX_CONCURRENT_RUNS) {

@@ -138,3 +138,21 @@ export async function runtimeManagerHealth(): Promise<boolean> {
     return false;
   }
 }
+
+export interface ManagedJobObservation {state:"active"|"settled"|"unknown"|"removed";code:string;proof?:unknown}
+async function requestManagedJob(runId:string,operation:"inspect"|"launch"|"cancel"|"cleanup",runtimeId?:string):Promise<ManagedJobObservation>{
+  if(!UUID.test(runId)||(operation==="launch"&&(!runtimeId||!UUID.test(runtimeId))))throw Error("Managed JobRun identity is invalid");
+  const response=await fetch(new URL(`/v1/job-runs/${encodeURIComponent(runId)}${operation==="inspect"?"":"/"+operation}`,managerUrl()),{
+    method:operation==="inspect"?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${managerToken()}`,Accept:"application/json",...(operation==="launch"?{"Content-Type":"application/json"}:{})},
+    body:operation==="launch"?JSON.stringify({runId,runtimeId}):undefined,signal:AbortSignal.timeout(30_000),
+  });
+  if(!response.ok){await response.body?.cancel().catch(()=>undefined);throw Error("Managed JobRun owner unavailable");}
+  const result=await response.json() as {data?:ManagedJobObservation};
+  if(!result.data||!["active","settled","unknown",...(operation==="cleanup"?["removed"]:[])].includes(result.data.state)||typeof result.data.code!=="string"||result.data.code.length>128||(result.data.state==="settled"&&!result.data.proof))throw Error("Managed JobRun owner response invalid");
+  return result.data;
+}
+export const launchManagedJobRun=(runId:string,runtimeId:string)=>requestManagedJob(runId,"launch",runtimeId);
+export const inspectManagedJobRun=(runId:string)=>requestManagedJob(runId,"inspect");
+export const cancelManagedJobRun=(runId:string)=>requestManagedJob(runId,"cancel");
+
+export const cleanupManagedJobRun=(runId:string)=>requestManagedJob(runId,"cleanup");

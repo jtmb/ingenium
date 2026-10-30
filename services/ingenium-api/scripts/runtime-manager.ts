@@ -1,5 +1,4 @@
 import { createServer, request as httpRequest } from "node:http";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
@@ -9,6 +8,9 @@ import {
   type RuntimeProvisionRequest,
 } from "../lib/runtime-manager-contract.js";
 
+import { createManagedJobContainerOwner } from "../lib/dot-v2/managed-job-owner.mjs";
+import { createManagedJobCoreClient } from "../lib/dot-v2/managed-job-core-client.mjs";
+import { loadManagerToken } from "../lib/runtime-manager-auth.js";
 import { observeManagedRuntime } from "../lib/runtime-placement-contract.js";
 
 const DOCKER_SOCKET = "/var/run/docker.sock";
@@ -36,17 +38,6 @@ function environment(name: string): string {
   return value;
 }
 
-function loadManagerToken(): string {
-  const path = environment("INGENIUM_RUNTIME_MANAGER_TOKEN_FILE");
-  const stat = lstatSync(path);
-  const uid = typeof process.getuid === "function" ? process.getuid() : stat.uid;
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & 0o077) !== 0 || realpathSync(path) !== path) {
-    throw new Error("Runtime manager token file is unsafe");
-  }
-  const token = readFileSync(path, "utf8").trim();
-  if (!/^[A-Za-z0-9_-]{43,128}$/.test(token)) throw new Error("Runtime manager token is invalid");
-  return token;
-}
 
 function authorized(header: string | undefined, token: string): boolean {
   if (!header?.startsWith("Bearer ")) return false;
@@ -369,6 +360,17 @@ async function readJsonBody(request: import("node:http").IncomingMessage): Promi
 export function startRuntimeManager(): import("node:http").Server {
   const token = loadManagerToken();
   const mappings = readWorkspaceMappings(environment("INGENIUM_RUNTIME_WORKSPACE_MAP_FILE"));
+  const jobCore=createManagedJobCoreClient({apiUrl:environment("INGENIUM_RUNTIME_API_URL"),managerToken:token});
+  const jobOwner=createManagedJobContainerOwner({core:jobCore,docker:dockerRequest,
+    async buildRuntimeSpec(admission){
+      const material=await jobCore.launchMaterial(admission),input=material.provision;
+      if(material.runId!==admission.runId||material.attemptId!==admission.attemptId||material.credentialRunId!==admission.runId||material.profileQualified!==true||input.capability!==material.capability
+        ||input.runtimeId!==admission.runtimeId||input.organizationId!==admission.organizationId||input.projectId!==admission.projectId||input.ownerUserId!==admission.ownerUserId||input.workspaceId!==admission.workspaceId||input.storageMappingHash!==admission.bindingHash||input.securityEpoch!==admission.bindingEpoch||input.revision!==admission.provisioningRevision)throw Error("Managed JobRun material binding changed");
+      const mapping=mappings.get(input.workspaceId);if(!mapping)throw Error("Managed JobRun workspace mapping unavailable");
+      return {admission:material.admission,capability:material.capability,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
+    },
+    handoff:(containerId,_admission,capability)=>handoffRuntimeCapability(containerId,capability),
+  });
   const port = Number(environment("INGENIUM_RUNTIME_MANAGER_PORT"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("Runtime manager port is invalid");
   const server = createServer(async (request, response) => {
@@ -387,6 +389,20 @@ export function startRuntimeManager(): import("node:http").Server {
         const inspect = await provisionRuntime(await readJsonBody(request) as RuntimeProvisionRequest, mappings);
         response.writeHead(202).end(JSON.stringify({ data: publicInspect(inspect) }));
         return;
+      }
+      const jobRoute=/^\/v1\/job-runs\/([0-9a-f-]+)(\/launch|\/cancel|\/cleanup)?$/.exec(url.pathname);
+      if(jobRoute&&UUID.test(jobRoute[1]!)){
+        const runId=jobRoute[1]!;let result;
+        if(request.method==="GET"&&!jobRoute[2])result=await jobOwner.inspect(runId);
+        else if(request.method==="POST"&&jobRoute[2]==="/cancel")result=await jobOwner.cancel(runId);
+        else if(request.method==="POST"&&jobRoute[2]==="/cleanup")result=await jobOwner.cleanup(runId);
+        else if(request.method==="POST"&&jobRoute[2]==="/launch"){
+          const input=await readJsonBody(request) as Record<string,unknown>;
+          if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join("|")!=="runId|runtimeId"||
+             input.runId!==runId||typeof input.runtimeId!=="string"||!UUID.test(input.runtimeId))throw Error("Managed JobRun path binding changed");
+          result=await jobOwner.launch({runId,runtimeId:input.runtimeId});
+        }
+        if(result){response.writeHead(200).end(JSON.stringify({data:result}));return;}
       }
       const placement = /^\/v1\/runtimes\/([0-9a-f-]+)\/placement$/.exec(url.pathname);
       if (request.method === "GET" && placement && UUID.test(placement[1]!)) {

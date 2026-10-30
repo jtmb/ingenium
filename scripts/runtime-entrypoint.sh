@@ -67,6 +67,8 @@ chmod 0700 "/home/appuser/.config/opencode/runtime"
 
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents
 
+mcp_audience="runtime"
+if [ "${INGENIUM_RUNTIME_ROLE:-runtime}" = "job" ]; then mcp_audience="job-run"; fi
 config_file="/home/appuser/.config/opencode/runtime/opencode.jsonc"
 cat > "$config_file" <<EOF
 {
@@ -81,7 +83,7 @@ cat > "$config_file" <<EOF
           "INGENIUM_API_URL": "$INGENIUM_API_URL",
           "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
           "INGENIUM_RUNTIME_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
-          "INGENIUM_MCP_AUDIENCE": "runtime",
+          "INGENIUM_MCP_AUDIENCE": "$mcp_audience",
           "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
           "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
           "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
@@ -102,5 +104,14 @@ cat > "$config_file" <<EOF
 EOF
 chmod 0600 "$config_file"
 
-export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
-exec supervisord -c /app/runtime-supervisord.conf
+case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
+  job)
+    if [ -z "${INGENIUM_JOB_RUN_ID:-}" ] || [ -z "${INGENIUM_JOB_ATTEMPT_ID:-}" ]; then echo "ERROR: original JobRun identity missing"; exit 1; fi
+    exec node /app/services/ingenium-api/dist/scripts/runtime-job-child.js
+    ;;
+  runtime)
+    export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
+    exec supervisord -c /app/runtime-supervisord.conf
+    ;;
+  *) echo "ERROR: runtime role unavailable"; exit 1 ;;
+esac

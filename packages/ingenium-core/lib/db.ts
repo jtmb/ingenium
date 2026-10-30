@@ -5515,6 +5515,7 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
     { file: "122_veyra_workspace_projects.sql", tables: ["veyra_installation_identity", "veyra_workspace_projects", "veyra_workspace_roots", "veyra_installation_legacy_refs", "veyra_project_aliases", "veyra_project_operations"], triggers: [] },
     { file: "123_veyra_memory_lifecycle.sql", tables: ["veyra_memory_policy", "veyra_memory_chat_policy", "veyra_memory_recall", "veyra_memory_suppression", "veyra_memory_receipt", "veyra_memory_extraction"], triggers: ["veyra_memory_receipt_immutable_update", "veyra_memory_receipt_immutable_delete", "veyra_memory_suppression_immutable_update", "veyra_memory_suppression_immutable_delete", "veyra_memory_extraction_immutable_update", "veyra_memory_extraction_immutable_delete"] },
     { file: "124_veyra_dot_automation.sql", tables: ["veyra_dot_records"], triggers: [] },
+    { file: "126_managed_job_execution.sql", tables: ["job_run_managed_execution", "job_run_mcp_credentials"], triggers: ["managed_job_execution_immutable", "job_run_mcp_credentials_immutable"] },
   ];
   for (const migration of migrations) {
     const present = migration.tables.filter(name => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
@@ -5544,6 +5545,11 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
         const columns = database.prepare("PRAGMA table_xinfo(" + table + ")").all() as { name: string; hidden: number }[];
         if (!["scope_organization_id", "scope_owner_user_id"].every(name => columns.some(column => column.name === name && column.hidden === 2))) throw new Error("Missing Veyra derived scope invariant: " + table);
       }
+    }
+    if (migration.file.startsWith("126_")) {
+      references("job_run_managed_execution", "run_id", "job_runs");
+      references("job_run_mcp_credentials", "run_id", "job_runs");
+      references("job_run_mcp_credentials", "service_principal_id", "service_principals");
     }
     if (migration.file.startsWith("124_")) {
       references("veyra_dot_records", "organization_id", "organizations");

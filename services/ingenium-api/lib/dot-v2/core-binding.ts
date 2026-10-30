@@ -33,16 +33,25 @@ export interface CoreDotExecution {
   requestCancellation(scope:DotScope,run:CoreRun):void;
   inspectOwnedRun(scope:DotScope,run:CoreRun):"running"|"success"|"failed"|"cancelled"|"unknown";
 }
+export interface AsyncCoreDotExecution {
+  executeJobRun(runId:string,job:CoreJob,prompt:string):Promise<void>;
+  requestCancellation(scope:DotScope,run:CoreRun):Promise<void>;
+  inspectOwnedRun(scope:DotScope,run:CoreRun):Promise<"running"|"success"|"failed"|"cancelled"|"unknown">;
+}
 export interface CoreDotOptions {
+  asyncExecution?:AsyncCoreDotExecution;
   nestedCheckpointPolicy:"deferred-by-core-v1";
   now():string;id():string;
   onDiagnostic(event:{phase:string;code:string;runId?:string;error?:unknown}):void;
 }
 export interface CoreDotRuntime {
+  usesAsyncExecution:boolean;
   service:DotService;
   ownsJob(projectId:string,jobId:string):boolean;
   dispatchJob(projectId:string,jobId:string,isActive:()=>boolean):Promise<void>;
   recoverOperations(limit?:number):number;
+  recoverOperationsAsync(limit?:number):Promise<number>;
+  cancelFollowupAsync(actor:Actor,scope:DotScope,id:string,revision:number):Promise<void>;
 }
 
 /** Inject the existing API singleton; this factory does not open another database or start a timer. */
@@ -95,8 +104,8 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       if("id" in claim)return {runId:claim.id};
       return {blocked:claim.reason,retryable:["Job already has a running or queued run","Automation concurrency quota is full"].includes(claim.reason)};
     },
-    requestCancellation(scope,id){const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");execution.requestCancellation(scope,run);},
-    inspect(scope,id){const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");return execution.inspectOwnedRun(scope,run);},
+    requestCancellation(scope,id){if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");execution.requestCancellation(scope,run);},
+    inspect(scope,id){if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");return execution.inspectOwnedRun(scope,run);},
   },options.now,options.id);
   const followupForJob=(projectId:string,jobId:string):Followup|undefined=>{
     sameConnection();
@@ -112,10 +121,26 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
     try{service.notify(actorFor(scope),scope,id,false);}
     catch(error){options.onDiagnostic({phase:"notify",code:"DOT_NOTIFICATION_BLOCKED",error});}
   };
+  const asyncJobs={
+    async requestCancellation(scope:DotScope,id:string){
+      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
+      const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");
+      await options.asyncExecution.requestCancellation(scope,run);
+      sameConnection();if(db.inTransaction)throw new DotError("DOT_OUTER_TRANSACTION_UNSUPPORTED");
+    },
+    async inspect(scope:DotScope,id:string){
+      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
+      const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");
+      const result=await options.asyncExecution.inspectOwnedRun(scope,run);
+      sameConnection();if(db.inTransaction)throw new DotError("DOT_OUTER_TRANSACTION_UNSUPPORTED");
+      binding.authorizeRun(actorFor(scope),scope,knownRun(scope,id),"read");return result;
+    },
+  };
   let recoveryCursor="";
   const recoveryDiagnostics=new Map<string,string>();
   const recoverableDenials=new Set(["DOT_FORBIDDEN","DOT_MEMORY_DISABLED","DOT_SOURCE_REVOKED","DOT_RUN_AUTHORIZATION_REVOKED","DOT_JOB_BINDING_CHANGED","DOT_RUN_BINDING_CHANGED","DOT_PROJECTLESS_UNBOUND","DOT_NOT_FOUND"]);
   return {
+    usesAsyncExecution:!!options.asyncExecution,
     service,
     ownsJob:(projectId,id)=>!!followupForJob(projectId,id),
     async dispatchJob(projectId,id,isActive){
@@ -154,6 +179,7 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       }
     },
     recoverOperations(limit=100){
+      if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
       sameConnection();if(!Number.isInteger(limit)||limit<1||limit>100)throw new DotError("DOT_VALIDATION");
       const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
       let rows=page();
@@ -163,6 +189,35 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
         const op=JSON.parse(row.body) as Operation;
         try{
           service.recoverOperation(actorFor(op.scope),op.scope,op.id);
+          recoveryDiagnostics.delete(op.id);
+        }catch(error){
+          if(!(error instanceof DotError) || !recoverableDenials.has(error.code))throw error;
+          if(recoveryDiagnostics.get(op.id)!==error.code){
+            options.onDiagnostic({phase:"recovery",code:"DOT_RECOVERY_OPERATION_BLOCKED",runId:op.runId??undefined,error});
+            recoveryDiagnostics.delete(op.id);recoveryDiagnostics.set(op.id,error.code);
+            if(recoveryDiagnostics.size>100)recoveryDiagnostics.delete(recoveryDiagnostics.keys().next().value!);
+          }
+          continue;
+        }
+        notify(op.scope,op.id);
+      }
+      return rows.length;
+    },
+    async cancelFollowupAsync(actor,scope,id,revision){
+      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
+      await service.cancelAsync(actor,scope,id,revision,asyncJobs);
+    },
+    async recoverOperationsAsync(limit=100){
+      if(!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
+      sameConnection();if(!Number.isInteger(limit)||limit<1||limit>100)throw new DotError("DOT_VALIDATION");
+      const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
+      let rows=page();
+      if(!rows.length && recoveryCursor){recoveryCursor="";rows=page();}
+      if(rows.length)recoveryCursor=rows[rows.length-1]!.id;
+      for(const row of rows){
+        const op=JSON.parse(row.body) as Operation;
+        try{
+          await service.recoverOperationAsync(actorFor(op.scope),op.scope,op.id,asyncJobs);
           recoveryDiagnostics.delete(op.id);
         }catch(error){
           if(!(error instanceof DotError) || !recoverableDenials.has(error.code))throw error;

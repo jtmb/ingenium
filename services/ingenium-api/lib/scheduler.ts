@@ -384,14 +384,15 @@ function matchField(pattern: string, value: number, _min: number, _max: number):
   return value === n;
 }
 
-function runJobScheduler(generation: number): void {
+async function runJobScheduler(generation: number): Promise<void> {
   if (!isSchedulerActive(generation)) return;
   void recoverVaultSecretRunDirectories().catch(() => {
     logger.warn("job-scheduler", "Vault job recovery retained unresolved evidence");
   });
   try {
-    try { dotRuntime?.recoverOperations(100); }
+    try { if(dotRuntime?.usesAsyncExecution)await dotRuntime.recoverOperationsAsync(100);else dotRuntime?.recoverOperations(100); }
     catch (error) { logger.warn("dot-scheduler", "Dot operation recovery requires attention", { name: error instanceof Error ? error.name : "unknown" }); }
+    if(!isSchedulerActive(generation))return;
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const now = new Date();
@@ -490,7 +491,7 @@ function scheduleEventJobTick(generation: number): void {
 }
 
 function scheduleJobTick(generation: number): void {
-  scheduleTimeout(generation, 60_000, () => runJobScheduler(generation));
+  scheduleTimeout(generation, 60_000, () => { void trackTask(runJobScheduler(generation)).catch(() => { logger.warn("dot-scheduler","Dot async recovery retained unresolved work"); }); });
 }
 
 function scheduleLockCleanup(generation: number): void {

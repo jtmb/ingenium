@@ -41,6 +41,10 @@ export function createCoreRequestDotBinding(request:Request,selected:DotRequestS
 /** HTTP-only session. Never retain its request identity for the autonomous scheduler. */
 export function createCoreRequestDotSession(request:Request,selected:DotRequestSelection,runner:DotQualifiedRunnerOwner,options:CoreDotOptions) {
   const binding=createCoreRequestDotBinding(request,selected,runner);
+  const execution=options.asyncExecution?{executeJobRun:options.asyncExecution.executeJobRun,
+    requestCancellation(){throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");},
+    inspectOwnedRun():never{throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");},
+  }:binding.execution;
   const runtime=createCoreDotRuntime({getDb,execTransaction,checkpointAfterWrite,jobs:{
     getJob:jobs.getJob,getJobRun:jobs.getJobRun,cancelJobRun:jobs.cancelJobRun,isJobRunAuthorizationCurrent:jobs.isJobRunAuthorizationCurrent,
     startJobRun(projectId,id,trigger,provenance){
@@ -49,6 +53,6 @@ export function createCoreRequestDotSession(request:Request,selected:DotRequestS
       if(!current)throw new DotError("DOT_REQUEST_UNAUTHENTICATED");
       return jobs.startJobRun(projectId,id,trigger,{...provenance,sourceActor:{type:current.principal.type,id:current.principal.id}});
     },
-  }},binding.authorization,binding.bindingPolicy,binding.execution,options);
-  return {service:runtime.service,context:binding.context(),queue:binding.queue};
+  }},binding.authorization,binding.bindingPolicy,execution,options);
+  return {service:runtime.service,context:binding.context(),queue:binding.queue,asyncCancel:options.asyncExecution?runtime.cancelFollowupAsync:undefined};
 }

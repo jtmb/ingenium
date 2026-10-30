@@ -192,7 +192,7 @@ export class DotService {
       return { operations,skipped:plan.skipped };
     });
   }
-  cancel(actor: Actor, scope: DotScope, id: string, revision: number): void {
+  persistCancellationIntent(actor: Actor, scope: DotScope, id: string, revision: number): void {
     this.require(actor,scope,"cancel");
     this.repository.transaction(() => {
       const f = this.repository.get<Followup>("followup",id,scope);
@@ -209,8 +209,35 @@ export class DotService {
         cursor = page.nextCursor ?? "";
       } while(cursor);
     });
+  }
+  cancel(actor: Actor, scope: DotScope, id: string, revision: number): void {
+    this.persistCancellationIntent(actor,scope,id,revision);
     // Persist intent before a runner signal. Recovery repeats only the idempotent cancellation request.
     this.recover(actor,scope);
+  }
+  async cancelAsync(actor:Actor,scope:DotScope,id:string,revision:number,jobs:{requestCancellation(scope:DotScope,id:string):Promise<void>;inspect(scope:DotScope,id:string):Promise<ReturnType<JobAuthority["inspect"]>>}):Promise<void> {
+    this.persistCancellationIntent(actor,scope,id,revision);
+    let cursor="";
+    do { const page=this.repository.page<Operation>("operation",scope,cursor,100);
+      for(const op of page.data)if(op.followupId===id)await this.recoverOperationAsync(actor,scope,op.id,jobs);
+      cursor=page.nextCursor??"";
+    } while(cursor);
+  }
+  async recoverOperationAsync(actor:Actor,scope:DotScope,id:string,jobs:{requestCancellation(scope:DotScope,id:string):Promise<void>;inspect(scope:DotScope,id:string):Promise<ReturnType<JobAuthority["inspect"]>>}):Promise<void> {
+    this.require(actor,scope,"read");text(id,512);
+    const original=this.repository.get<Operation>("operation",id,scope);
+    if(!original)throw new DotError("DOT_NOT_FOUND");
+    if(!original.runId||terminal.has(original.state))return;
+    if(original.state==="cancel_requested") {this.require(actor,scope,"cancel");await jobs.requestCancellation(scope,original.runId);}
+    const state=await jobs.inspect(scope,original.runId);
+    // Await boundaries must never retain a transaction or stale operation CAS/authorization.
+    this.require(actor,scope,"read");
+    const current=this.repository.get<Operation>("operation",id,scope);
+    if(!current||current.runId!==original.runId)throw new DotError("DOT_RUN_BINDING_CHANGED");
+    if(terminal.has(current.state))return;
+    if(current.state==="cancel_requested")this.require(actor,scope,"cancel");
+    const next=current.state==="cancel_requested"&&(state==="running"||state==="unknown")?"cancel_requested":state;
+    if(next!==current.state||(state==="unknown"&&current.code!=="RUN_OUTCOME_UNKNOWN"))this.repository.put("operation",{...current,state:next,code:state==="unknown"?"RUN_OUTCOME_UNKNOWN":current.code,revision:current.revision+1,updatedAt:this.now()},current.revision);
   }
   private recoverRecord(actor: Actor, scope: DotScope, op: Operation): void {
     if (!op.runId || terminal.has(op.state)) return;

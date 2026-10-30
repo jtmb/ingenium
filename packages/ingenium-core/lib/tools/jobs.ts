@@ -761,6 +761,12 @@ export function startJobRun(
  * Mark a job run as finished with a terminal status and optional exit code.
  * Returns undefined if the run ID doesn't exist.
  */
+function managedExecutionForRun(db:ReturnType<typeof getDb>,projectId:string,runId:string):{phase:string;result_json:string|null;retirement_proof:string|null}|undefined {
+  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_run_managed_execution'").get())return undefined;
+  return db.prepare("SELECT phase,result_json,retirement_proof FROM job_run_managed_execution WHERE run_id=? AND project_id=?").get(runId,projectId) as {phase:string;result_json:string|null;retirement_proof:string|null}|undefined;
+}
+export function isManagedJobRun(projectId:string,runId:string):boolean {return !!managedExecutionForRun(getDb(dbPath()),projectId,runId);}
+
 export function finishJobRun(projectId: string, runId: string, status: "success" | "failed" | "timeout" | "cancelled", exitCode: number | null): JobRunWithEventMetadata | undefined {
   const result = execTransaction(() => {
     const db = getDb(dbPath());
@@ -772,6 +778,13 @@ export function finishJobRun(projectId: string, runId: string, status: "success"
        WHERE run.id = ?`,
     ).get(projectId, runId) as { id: string } | undefined;
     if (!existing) return undefined;
+
+    const managed=managedExecutionForRun(db,projectId,runId);
+    if(managed){
+      if(managed.phase!=="retired"||!managed.retirement_proof)throw Error("Managed JobRun requires positive original-container retirement");
+      const prior=getJobRunFromDb(db,projectId,runId);if(prior&&!["running","queued"].includes(prior.status))return prior;
+      if(status==="success"){const result=managed.result_json?JSON.parse(managed.result_json):null,proof=JSON.parse(managed.retirement_proof);if(!result?.verified||result.exitCode!==0||proof.exitCode!==0)throw Error("Managed JobRun response verification unavailable");}
+    }
 
     db.prepare(
       "UPDATE job_runs SET status = ?, finished_at = ?, exit_code = ? WHERE id = ? AND project_id = ?",
@@ -804,6 +817,13 @@ export function cancelJobRun(projectId: string, runId: string): JobRunWithEventM
       return getJobRunFromDb(db, projectId, runId)!;
     }
 
+    const managed=managedExecutionForRun(db,projectId,runId);
+    if(managed&&managed.phase!=="retired"){
+      db.prepare("UPDATE job_run_managed_execution SET phase='cancel_requested',revision=revision+1,updated_at=? WHERE run_id=? AND project_id=? AND phase!='retired'").run(now,runId,projectId);
+      db.prepare("UPDATE veyra_dot_records SET revision=revision+1,body=json_set(body,'$.state','cancel_requested','$.revision',revision+1,'$.updatedAt',?) WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.state') NOT IN ('success','failed','cancelled','skipped')").run(now,runId,projectId);
+      return getJobRunFromDb(db,projectId,runId)!;
+    }
+
     db.prepare(
       "UPDATE job_runs SET status = 'cancelled', finished_at = ? WHERE id = ? AND project_id = ?",
     ).run(now, runId, projectId);
@@ -819,10 +839,12 @@ export function recoverInterruptedJobRuns(): number {
   const recovered = execTransaction(() => {
     const db = getDb(dbPath());
     const finishedAt = new Date().toISOString();
+    const managedGuard=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_run_managed_execution'").get()
+      ? "AND NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=job_runs.id)" : "";
     return db.prepare(
       `UPDATE job_runs
        SET status = 'failed', finished_at = ?, exit_code = -1
-       WHERE status = 'running' AND trigger IN ('manual', 'cron')`,
+       WHERE status = 'running' AND trigger IN ('manual', 'cron') ${managedGuard}`,
     ).run(finishedAt).changes;
   });
   if (recovered > 0) checkpointAfterWrite();

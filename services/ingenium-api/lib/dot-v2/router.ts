@@ -14,7 +14,7 @@ export function createDotRouter(service: DotService, resolveContext: DotContextR
  return resolvedRouter(request=>({service,context:resolveContext(request),queue}),false);
 }
 
-export interface DotRequestSession {service:DotService;context:DotRequestContext;queue:DotQueueReader}
+export interface DotRequestSession {service:DotService;context:DotRequestContext;queue:DotQueueReader;asyncCancel?:(actor:Actor,scope:DotScope,id:string,revision:number)=>Promise<void>}
 /** Build fresh request authority behind the existing auth/CSRF/journal middleware. */
 export function createRequestDotRouter(factory:(request:Request)=>DotRequestSession):Router {
  return resolvedRouter(factory,true);
@@ -52,11 +52,13 @@ function resolvedRouter(factory:(request:Request)=>DotRequestSession,forwardUnkn
    res.json({data:service.get(actor,scope,kinds[collection as keyof typeof kinds],req.params.id!)});
   }catch(error){fail(error,res,next);}
  });
- router.post("/commands",(req,res,next)=>{
+ router.post("/commands",async(req,res,next)=>{
   try {
-   const {service,context}=factory(req);
+   const {service,context,asyncCancel}=factory(req);
    const {actor,scope}=context;
-   const data=executeDotCommand(service,actor,scope,req.body as DotCommand);
+   const command=req.body as DotCommand;
+   if(command?.type==="cancel"&&asyncCancel&&(typeof command.id!=="string"||!command.id.length||!Number.isSafeInteger(command.revision)||command.revision<0))throw new DotError("DOT_VALIDATION");
+   const data=command?.type==="cancel"&&asyncCancel?await asyncCancel(actor,scope,command.id,command.revision):executeDotCommand(service,actor,scope,command);
    res.status(req.body.type==="propose"?201:200);
    if(req.body.type==="propose")res.setHeader("Location",`./suggestions/${encodeURIComponent(String((data as {id:string}).id))}`);
    res.json({data:data??null});

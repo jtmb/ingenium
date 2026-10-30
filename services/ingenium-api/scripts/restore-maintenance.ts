@@ -33,7 +33,7 @@ import {
   projects,
   runtimes,
 } from "ingenium-core";
-import { hasActiveRuntimeForRestore } from "../lib/restore-runtime-guard.js";
+import { hasActiveRuntimeForRestore, hasUnretiredManagedExecutionForRestore } from "../lib/restore-runtime-guard.js";
 
 const PROGRAM = "restore-maintenance";
 const JOURNAL_FILE = "journal.json";
@@ -914,7 +914,7 @@ async function execute(): Promise<void> {
   const global = projects.getGlobalProject();
   try {
     if (!global) return;
-    if (CONTROL_PLANE_MODE && hasActiveRuntimeForRestore(runtimes.listRuntimeInstances())) {
+    if (hasUnretiredManagedExecutionForRestore(getDb()) || CONTROL_PLANE_MODE && hasActiveRuntimeForRestore(runtimes.listRuntimeInstances())) {
       throw new MaintenanceError("HOLDER_REFUSED");
     }
     const queued = backups.listQueuedRestoreExecutions(global.id)[0];
@@ -943,6 +943,9 @@ async function execute(): Promise<void> {
     run = safeTransition(global.id, run, owner, fence, "quiescing");
     writeJournal(root, run.id, "quiescing", capsule, targets);
     await stopDbUsers();
+    // Repeat after API/scheduler shutdown: no remotely managed child or accepted
+    // in-flight effect may be hidden by the parent runtime reaching STOPPED.
+    if (hasUnretiredManagedExecutionForRestore(getDb())) throw new MaintenanceError("HOLDER_REFUSED");
     closeDbForMaintenance();
     scanOpenHolders(paths);
     capsule = backups.captureRestoreExecutionCapsule(global.id, run.id);
