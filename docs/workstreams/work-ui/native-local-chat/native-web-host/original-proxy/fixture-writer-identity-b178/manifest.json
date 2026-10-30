@@ -1,0 +1,51 @@
+{
+  "requires": "492f private ProjectStore writer identity; current b178 source chain",
+  "scope": "six existing test/helper sources only; no test assertions/behavior changes; compiler UNRUN",
+  "patch_sha256": "673db4633412cc949dc254cb6c2fdad526763e8fd9d4e63204536a6821a90b4f",
+  "patch_bytes": 5786,
+  "constructors": 12,
+  "files": [
+    {
+      "path": "crates/adapters/src/projects/close/tests.rs",
+      "preimage_blob": "c55e0702c7264e8978f940271c086982d2408397",
+      "preimage_sha256": "a2a5abfbfd533a4eb2a428e5925008d2e7a858559e51b9146adda220a114f8eb",
+      "postimage_sha256": "f601bf63b190c898b3ef2fe81b4e082bed4cf1b6233a034af28b879f6f4e4174",
+      "constructors": 1
+    },
+    {
+      "path": "crates/adapters/src/projects/saved_metadata_search/tests.rs",
+      "preimage_blob": "e75f962995d001f78519edbed8180f91837a8b43",
+      "preimage_sha256": "811c2bce6b987fdaa7e0cd1c71ce79b2d0006ad07e8749f4c818f7774d5d5c44",
+      "postimage_sha256": "fb74e397dedeca455e9d2d9e6428c992c4cbb71b2fba8ce9c0d5c4599d19ec70",
+      "constructors": 1
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/tests.rs",
+      "preimage_blob": "90677e9b2c1742000a2be46ce28799d68541129b",
+      "preimage_sha256": "b2532437d779329b185bd5b87d07ee5cbd7a9c4b1e6b870bef631007f9f9ba17",
+      "postimage_sha256": "007abfe2b86a8ede6cbfce4ea608de23da434ec7d0ef3a3c4179854d3f4e7cd0",
+      "constructors": 4
+    },
+    {
+      "path": "crates/adapters/src/projects/test_support/busy.rs",
+      "preimage_blob": "0be3fa9c71da7f909538c88c75286de61ff1e87e",
+      "preimage_sha256": "b17a25e89bcebccfbcab306d416c1e56faec034758946845df49dec5eccec3db",
+      "postimage_sha256": "590a6beabe53f447692e762b55c988f4e4c6a15ae60b1441d32e6dcd4269ac8c",
+      "constructors": 1
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/task_names/tests.rs",
+      "preimage_blob": "b9a07550cb02aa0df0d2195850cb2820e5bf94cf",
+      "preimage_sha256": "ca48ee71c12b2d88be264a8929033ae735fddf606c3a28b2e8f51996693efc4c",
+      "postimage_sha256": "02041915cae09e3dc162c1b994bc54a4ec5316840d7ea9975ddd000cc39b6cac",
+      "constructors": 4
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs",
+      "preimage_blob": "e8197989dc9dc411d716bf402202dc9706509a68",
+      "preimage_sha256": "89b7727cfe90401d2c39e6731820ba591f15854acd4f222de5dccabf30fc3761",
+      "postimage_sha256": "09a0c75341d570b6facd637980f9d3c310c43e1ce7b5beb4f86b498493882516",
+      "constructors": 1
+    }
+  ]
+}

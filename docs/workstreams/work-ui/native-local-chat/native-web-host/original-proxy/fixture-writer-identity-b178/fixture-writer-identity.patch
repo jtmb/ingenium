@@ -1,0 +1,104 @@
+--- a/crates/adapters/src/projects/close/tests.rs
++++ b/crates/adapters/src/projects/close/tests.rs
+@@ -17,7 +17,7 @@
+         .execute_batch(include_str!("../0004.sql"))
+         .unwrap();
+     super::super::validate_schema(&connection, super::super::SCHEMA_VERSION).unwrap();
+-    ProjectStore { local_custody: None, local_installation_id: None, connection }
++    ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+
+ struct OwnedStatement(NonNull<ffi::sqlite3_stmt>);
+--- a/crates/adapters/src/projects/saved_metadata_search/tests.rs
++++ b/crates/adapters/src/projects/saved_metadata_search/tests.rs
+@@ -15,7 +15,7 @@
+     ] {
+         connection.execute_batch(migration).unwrap();
+     }
+-    ProjectStore { local_custody: None, local_installation_id: None, connection }
++    ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+
+ fn draft(name: String) -> ProjectDraft {
+--- a/crates/adapters/src/projects/presentation/tests.rs
++++ b/crates/adapters/src/projects/presentation/tests.rs
+@@ -15,7 +15,7 @@
+     connection
+         .execute_batch(include_str!("../0004.sql"))
+         .unwrap();
+-    ProjectStore { local_custody: None, local_installation_id: None, connection }
++    ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+ fn project(store: &mut ProjectStore) -> veyra_contracts::Project {
+     store
+@@ -415,8 +415,9 @@
+         connection
+             .execute_batch(include_str!("../0004.sql"))
+             .unwrap();
+-        let mut first = ProjectStore { local_custody: None, local_installation_id: None, connection };
++        let mut first = ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection };
+         let mut second = ProjectStore {
++            native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()),
+             local_custody: None, local_installation_id: None,
+             connection: Connection::open(&path).unwrap(),
+         };
+@@ -442,6 +443,7 @@
+     }
+     {
+         let reopened = ProjectStore {
++            native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()),
+             local_custody: None, local_installation_id: None,
+             connection: Connection::open(&path).unwrap(),
+         };
+--- a/crates/adapters/src/projects/test_support/busy.rs
++++ b/crates/adapters/src/projects/test_support/busy.rs
+@@ -92,7 +92,7 @@
+     if statement.statement.is_none() {
+         return Err(StoreError::Invalid);
+     }
+-    Ok((ProjectStore { local_custody: None, local_installation_id: None, connection }, statement))
++    Ok((ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }, statement))
+ }
+
+ #[cfg(test)]
+--- a/crates/adapters/src/projects/presentation/task_names/tests.rs
++++ b/crates/adapters/src/projects/presentation/task_names/tests.rs
+@@ -19,7 +19,7 @@
+ fn workspace() -> ProjectStore {
+     let connection = Connection::open_in_memory().unwrap();
+     initialize(&connection);
+-    ProjectStore { local_custody: None, local_installation_id: None, connection }
++    ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+ fn public_project(store: &mut ProjectStore) -> Project {
+     store
+@@ -203,6 +203,7 @@
+ fn invalid_targets_and_names_refuse_before_any_schema_or_sql_access() {
+     // Deliberately no schema: validating after SQL would produce the wrong error.
+     let mut store = ProjectStore {
++        native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()),
+         local_custody: None, local_installation_id: None,
+         connection: Connection::open_in_memory().unwrap(),
+     };
+@@ -449,8 +450,9 @@
+     let connection = Connection::open_with_flags(&uri, flags).unwrap();
+     initialize(&connection);
+     let second_connection = Connection::open_with_flags(&uri, flags).unwrap();
+-    let mut first = ProjectStore { local_custody: None, local_installation_id: None, connection };
++    let mut first = ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection };
+     let mut second = ProjectStore {
++        native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()),
+         local_custody: None, local_installation_id: None,
+         connection: second_connection,
+     };
+--- a/crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs
++++ b/crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs
+@@ -15,7 +15,7 @@
+     ] {
+         connection.execute_batch(sql).unwrap();
+     }
+-    ProjectStore { local_custody: None, local_installation_id: None, connection }
++    ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+
+ fn project_draft(index: u32) -> ProjectDraft {
