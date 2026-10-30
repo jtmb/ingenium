@@ -84,3 +84,13 @@ WHEN NEW.kind='voice-speech-tts' AND NEW.parent_operation_id=NEW.control_operati
 BEGIN SELECT RAISE(ABORT,'attached CPU requires original linked assistant claim'); END;
 CREATE TRIGGER veyra_voice_assistant_no_delete BEFORE DELETE ON veyra_voice_assistant_sources
 BEGIN SELECT RAISE(ABORT,'assistant originals retained for no replay'); END;
+-- UPDATE OR REPLACE can otherwise delete a DIFFERENT original on UNIQUE
+-- collision before its delete trigger runs (recursive_triggers=OFF).
+-- ABORT also overrides caller OR IGNORE/OR REPLACE conflict policies.
+CREATE TRIGGER veyra_voice_assistant_update_no_replace BEFORE UPDATE ON veyra_voice_assistant_sources
+WHEN EXISTS(SELECT 1 FROM veyra_voice_assistant_sources s WHERE s.claim_id<>OLD.claim_id AND (
+ s.claim_id=NEW.claim_id OR
+ (s.call_instance_id=NEW.call_instance_id AND s.source_id=NEW.source_id AND s.segment_index=NEW.segment_index) OR
+ (NEW.cpu_operation_id IS NOT NULL AND s.cpu_operation_id=NEW.cpu_operation_id) OR
+ (NEW.dispatch_id IS NOT NULL AND s.dispatch_id=NEW.dispatch_id)))
+BEGIN SELECT RAISE(ABORT,'assistant source cross-original update collision'); END;

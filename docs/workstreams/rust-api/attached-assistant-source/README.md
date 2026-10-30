@@ -15,7 +15,7 @@ Files:
 - `owner-splices.md`: actual current owner/hash anchors and minimal Core,
   request-context, supervisor and startup/restore splices. Recipe snippets are
   deliberately not represented as a tested canonical patch.
-- `assistant-source.test.mjs`: 29 source-owner/SQLite checks, one Node process,
+- `assistant-source.test.mjs`: 60 source-owner/SQLite checks, one Node process,
   existing locked better-sqlite3, `:memory:` only, 8MiB SQLite page-cache budget,
   each fixture database below 64MiB. Synthetic authorization, original plan and
   CPU ports are test fixtures only. Actual production API/resource authority,
@@ -34,7 +34,7 @@ export VEYRA_SOURCE_APP="$APP"
 /home/brajam/.local/bin/node "$OWN/docs/workstreams/rust-api/attached-assistant-source/check-types.mjs"
 ```
 
-Observed result: 29/29 pass; strict source type check passes after adding the
+Observed result: 60/60 pass; strict source type check passes after adding the
 required missing-segment guard. No disk database, build, cache, dependency or
 runtime artifact was created. Existing refused/protected artifacts untouched.
 
@@ -55,3 +55,20 @@ pre-effect spend ordering, barge/End negative fence and startup/restore hook.
 No output metadata DTO or hash becomes source authority. Never rehydrate or
 adopt private handles from JSON, create fake completed-agent rows, replay an
 unknown effect, or infer settlement of the attached agent/goal queue.
+
+The follow-on UPDATE collision guard fixes a gap in c649: with recursive
+triggers disabled, UPDATE OR REPLACE could bind a reserved source to a different
+source's existing unique CPU operation and delete that original. The explicit
+BEFORE UPDATE guard now checks all four unique identities against OTHER rows,
+excluding OLD, and raises ABORT before conflict resolution. The matrix covers
+UPDATE / UPDATE OR IGNORE / UPDATE OR REPLACE with recursive_triggers=0/1 for
+claim ID, call-instance/source/segment, nonnull CPU operation and nonnull dispatch
+ID. All refusals compare both complete row snapshots byte-for-byte. Six positive
+controls exercise noncolliding link, spend and fence with the same UPDATE forms
+and trigger settings. One isolated test drops only the new guard and reproduces
+the old row deletion; that change exists only in its disposable in-memory DB.
+The 29-case c649 checkpoint and its earlier failure evidence remain preserved.
+New `assistant-source134-update-guard.tap` and
+`assistant-source134-update-guard-types.tap` stay in the SAME coordination root
+for Root's review; exact sizes/hashes and remaining consumers are recorded in
+the existing receipt. No canonical files or physical workloads were touched.

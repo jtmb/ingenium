@@ -217,6 +217,12 @@ later gates accept `prepared:false` only after an original committed spend.
 ## Startup and restore
 
 Register SQL134 once through existing Core migrations (130-133 stay unchanged).
+Apply the follow-on `veyra_voice_assistant_update_no_replace` BEFORE UPDATE
+guard as well as the INSERT guard. It checks every unique identity against
+other rows excluding OLD and raises ABORT under caller OR IGNORE/OR REPLACE.
+Without it, a legal reserved-to-linked CPU identity update can cause REPLACE to
+delete another original when recursive triggers are disabled. Root must mount
+this guard in canonical SQL134 before treating source retention as validated.
 At ORIGINAL Core startup/restore, before any new request/dispatch admission,
 execute this reduction through the original Core transaction/checkpoint path:
 
