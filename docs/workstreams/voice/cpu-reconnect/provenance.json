@@ -1,0 +1,20 @@
+{
+  "nativeBaseTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+  "baseType": "tree",
+  "nativeWritten": false,
+  "preimages": {
+    "crates/adapters/src/speech.rs": "b89188c3f8e2a1914a285711cb37d07e75d5feafd949470478c93962b3de6e2c",
+    "crates/adapters/src/speech/http_worker.rs": "efb3aefa6ce6f04636b5d84a078757d9a2c52a6174e19b85f95e8600d49fb49f",
+    "crates/adapters/src/speech/cpu_reconnect.rs": null
+  },
+  "postimages": {
+    "crates/adapters/src/speech.rs": "1df5bc92f008dd27464b59a614b427bb5097b486415a827ae8d40876fdcc36b8",
+    "crates/adapters/src/speech/http_worker.rs": "95bb03f22853dd26e9a3bc19bd2eb9ef691a61a327c619367a725bb43523e618",
+    "crates/adapters/src/speech/cpu_reconnect.rs": "c3b97d1518c869348bdff88a4f6d2b26c31b99af2fe1ebb9e4665feab39dd33d"
+  },
+  "patchSha256": "e8bd054801f807cc28774ce7b92c785934c9d14d5106977b62416ae6b9777c20",
+  "composition": "Explicit v2 entry points require existing supervisor port; v1 remains unchanged. No default owner or runtime activation.",
+  "requiredRootWork": "Real process/job custody + original durable binding/transition IPC; original-result validation; scoped uncertain-receipt reconciliation/retirement under existing Speech owner; positive prior-process retirement for replacement generation.",
+  "nativeCompilation": false,
+  "runtimeQualification": false
+}

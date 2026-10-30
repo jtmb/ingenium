@@ -86,3 +86,12 @@ The API consumer must now configure `backend:'cpu-onnx'` explicitly for CPU or `
 The dependency-free `unittest` suite requires an empty `speech-fixtures` child of this stream's declared coordination directory, with `VEYRA_VOICE_TEST_ROOT` pointing there and `TEMP/TMP/TMPDIR` pointing to its parent. It uses tiny fixture files and fake model ports; no server binds and no neural package imports. The coordinator/worker cleanup receipt inventories, verifies, measures and removes those fixtures after the consumer exits. Never run tests against real model assets.
 
 Authored Python modules pass Ruff and strict mypy (Python 3.12 target, external model imports skipped); model-free execution here used the available Python 3.14 standard library. The frozen DirectML kernel is retained with its original style and provenance, not claimed as type-checked or requalified by these wrapper checks. See `provenance.json` and [the coordinator integration request](../../../docs/workstreams/voice/speech-backend-integration.md).
+## Reconnectable CPU ownership
+
+The separate [v2 ownership protocol](../../../docs/workstreams/voice/cpu-reconnect/README.md)
+adds exact original request/digest/boot/generation proofs through an explicit
+Windows-native or Linux API supervisor port. It does not enable itself from v1
+health, replace existing v1/local behavior, replay lost results, or supply a fake
+process-retirement primitive. Real owner enrollment and durable original journal
+composition remain required for v2 activation. Model-free tests are source
+evidence, not asset/audio/runtime or release qualification.

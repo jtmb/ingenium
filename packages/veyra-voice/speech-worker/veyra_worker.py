@@ -22,6 +22,7 @@ from typing import Callable, Iterator, Mapping, Protocol, cast
 import wave
 
 from inference_control import InferenceInterrupted, check_inference
+from cpu_ownership import CpuOperations, Identity, OwnershipError, SupervisorOwner
 
 
 class WorkerError(Exception):
@@ -261,6 +262,7 @@ class Job:
     request_id: str
     cancelled: threading.Event
     deadline: float
+    owned_v2: bool = False
 
 
 class SpeechModel(Protocol):
@@ -296,12 +298,16 @@ class SpeechWorker:
     """Serialize neural work, bound payloads and discard cancelled results."""
 
     def __init__(
-        self, models: Models, voice: str, instance_id: str, deadline_seconds: float = 5
+        self, models: Models, voice: str, instance_id: str, deadline_seconds: float = 5,
+        cpu_operations: CpuOperations | None = None,
     ) -> None:
         if voice not in models.voices or not 0 < deadline_seconds <= 5:
             raise WorkerError("WORKER_CONFIG_INVALID")
+        if cpu_operations is not None and (models.backend != "cpu-onnx" or cpu_operations.lease.instance_id != instance_id):
+            raise WorkerError("WORKER_CONFIG_INVALID")
         self.models, self.voice, self.instance_id = models, voice, instance_id
         self.deadline_seconds = deadline_seconds
+        self.cpu_operations = cpu_operations
         self.inference_lock = threading.Lock()
         self.job_lock = threading.Lock()
         self.job: Job | None = None
@@ -337,6 +343,7 @@ class SpeechWorker:
             if self.models.backend == "directml"
             else "cpu-onnx",
             "busy": self.inference_lock.locked(),
+            "ownership": self.cpu_operations.info() if self.cpu_operations is not None else None,
         }
 
     def _purge_cancelled(self) -> None:
@@ -350,6 +357,8 @@ class SpeechWorker:
         """Cancel only the named job, including a request not yet admitted."""
         identifier = request_id(identifier)
         with self.job_lock:
+            if self.job and self.job.request_id == identifier and self.job.owned_v2:
+                raise WorkerError("OWNERSHIP_IDENTITY_REQUIRED", 409)
             self._purge_cancelled()
             if identifier not in self.cancelled and len(self.cancelled) >= 128:
                 if self.job and self.job.request_id == identifier:
@@ -360,19 +369,20 @@ class SpeechWorker:
                 self.job.cancelled.set()
 
     @contextmanager
-    def _job(self, identifier: str) -> Iterator[Job]:
+    def _job(self, identifier: str, cancellation: threading.Event | None = None) -> Iterator[Job]:
         """Do not overlap models or report a completed result after cancellation."""
         if not self.ready():
             raise WorkerError("BACKEND_UNAVAILABLE", 503)
         if not self.inference_lock.acquire(blocking=False):
             raise WorkerError("BUSY", 429)
         job = Job(
-            identifier, threading.Event(), time.monotonic() + self.deadline_seconds
+            identifier, cancellation if cancellation is not None else threading.Event(),
+            time.monotonic() + self.deadline_seconds, cancellation is not None,
         )
         try:
             with self.job_lock:
                 self._purge_cancelled()
-                if identifier in self.cancelled:
+                if cancellation is None and identifier in self.cancelled:
                     job.cancelled.set()
                 self.job = job
             check_inference(job)
@@ -393,18 +403,18 @@ class SpeechWorker:
                 self.job = None
             self.inference_lock.release()
 
-    def transcribe(self, identifier: object, pcm: bytes) -> dict[str, object]:
+    def transcribe(self, identifier: object, pcm: bytes, *, cancellation: threading.Event | None = None) -> dict[str, object]:
         """Accept only 250 ms to fifteen seconds of 16 kHz mono s16le."""
         identifier = request_id(identifier)
         if not isinstance(pcm, bytes) or not 8000 <= len(pcm) <= 480000 or len(pcm) % 2:
             raise WorkerError("INVALID_AUDIO")
-        with self._job(identifier) as job:
+        with self._job(identifier, cancellation) as job:
             text = self.models.transcriber.transcribe(pcm, job)
             if not isinstance(text, str) or len(text) > 2000:
                 raise WorkerError("TRANSCRIPT_LIMIT", 502)
         return {"text": text.strip(), "language": "en", "durationMs": len(pcm) / 32}
 
-    def synthesize(self, value: object) -> bytes:
+    def synthesize(self, value: object, *, cancellation: threading.Event | None = None) -> bytes:
         """Accept one configured voice and return a bounded integer PCM WAV."""
         if not isinstance(value, dict) or set(value) != {"requestId", "text", "voice"}:
             raise WorkerError("INVALID_REQUEST")
@@ -422,7 +432,7 @@ class SpeechWorker:
             )
         ):
             raise WorkerError("INVALID_TEXT")
-        with self._job(identifier) as job:
+        with self._job(identifier, cancellation) as job:
             data, format_ = bytearray(), None
             for rate, channels, width, chunk in self.models.voices[
                 voice
@@ -492,6 +502,8 @@ class Application:
         """Return only sanitized protocol responses; never log audio or text."""
         try:
             self.authorize(headers)
+            if method == "POST" and path.startswith("/v2/"):
+                return self.owned_cpu(path, headers, body)
             value: object = None
             status, content_type = 200, "application/json"
             if method == "GET" and path == "/health":
@@ -537,12 +549,57 @@ class Application:
                 value if isinstance(value, bytes) else json.dumps(value).encode(),
                 content_type,
             )
-        except WorkerError as error:
+        except (WorkerError, OwnershipError) as error:
             return Response(
                 error.status, json.dumps({"error": {"code": error.code}}).encode()
             )
         except (ValueError, UnicodeError):
             return Response(400, b'{"error":{"code":"INVALID_JSON"}}')
+
+    def owned_cpu(self, path: str, headers: Mapping[str, str], body: bytes) -> Response:
+        """Separate v2 ownership effects; legacy v1 remains its existing protocol."""
+        owner = self.worker.cpu_operations
+        if self.worker.models.backend != "cpu-onnx" or owner is None:
+            raise OwnershipError("PROCESS_OWNER_REQUIRED", 503)
+        operation = path in ("/v2/operations/reserve", "/v2/operations/observe", "/v2/operations/cancel")
+        if not operation and path not in ("/v2/transcriptions", "/v2/speech"):
+            raise OwnershipError("NOT_FOUND", 404)
+        binary = path == "/v2/transcriptions"
+        expected = "application/octet-stream" if binary else "application/json"
+        if headers.get("content-type", "").split(";")[0] != expected:
+            raise OwnershipError("INVALID_CONTENT_TYPE", 415)
+        if not 0 < len(body) <= (480000 if binary else 2048 if operation else 4096):
+            raise OwnershipError("BODY_LIMIT", 413)
+        if operation:
+            identity = Identity.parse(json.loads(body))
+            action = {"/v2/operations/reserve": owner.reserve,
+                "/v2/operations/observe": owner.observe, "/v2/operations/cancel": owner.cancel}[path]
+            return Response(200, json.dumps(action(identity)).encode())
+        encoded = headers.get("x-veyra-identity", "")
+        if not 0 < len(encoded) <= 2048:
+            raise OwnershipError("IDENTITY_INVALID", 400)
+        identity = Identity.parse(json.loads(encoded))
+        if identity.kind != ("transcribe" if binary else "synthesize"):
+            raise OwnershipError("ORIGINAL_CONFLICT")
+        value = None if binary else json.loads(body)
+        if not binary and (not isinstance(value, dict) or value.get("requestId") != identity.request_id):
+            raise OwnershipError("ORIGINAL_CONFLICT")
+
+        def execute(cancellation: threading.Event) -> tuple[Response, str]:
+            # Both real worker methods exit _job's finally before this callback
+            # returns. Validation refusal also seals dispatch without inference.
+            try:
+                if binary:
+                    result = self.worker.transcribe(identity.request_id, body, cancellation=cancellation)
+                    response = Response(200, json.dumps(result).encode())
+                else:
+                    response = Response(200, self.worker.synthesize(value, cancellation=cancellation), "audio/wav")
+                return response, "completed"
+            except WorkerError as error:
+                return Response(error.status, json.dumps({"error": {"code": error.code}}).encode()), (
+                    "cancelled" if error.code == "CANCELLED" else "failed"
+                )
+        return owner.execute(identity, body, execute)
 
 
 class Server(ThreadingHTTPServer):
@@ -612,8 +669,15 @@ class Handler(BaseHTTPRequestHandler):
             application.authorize(headers)
             body = b""
             if method == "POST":
+                if self.path.startswith("/v2/"):
+                    if len(self.headers.get_all("Authorization", [])) != 1 or len(self.headers.get_all("Content-Type", [])) != 1:
+                        raise WorkerError("INVALID_HEADERS")
+                    if self.path in ("/v2/transcriptions", "/v2/speech"):
+                        identities = self.headers.get_all("X-Veyra-Identity", [])
+                        if len(identities) != 1 or not 0 < len(identities[0]) <= 2048:
+                            raise WorkerError("IDENTITY_INVALID")
                 lengths = self.headers.get_all("Content-Length", [])
-                maximum = 480000 if self.path == "/v1/transcriptions" else 4096
+                maximum = 480000 if self.path in ("/v1/transcriptions", "/v2/transcriptions") else 2048 if self.path.startswith("/v2/operations/") else 4096
                 if (
                     self.headers.get("Transfer-Encoding")
                     or len(lengths) != 1
@@ -670,10 +734,13 @@ def prepare(
     *,
     enable_inference: bool,
     loader: Callable[[Settings, dict[str, object]], Models] = load_models,
+    cpu_owner: SupervisorOwner | None = None,
 ) -> Application:
     """Verify independent assets/configuration before allowing GPU startup."""
     if not enable_inference:
         raise WorkerError("INFERENCE_ADMISSION_REQUIRED", 503)
+    if cpu_owner is not None and settings.backend != "cpu-onnx":
+        raise WorkerError("CPU_OWNER_BACKEND_MISMATCH", 503)
     if (
         sys.version_info[:2] != (3, 12)
         or sys.platform not in ("linux", "win32")
@@ -729,10 +796,14 @@ def prepare(
                 "VEYRA_SPEECH_BUDGET_MIB": str(settings.budget_mib),
             }
         )
+    # Actual production v2 enrollment is supplied by the Windows-native OR Linux
+    # API supervisor. No default implementation, statefile/PID inference or HTTP
+    # bootstrap can manufacture its process/retention authority.
+    ownership = CpuOperations(settings.instance_id, cpu_owner) if cpu_owner is not None and settings.backend == "cpu-onnx" else None
     loaded = loader(settings, manifest)
     if loaded.backend != settings.backend:
         raise WorkerError("BACKEND_SELECTION_MISMATCH", 503)
-    worker = SpeechWorker(loaded, cast(str, manifest["voice"]), settings.instance_id)
+    worker = SpeechWorker(loaded, cast(str, manifest["voice"]), settings.instance_id, cpu_operations=ownership)
     if not worker.ready():
         raise WorkerError("SPEECH_STARTUP_NOT_QUALIFIED", 503)
     return Application(worker, token)

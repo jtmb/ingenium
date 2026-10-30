@@ -9,7 +9,9 @@
   "newCode": [
     "veyra_worker.py",
     "cpu_models.py",
-    "tests/test_veyra_worker.py"
+    "tests/test_veyra_worker.py",
+    "cpu_ownership.py",
+    "tests/test_cpu_ownership.py"
   ],
   "qualificationInherited": false,
   "runtimeQualificationRequired": true,
