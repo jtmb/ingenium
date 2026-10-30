@@ -14,7 +14,7 @@ export interface Core126ParentProof {
 }
 export interface Core126ManagerProof {schemaVersion:1;kind:'original-manager-core126-parent-v1';observedAt:number;expiresAt:number;daemonId:string;hostId:string;parent:Readonly<Core126ParentProof>;image:{id:string;config:Readonly<Core126ImageConfig>}}
 /** Must come from the original provision owner. Never reconstruct from current labels/probe. */
-export interface Core126OriginalProvisionProfile {runtimeId:string;parentContainerId:string;hostId:string;workspaceId:string;bindingHash:string;bindingEpoch:number;provisioningRevision:number;publicProfileSha256:string;limits:Core126Limits}
+export interface Core126OriginalProvisionProfile {imageId:string;startIdentity:string;runtimeId:string;parentContainerId:string;hostId:string;workspaceId:string;bindingHash:string;bindingEpoch:number;provisioningRevision:number;publicProfileSha256:string;limits:Core126Limits}
 export interface Core126ImageApproval {imageId:string;manifestSha256:string;sourceRevision:string;sourceSha256:string;validUntil:number}
 declare const observationBrand:unique symbol,clientBrand:unique symbol,definitionBrand:unique symbol,registryBrand:unique symbol;
 export interface Core126Observation {readonly [observationBrand]:true}

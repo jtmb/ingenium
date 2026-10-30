@@ -7,31 +7,39 @@ export function createCore126ManagerGuard({loadToken}){
 /** Mount these closed handlers before generic user/runtime auth; they authenticate their OWN exact audience.
  * No handler creates a browser/service/compatibility principal from a job-run credential.
  */
-export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool}){
+export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool,listAuthorizedTools}){
  return {
   async internal(request){
-   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|consumed|removed)$/.exec(request.path);
+   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$/.exec(request.path);
    if(!match)return null;const ctx=managerGuard.context(request),runId=match[1],operation=match[2];
    if(operation==="admission"&&request.method==="GET")return {data:owner.admit(runId,request.query?.action,ctx)};
    if(request.method!=="POST")throw Object.assign(Error("Method unavailable"),{status:405});
    const body=request.body;
    if(operation==="consumed"){if(body&&Object.keys(body).length)throw Object.assign(Error("Invalid consume request"),{status:422});return {data:owner.consume(runId,ctx)};}
    if(!body||typeof body!=="object"||Array.isArray(body)||Buffer.byteLength(JSON.stringify(body))>65536)throw Object.assign(Error("Invalid journal request"),{status:422});
-   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired",removed:"recordRemoved"};
+   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired","no-create-close":"closeNoCreate",removed:"recordRemoved"};
    if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
   },
   async runtime(request){
-   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
+   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
    if(!match)return null;
    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
    const credential=credentials.inspectManagedJobCredential(token,"job-run");
    if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
    if(match[2]==="assignment"&&request.method==="GET")return {data:owner.assignment(match[1],credential)};
    if(match[2]==="result"&&request.method==="POST")return {data:owner.result(match[1],request.body,credential)};
+   if(match[2]==="mcp-tools"||match[3]){
+    if(request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.["x-ingenium-job-attempt"]!==credential.attemptId||request.headers?.cookie!==undefined||request.headers?.origin!==undefined)throw Object.assign(Error("JobRun MCP audience denied"),{status:401});
+    owner.assignment(match[1],credential);
+    if(match[2]==="mcp-tools"&&request.method==="GET"){
+     if(!listAuthorizedTools)throw Object.assign(Error("JobRun catalog unavailable"),{status:503});
+     return {data:await listAuthorizedTools(credential)};
+    }
+   }
    if(match[3]&&request.method==="POST"){
     if(!authorizeTool||!dispatchExistingTool)throw Object.assign(Error("JobRun broker route unavailable"),{status:503});
     owner.assignment(match[1],credential); // Recheck current run/profile/parent capability at each broker entry.
-    const authorized=authorizeTool(credential,match[3],request.body);return {data:await dispatchExistingTool(authorized,request.body)};
+    const authorized=authorizeTool(credential,match[3],request.body);return {data:await dispatchExistingTool(authorized,request.body,credential)};
    }
    throw Object.assign(Error("Method unavailable"),{status:405});
   },

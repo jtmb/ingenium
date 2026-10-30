@@ -10,7 +10,7 @@ const EXTENSION_EXECUTABLES = [
   "repository-command", "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner",
 ].map((name) => `scripts/${name}.js`);
 const EXTENSION_REQUIRED = [
-  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
+  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
   ...[
     "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
   ].flatMap((name) => [

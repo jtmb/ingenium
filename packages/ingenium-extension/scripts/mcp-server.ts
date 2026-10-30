@@ -94,6 +94,17 @@ export async function runMcpLauncher(
   worktree = process.env.INGENIUM_WORKTREE ?? process.cwd(),
   options: McpLauncherOptions = {},
 ): Promise<number> {
+  // Select the private job transport BEFORE generic binding, project provisioning or credential loading.
+  if (process.env.INGENIUM_MCP_AUDIENCE === "job-run") {
+    try {
+      const {runJobRunMcpTransport} = await import("./job-run-mcp-transport.js");
+      await runJobRunMcpTransport();
+      return 0;
+    } catch {
+      writeLauncherFailure("authentication", "Original JobRun MCP transport unavailable.");
+      return 2;
+    }
+  }
   const preflight = preflightMcpLauncher(worktree);
   if (!preflight.ok) {
     writeLauncherFailure(preflight.stage, preflight.message);

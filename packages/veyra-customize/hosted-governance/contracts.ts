@@ -10,7 +10,8 @@ export type ProposalDetail = ProposalSummary & {projectId: string; targetSkillId
   expectedRevision: number | null; expectedSourceRevision: number | null; proposedState: Record<string, unknown>;
   evidence: unknown[]; observationIds: unknown[]; reviewer: string | null; reviewReason: string | null;
   updatedAt: string; appliedAt: string | null; rolledBackAt: string | null; observations?: {id: number; contentPreview?: string; source?: string}[];
-  currentSkill?: {content: string; revision: number} | null; sourceSkill?: {projectId:string; content: string; revision: number; name: string} | null};
+  reviewed?: {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null;proposalHash:string;currentTarget:{id:string;revision:number}|null;currentSource:{id:string;projectId:string;name:string;revision:number}|null};
+  currentSkill?: {id:string;projectId:string;name:string;content: string; revision: number} | null; sourceSkill?: {id:string;projectId:string; content: string; revision: number; name: string} | null};
 export type ProposalPage = {data: ProposalSummary[]; pagination: {nextCursor: string | null; hasMore: boolean}};
 export type ProposalCounts = {open: number; history: number; byStatus: Record<string, number>};
 export type SynthesisStatus = {total_observations: number; pending_count: number; processed_count: number; trait_count: number;
@@ -34,7 +35,7 @@ export type WriteCommand =
   | {op: "create"; reviewedAbsent:true; name: string; description: string; content: string}
   | {op: "save"; name: string; filePath:string; target: {id:string;revision:number}; content: string; extra: {tags?: string; always_apply: number; files?: string}}
   | {op: "archive" | "restore" | "enable" | "disable"; name: string; target: {id:string;revision:number}}
-  | {op: "approve" | "reject" | "rollback"; id: string; reviewed: {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null}; reviewer: string; reason?: string}
+  | {op: "submit" | "approve" | "reject" | "rollback"; id: string; reviewed: {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null;proposalHash:string;currentTarget:{id:string;revision:number}|null;currentSource:{id:string;projectId:string;name:string;revision:number}|null}; reviewer: string; reason?: string}
   | {op: "synthesis-run"; sessionId?: string; model?: {providerId: string; modelId: string}};
 export type Command = ReadCommand | WriteCommand;
 export type Operation = Command["op"];

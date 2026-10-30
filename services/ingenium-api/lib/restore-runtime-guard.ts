@@ -23,9 +23,9 @@ export function hasUnretiredManagedExecutionForRestore(db: {prepare(sql:string):
     "AND json_extract(e.retirement_proof,'$.containerId')=e.original_container_id " +
     "AND json_extract(e.retirement_proof,'$.daemonId')=e.daemon_id " +
     "AND json_type(e.retirement_proof,'$.exitCode')='integer') " +
-    "OR (e.original_container_id IS NULL AND json_extract(e.retirement_proof,'$.kind')='core-no-create-effect-v1' " +
+    "OR (e.original_container_id IS NULL AND e.effect_fence='closed-no-create-v1' AND e.material_consumed_at IS NULL AND e.credential_id IS NULL AND e.result_json IS NULL AND json_extract(e.retirement_proof,'$.kind')='core-no-create-effect-v1' " +
     "AND json_extract(e.retirement_proof,'$.effectFence')='closed-no-create-v1' " +
-    "AND json_extract(e.retirement_proof,'$.runIdentityHash')=e.run_identity_hash))) " +
+    "AND json_extract(e.retirement_proof,'$.runIdentityHash')=e.run_identity_hash AND json_type(e.retirement_proof,'$.closedRevision')='integer' AND json_extract(e.retirement_proof,'$.closedRevision')>=1 AND json_extract(e.retirement_proof,'$.closedRevision')<=e.revision AND julianday(json_extract(e.retirement_proof,'$.closedAt')) IS NOT NULL AND NOT EXISTS(SELECT 1 FROM job_run_mcp_credentials c WHERE c.run_id=e.run_id)))) " +
     " ELSE 1 END IS NOT 0 LIMIT 1"
   ).get();
   return invalid !== undefined;

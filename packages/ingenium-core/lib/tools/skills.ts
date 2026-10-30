@@ -1,10 +1,64 @@
 import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { Skill, SkillVersion } from "../schema.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, realpathSync, lstatSync } from "node:fs";
 import { resolve, sep, isAbsolute } from "node:path";
 import { logger } from "../logger.js";
 import { getSkillsBase } from "./paths.js";
+
+/** Synchronous opt-in scope owned by the original skill projection module. */
+export interface SkillProjectionWitness {
+  phase: "attempt" | "completed" | "failed";
+  action: "write" | "remove" | "mkdir" | "validate";
+  projectId: string; skillId: string | null; name: string; revision: number | null;
+  relativePath: string; code?: string; expectedSha256?: string;
+}
+export type SkillProjectionObserver = (event: Readonly<SkillProjectionWitness>) => void;
+let strictProjectionObserver: SkillProjectionObserver | undefined;
+export class SkillProjectionFailure extends Error {
+  constructor(public readonly witness: Readonly<SkillProjectionWitness>) {
+    super("Skill projection did not complete: " + (witness.code ?? "PROJECTION_FAILED"));
+    this.name = "SkillProjectionFailure";
+  }
+}
+/** Observer validates the admission plan and captures bounded memory events; never writes SQL here. */
+export function withStrictSkillProjection<T>(observer: SkillProjectionObserver, work: () => T): T {
+  if (typeof observer !== "function" || strictProjectionObserver) throw new Error("Exclusive synchronous projection observer required");
+  if (work.constructor.name === "AsyncFunction") throw new Error("Asynchronous skill projection is forbidden");
+  strictProjectionObserver = observer;
+  try {
+    const result = work();
+    if (result && typeof (result as {then?: unknown}).then === "function") throw new Error("Asynchronous skill projection is forbidden");
+    return result;
+  } finally { strictProjectionObserver = undefined; }
+}
+function projectionEvent(skill: Partial<Skill> & {name: string}, action: SkillProjectionWitness["action"], relativePath: string, phase: SkillProjectionWitness["phase"], code?: string): SkillProjectionWitness {
+  return {phase,action,projectId:skill.project_id ?? "",skillId:skill.id ?? null,name:skill.name,
+    revision:typeof skill.revision === "number" ? skill.revision : null,relativePath,...(code?{code}:{})};
+}
+function projectionRefused(skill: Partial<Skill> & {name:string}, code: string, relativePath = ""): void {
+  if (!strictProjectionObserver) return;
+  const event = projectionEvent(skill,"validate",relativePath,"failed",code);
+  strictProjectionObserver(Object.freeze(event));
+  throw new SkillProjectionFailure(event);
+}
+function projectionIo<T>(skill: Partial<Skill> & {name:string}, action: SkillProjectionWitness["action"], relativePath: string, work: () => T, expectedSha256?: string): T {
+  if (!strictProjectionObserver) return work();
+  const observer = strictProjectionObserver;
+  const eventAt = (phase: SkillProjectionWitness["phase"], code?: string) => ({...projectionEvent(skill,action,relativePath,phase,code),...(expectedSha256?{expectedSha256}:{})});
+  observer(Object.freeze(eventAt("attempt")));
+  try {
+    const result = work();
+    observer(Object.freeze(eventAt("completed")));
+    return result;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      && /^[A-Z0-9_]{1,48}$/.test(error.code) ? error.code : "PROJECTION_IO_FAILED";
+    const event = eventAt("failed",code);
+    try { observer(Object.freeze(event)); } catch { /* Attempt is already durable; preserve failure. */ }
+    throw new SkillProjectionFailure(event);
+  }
+}
 
 /**
  * Validate a skill name for filesystem safety.
@@ -276,10 +330,12 @@ export function getSkillVersion(skillId: string, revision: number): SkillVersion
 export function writeSkillToDisk(skill: Skill): void {
   // Archived skills should not have a SKILL.md written (it was removed on archive)
   if ((skill as any).archived_at) {
+    projectionRefused(skill,"ARCHIVED_PROJECTION");
     return;
   }
 
   if (!isSafeSkillName(skill.name)) {
+    projectionRefused(skill,"UNSAFE_SKILL_NAME");
     logger.warn("skills", "Refusing to write skill with unsafe name", { name: skill.name });
     return;
   }
@@ -288,11 +344,12 @@ export function writeSkillToDisk(skill: Skill): void {
   const skillsBase = getSkillsBase(projectId);
   const baseDir = safeSkillDir(skillsBase, skill.name);
   if (!baseDir) {
+    projectionRefused(skill,"UNSAFE_SKILL_DIRECTORY");
     logger.warn("skills", "Refusing to write skill — unsafe directory (symlink/canonical escape)", { name: skill.name });
     return;
   }
   const dir = resolve(skillsBase, skill.name);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) projectionIo(skill,"mkdir","",()=>mkdirSync(dir, { recursive: true }));
 
   // Write SKILL.md with YAML frontmatter
   const escaped = (skill.description || "")
@@ -306,29 +363,30 @@ created: ${(skill as any).created_at || new Date().toISOString()}
 ---
 `;
   const body = stripLeadingFrontmatter(skill.content);
-  writeFileSync(resolve(dir, "SKILL.md"), frontmatter + "\n" + body);
+  projectionIo(skill,"write","SKILL.md",()=>writeFileSync(resolve(dir,"SKILL.md"),frontmatter+"\n"+body),createHash("sha256").update(frontmatter+"\n"+body).digest("hex"));
 
   // Write metadata.json
   const tags = skill.tags ? skill.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
   const meta = JSON.stringify({ tags, alwaysApply: (skill as any).always_apply === 1 }, null, 2);
-  writeFileSync(resolve(dir, "metadata.json"), meta);
+  projectionIo(skill,"write","metadata.json",()=>writeFileSync(resolve(dir,"metadata.json"),meta),createHash("sha256").update(meta).digest("hex"));
 
   // Write file_tree
   if ((skill as any).file_tree) {
     try {
       const tree = JSON.parse((skill as any).file_tree);
       for (const [relPath, content] of Object.entries(tree)) {
-        if (typeof content !== "string") continue; // defensively skip non-string values
+        if (typeof content !== "string") { projectionRefused(skill,"INVALID_REFERENCE_BODY"); continue; }
         const safePath = resolveSafePath(baseDir, relPath as string);
         if (!safePath) {
+          projectionRefused(skill,"UNSAFE_REFERENCE_PATH");
           logger.warn("skills", "Rejected unsafe file_tree path", {
             name: skill.name, path: relPath, baseDir,
           });
           continue;
         }
         const parentDir = resolve(safePath, "..");
-        if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
-        writeFileSync(safePath, content as string, "utf-8");
+        if (!existsSync(parentDir)) projectionIo(skill,"mkdir",relPath,()=>mkdirSync(parentDir, { recursive: true }));
+        projectionIo(skill,"write",relPath,()=>writeFileSync(safePath,content as string,"utf-8"),createHash("sha256").update(content as string).digest("hex"));
 
         // Post-write symlink defense
         try {
@@ -337,11 +395,13 @@ created: ${(skill as any).created_at || new Date().toISOString()}
             logger.warn("skills", "Post-write symlink escape detected, removing file", {
               name: skill.name, path: relPath, realPath,
             });
-            unlinkSync(safePath);
+            projectionIo(skill,"remove",relPath,()=>unlinkSync(safePath));
+            projectionRefused(skill,"POST_WRITE_PATH_ESCAPE");
           }
-        } catch { /* realpath may fail; safe to ignore */ }
+        } catch (error) { if(strictProjectionObserver) { if(error instanceof SkillProjectionFailure) throw error; projectionRefused(skill,"POST_WRITE_VALIDATION_FAILED"); } }
       }
     } catch (e) {
+      if(strictProjectionObserver) { if(e instanceof SkillProjectionFailure) throw e; projectionRefused(skill,"REFERENCE_PROJECTION_FAILED"); }
       logger.warn("skills", "Failed to parse file_tree JSON", { name: skill.name });
     }
   }
@@ -349,19 +409,32 @@ created: ${(skill as any).created_at || new Date().toISOString()}
 
 /** Remove only SKILL.md from disk for a given skill (preserves metadata.json and all auxiliary files). */
 export function removeSkillMdOnly(name: string, projectId?: string): void {
+  const projectionSkill = strictProjectionObserver && projectId ? getSkill(projectId,name) : undefined;
+  const witnessSkill = projectionSkill ?? {name,project_id:projectId};
+  if(strictProjectionObserver && !projectionSkill) projectionRefused(witnessSkill,"PROJECTION_SKILL_UNAVAILABLE");
   if (!isSafeSkillName(name)) {
+    projectionRefused(witnessSkill,"UNSAFE_SKILL_NAME");
     logger.warn("skills", "Refusing to remove SKILL.md with unsafe name", { name });
     return;
   }
   const skillsBase = getSkillsBase(projectId);
   const canonical = safeSkillDir(skillsBase, name);
   if (!canonical) {
+    projectionRefused(witnessSkill,"UNSAFE_SKILL_DIRECTORY");
     logger.warn("skills", "Refusing to remove SKILL.md — unsafe directory (symlink/canonical escape)", { name });
     return;
   }
   const dir = resolve(skillsBase, name);
   const filePath = resolve(dir, "SKILL.md");
-  try { if (existsSync(filePath)) unlinkSync(filePath); } catch {}
+  try { projectionIo(witnessSkill,"remove","SKILL.md",()=>{
+    if(strictProjectionObserver) {
+      try { lstatSync(filePath); } catch(error) {
+        if(error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
+        throw error;
+      }
+      unlinkSync(filePath);
+    } else if(existsSync(filePath))unlinkSync(filePath);
+  }); } catch(error) { if(strictProjectionObserver) throw error; }
 }
 
 /**
@@ -889,4 +962,24 @@ export function copySkills(sourceProjectId: string, targetProjectId: string): nu
   const count = execTransaction(() => copySkillsInCurrentTransaction(sourceProjectId, targetProjectId));
   checkpointAfterWrite();
   return count;
+}
+
+/** Absent-only insert in the existing outer transaction; never legacy UPSERT. */
+export function createSkillAbsentInCurrentTransaction(
+  projectId: string, name: string, description: string, content: string,
+): Skill {
+  const database = getDb();
+  if (!database.inTransaction) throw new Error("Hosted skill creation requires the existing outer Core transaction");
+  assertSafeName(name);
+  if (!database.prepare("SELECT 1 FROM projects WHERE id=? AND archived_at IS NULL").get(projectId)) {
+    throw new Error("Hosted target project is unavailable");
+  }
+  const now = new Date().toISOString(), id = randomUUID();
+  database.prepare(
+    "INSERT INTO skills(id,project_id,name,description,content,revision,created_at,updated_at) VALUES(?,?,?,?,?,0,?,?)",
+  ).run(id,projectId,name,description,content,now,now);
+  const stored = getSkillById(id);
+  if (!stored) throw new Error("Hosted skill insert could not be read");
+  writeSkillToDisk(stored);
+  return stored;
 }

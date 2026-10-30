@@ -5515,6 +5515,7 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
     { file: "122_veyra_workspace_projects.sql", tables: ["veyra_installation_identity", "veyra_workspace_projects", "veyra_workspace_roots", "veyra_installation_legacy_refs", "veyra_project_aliases", "veyra_project_operations"], triggers: [] },
     { file: "123_veyra_memory_lifecycle.sql", tables: ["veyra_memory_policy", "veyra_memory_chat_policy", "veyra_memory_recall", "veyra_memory_suppression", "veyra_memory_receipt", "veyra_memory_extraction"], triggers: ["veyra_memory_receipt_immutable_update", "veyra_memory_receipt_immutable_delete", "veyra_memory_suppression_immutable_update", "veyra_memory_suppression_immutable_delete", "veyra_memory_extraction_immutable_update", "veyra_memory_extraction_immutable_delete"] },
     { file: "124_veyra_dot_automation.sql", tables: ["veyra_dot_records"], triggers: [] },
+    { file: "125_native_hosted_governance.sql", tables: ["native_hosted_governance_grants", "native_hosted_governance_effects"], triggers: ["native_hosted_effect_identity_immutable", "native_hosted_effect_terminal_immutable", "native_hosted_effect_no_delete"] },
     { file: "126_managed_job_execution.sql", tables: ["job_run_managed_execution", "job_run_mcp_credentials"], triggers: ["managed_job_execution_immutable", "job_run_mcp_credentials_immutable"] },
   ];
   for (const migration of migrations) {
@@ -5545,6 +5546,15 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
         const columns = database.prepare("PRAGMA table_xinfo(" + table + ")").all() as { name: string; hidden: number }[];
         if (!["scope_organization_id", "scope_owner_user_id"].every(name => columns.some(column => column.name === name && column.hidden === 2))) throw new Error("Missing Veyra derived scope invariant: " + table);
       }
+    }
+    if (migration.file.startsWith("125_")) {
+      references("native_hosted_governance_grants", "owner_user_id", "users");
+      references("native_hosted_governance_grants", "installation_id", "veyra_installation_identity");
+      references("native_hosted_governance_grants", "hosted_project_id", "projects");
+      references("native_hosted_governance_effects", "grant_id", "native_hosted_governance_grants");
+      references("native_hosted_governance_effects", "actor_id", "users");
+      references("native_hosted_governance_effects", "project_id", "projects");
+      references("native_hosted_governance_effects", "source_project_id", "projects");
     }
     if (migration.file.startsWith("126_")) {
       references("job_run_managed_execution", "run_id", "job_runs");
@@ -5641,17 +5651,19 @@ export function verifyAndRebuildSkillsFts(db: Database.Database): void {
  * write-lock is still held. Always call `checkpointAfterWrite()` *after*
  * `execTransaction()` returns.
  */
-export function execTransaction<T>(fn: () => T, retries = WRITE_MAX_RETRIES): T {
+export function execTransaction<T>(fn: () => T, retries = WRITE_MAX_RETRIES, mode: "deferred" | "immediate" = "deferred"): T {
   if (!db) {
     db = getDb();
   }
-  for (let attempt = 0; attempt < retries; attempt++) {
+  const attempts = db!.inTransaction ? 1 : retries;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const result = db!.transaction(fn)();
+      const transaction = db!.transaction(fn);
+      const result = mode === "immediate" ? transaction.immediate() : transaction();
       return result;
     } catch (err) {
       if (
-        attempt < retries - 1 &&
+        attempt < attempts - 1 &&
         err instanceof Error &&
         (err.message.includes("SQLITE_BUSY") || err.message.includes("SQLITE_LOCKED"))
       ) {

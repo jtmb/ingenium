@@ -74,3 +74,8 @@ export * as ragChunker from "./tools/rag-chunker.js";
 export * as rag from "./tools/rag.js";
 export { EndpointPolicyError, isIP, isPrivateAddress, safeEndpointFetch, safeLlmFetch, validateEndpointUrl } from "./tools/endpoint-policy.js";
 export type { EndpointPolicyErrorCode, EndpointPolicyOptions } from "./tools/endpoint-policy.js";
+
+export { createHostedGovernance, HostedRefusal, proposalReviewHash } from "./tools/hosted-governance.js";
+export type { Row as HostedGovernanceRow, VerifiedNative as VerifiedNativeGovernanceContext } from "./tools/hosted-governance.js";
+export { createHostedGovernanceOwner } from "./tools/hosted-governance-owner.js";
+export type { HostedGovernanceAuthentication } from "./tools/hosted-governance-owner.js";

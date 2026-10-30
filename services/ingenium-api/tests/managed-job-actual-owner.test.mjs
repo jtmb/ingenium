@@ -1,0 +1,15 @@
+import{readFileSync}from'node:fs';
+const fixtureURL=new URL('../../../docs/workstreams/dot/core126-sqlite.cpu.mjs',import.meta.url);
+let source=readFileSync(fixtureURL,'utf8');
+for(const [before,after] of [
+ ['from "./managed-job-owner.proposal.mjs"',new URL('../lib/dot-v2/managed-job-owner.mjs',import.meta.url).href],
+ ['from "./core126-owner.proposal.mjs"',new URL('../lib/dot-v2/core126-owner.mjs',import.meta.url).href],
+ ['from "./core126-http.proposal.mjs"',new URL('../lib/dot-v2/core126-http.mjs',import.meta.url).href],
+]) { if(!source.includes(before))throw Error('Canonical fixture import changed');source=source.replace(before,'from '+JSON.stringify(after)); }
+source=source.replaceAll('import.meta.url',JSON.stringify(fixtureURL.href));
+source+=String.raw`
+test("actual initial Core write rechecks image/profile after asynchronous qualification",async t=>{const f=fixture();t.after(f.close);const qualify=f.profiles.qualify.bind(f.profiles);f.profiles.qualify=async(...args)=>{const result=await qualify(...args);f.denyProfile();return result;};await assert.rejects(f.prepare(),/Unqualified image/);assert.equal(f.db.prepare("SELECT count(*) n FROM job_run_managed_execution").get().n,0);assert.equal(f.jobs.getJobRun(f.ids.projectId,f.ids.runId).status,"running");});
+test("actual initial image/profile assertion is synchronous inside the original transaction",async t=>{const f=fixture();t.after(f.close);let calls=0;f.profiles.assertCurrent=()=>{calls++;assert.equal(f.db.inTransaction,true);};await f.prepare();assert.equal(calls,1);});
+`;
+source+='\n//# sourceURL=actual-managed-job-owner-fixture.mjs';
+await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));

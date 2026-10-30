@@ -3,7 +3,7 @@ const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "o
 const text = (v: unknown): v is string => typeof v === "string" && !!v.trim() && !/[\u0000-\u001f]/u.test(v);
 const int = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const nullable = (v: unknown) => v === null || typeof v === "string";
-const writes = new Set(["create","save","archive","restore","enable","disable","approve","reject","rollback","synthesis-run"]);
+const writes = new Set(["create","save","archive","restore","enable","disable","submit","approve","reject","rollback","synthesis-run"]);
 const bindingFields=["authorityId","connectionId","grantId","grantRevision","epoch","nativeLibraryId","nativeServiceInstanceId","hostedServiceInstanceId","nativeProjectId","nativeProjectRevision","actorId","installationId","hostedProjectId","apiProject","visibility"];
 export function bindingKey(b: Binding): string {
   if (!b || Object.keys(b).length!==bindingFields.length || Object.keys(b).some(key=>!bindingFields.includes(key)) || ![b.authorityId,b.connectionId,b.grantId,b.epoch,b.nativeLibraryId,b.nativeServiceInstanceId,b.hostedServiceInstanceId,b.actorId,b.installationId,b.hostedProjectId,b.apiProject].every(text)
@@ -23,14 +23,22 @@ export function descriptor(c: Command, b: Binding): {method: "GET"|"POST"|"PATCH
     "proposal-counts":["op"],"proposal-page":["op","view","cursor"],proposal:["op","id","enrich"],"synthesis-status":["op"],
     "synthesis-models":["op"],pipeline:["op"],create:["op","reviewedAbsent","name","description","content"],
     save:["op","name","filePath","target","content","extra"],archive:["op","name","target"],restore:["op","name","target"],
-    enable:["op","name","target"],disable:["op","name","target"],approve:["op","id","reviewed","reviewer","reason"],
+    enable:["op","name","target"],disable:["op","name","target"],submit:["op","id","reviewed","reviewer","reason"],approve:["op","id","reviewed","reviewer","reason"],
     reject:["op","id","reviewed","reviewer","reason"],rollback:["op","id","reviewed","reviewer","reason"],
     "synthesis-run":["op","sessionId","model"]};
   if(!obj(c)||!Object.hasOwn(fields,c.op)||Object.keys(c).some(key=>!fields[c.op].includes(key)))throw new Error("This governance operation is not allowlisted.");
   const exactSubset=(value:unknown,keys:string[])=>obj(value)&&Object.keys(value).every(key=>keys.includes(key));
   if("target" in c&&!exactSubset(c.target,["id","revision"])||"extra" in c&&!exactSubset(c.extra,["tags","always_apply","files"])
-    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision"])
+    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision","proposalHash","currentTarget","currentSource"])
     ||"model" in c&&c.model!==undefined&&!exactSubset(c.model,["providerId","modelId"]))throw new Error("Original command metadata is not allowlisted.");
+  if("reviewed" in c) {
+    const r=c.reviewed;
+    const snapshot=(v:unknown,source=false)=>v===null||obj(v)&&Object.keys(v).length===(source?4:2)
+      &&exactSubset(v,source?["id","revision","projectId","name"]:["id","revision"])
+      &&text(v.id)&&int(v.revision)&&(!source||text(v.projectId)&&text(v.name));
+    if(!obj(r)||typeof r.proposalHash!=="string"||!/^[0-9a-f]{64}$/.test(r.proposalHash)
+      ||!snapshot(r.currentTarget)||!snapshot(r.currentSource,true))throw new Error("Exact reviewed proposal snapshots are required.");
+  }
   const q = new URLSearchParams({project:b.apiProject}), esc=encodeURIComponent;
   const name = (v: string) => {if(!text(v)||v.length>64||v==="."||v===".."||/[\\/\u0000]/u.test(v))throw new Error("Invalid exact skill name.");return esc(v);};
   const id = (v: string) => {if(!text(v)||v.length>256||!/^[-A-Za-z0-9_]+$/.test(v))throw new Error("Invalid proposal identity.");return esc(v);};
@@ -46,7 +54,7 @@ export function descriptor(c: Command, b: Binding): {method: "GET"|"POST"|"PATCH
     case "proposal-counts": return {method:"GET",path:"/api/v1/skills/proposals/counts?"+q};
     case "proposal-page": if(!["open","history"].includes(c.view))throw new Error("Invalid proposal view.");q.set("view",c.view);q.set("limit","25");if(c.cursor){if(!text(c.cursor)||c.cursor.length>4096)throw new Error("Invalid proposal cursor.");q.set("cursor",c.cursor);}return {method:"GET",path:"/api/v1/skills/proposals/page?"+q};
     case "proposal": if(c.enrich!==undefined&&typeof c.enrich!=="boolean")throw new Error("Invalid explicit enrichment choice.");if(c.enrich===false)q.set("enrich","false");return {method:"GET",path:"/api/v1/skills/proposals/"+id(c.id)+"?"+q};
-    case "approve": case "reject": case "rollback": if(!("reviewed" in c))throw new Error("Reviewed proposal metadata missing.");if(!text(c.reviewer)||c.reviewer.length>256||c.reason!==undefined&&typeof c.reason!=="string")throw new Error("A reviewer and valid reason are required.");return {method:"POST",path:"/api/v1/skills/proposals/"+id(c.id)+"/"+c.op+"?"+q,body:{reviewer:c.reviewer.trim(),reason:c.reason}};
+    case "submit": case "approve": case "reject": case "rollback": if(!("reviewed" in c))throw new Error("Reviewed proposal metadata missing.");if(!text(c.reviewer)||c.reviewer.length>256||c.reason!==undefined&&typeof c.reason!=="string")throw new Error("A reviewer and valid reason are required.");return {method:"POST",path:"/api/v1/skills/proposals/"+id(c.id)+"/"+c.op+"?"+q,body:{reviewer:c.reviewer.trim(),reason:c.reason}};
     case "synthesis-status": return {method:"GET",path:"/api/v1/synthesis/status?"+q};
     case "synthesis-models": return {method:"GET",path:"/api/v1/synthesis/models?"+q};
     case "synthesis-run": if(c.sessionId){if(!/^[-A-Za-z0-9_]{1,256}$/.test(c.sessionId))throw new Error("Invalid synthesis session.");q.set("session_id",c.sessionId);}if(c.model&&(!text(c.model.providerId)||c.model.providerId.length>256||!text(c.model.modelId)||c.model.modelId.length>256))throw new Error("Invalid selected model.");return {method:"POST",path:"/api/v1/synthesis/run?"+q,body:c.model?{model:{providerId:c.model.providerId,modelId:c.model.modelId}}:{}};

@@ -25,6 +25,7 @@ CREATE TABLE job_run_managed_execution (
   daemon_id TEXT NOT NULL,
   image_id TEXT NOT NULL,
   original_container_id TEXT UNIQUE,
+  effect_fence TEXT NOT NULL DEFAULT 'untracked' CHECK(effect_fence IN ('untracked','open-v1','material-admitted-v1','create-admitted-v1','closed-no-create-v1')),
   phase TEXT NOT NULL CHECK(phase IN ('prepared','create_intent','created','start_intent','running','create_unknown','start_unknown','cancel_requested','retired')),
   admission_json TEXT NOT NULL CHECK(json_valid(admission_json)),
   run_identity_hash TEXT NOT NULL,
@@ -110,3 +111,32 @@ WHEN NEW.id IS NOT OLD.id OR NEW.run_id IS NOT OLD.run_id OR NEW.attempt_id IS N
   OR NEW.expires_at IS NOT OLD.expires_at OR NEW.created_at IS NOT OLD.created_at
   OR (NEW.revoked_at IS NOT OLD.revoked_at AND (OLD.revoked_at IS NOT NULL OR NEW.revoked_at IS NULL))
 BEGIN SELECT RAISE(ABORT,'Original JobRun credential metadata is immutable'); END;
+
+-- Never backfill old rows to open-v1. Only the NEW owner INSERT seeds proven open provenance.
+CREATE TRIGGER managed_job_effect_fence_monotonic BEFORE UPDATE ON job_run_managed_execution
+WHEN COALESCE((
+  NEW.effect_fence=OLD.effect_fence
+  OR (OLD.effect_fence='open-v1' AND NEW.effect_fence='material-admitted-v1' AND OLD.phase='prepared' AND NEW.phase='prepared')
+  OR (OLD.effect_fence='material-admitted-v1' AND NEW.effect_fence='create-admitted-v1' AND OLD.phase='prepared' AND NEW.phase='create_intent' AND OLD.material_consumed_at IS NOT NULL AND OLD.credential_id IS NOT NULL)
+  OR (OLD.effect_fence='open-v1' AND NEW.effect_fence='closed-no-create-v1' AND OLD.phase IN ('prepared','cancel_requested') AND NEW.phase='retired'
+    AND OLD.original_container_id IS NULL AND NEW.original_container_id IS NULL
+    AND OLD.material_consumed_at IS NULL AND NEW.material_consumed_at IS NULL
+    AND OLD.credential_id IS NULL AND NEW.credential_id IS NULL AND OLD.result_json IS NULL AND NEW.result_json IS NULL
+    AND NOT EXISTS(SELECT 1 FROM job_run_mcp_credentials c WHERE c.run_id=OLD.run_id)
+    AND json_extract(NEW.retirement_proof,'$.schemaVersion')=1
+    AND json_extract(NEW.retirement_proof,'$.kind')='core-no-create-effect-v1'
+    AND json_extract(NEW.retirement_proof,'$.runId')=OLD.run_id
+    AND json_extract(NEW.retirement_proof,'$.attemptId')=OLD.attempt_id
+    AND json_extract(NEW.retirement_proof,'$.specHash')=OLD.spec_hash
+    AND json_extract(NEW.retirement_proof,'$.runIdentityHash')=OLD.run_identity_hash
+    AND json_extract(NEW.retirement_proof,'$.effectFence')='closed-no-create-v1'
+    AND json_extract(NEW.retirement_proof,'$.closedRevision')=NEW.revision)
+),0)=0
+ OR (NEW.effect_fence IN ('open-v1','material-admitted-v1') AND NEW.phase NOT IN ('prepared','cancel_requested'))
+ OR (NEW.phase='create_intent' AND NEW.effect_fence!='create-admitted-v1')
+ OR (NEW.effect_fence='closed-no-create-v1' AND (NEW.phase!='retired' OR NEW.original_container_id IS NOT NULL OR NEW.material_consumed_at IS NOT NULL OR NEW.credential_id IS NOT NULL OR NEW.result_json IS NOT NULL))
+BEGIN SELECT RAISE(ABORT,'Managed effect admission fence is monotonic'); END;
+CREATE TRIGGER managed_job_credential_requires_material BEFORE INSERT ON job_run_mcp_credentials
+WHEN NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=NEW.run_id AND e.attempt_id=NEW.attempt_id
+  AND e.effect_fence='material-admitted-v1' AND e.phase='prepared' AND e.credential_id IS NULL)
+BEGIN SELECT RAISE(ABORT,'Original material admission is required'); END;

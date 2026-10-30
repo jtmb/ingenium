@@ -7,11 +7,11 @@ export const originalJobRunIdentity=run=>sha([run.id,run.job_id,run.project_id,r
 /** Core sole writer. All async profile/catalog work finishes before synchronous DB transactions. */
 export function createCore126Owner(ports){
  const {getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials,profiles,requireManager,verifierFactory}=ports;
- const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb();
+ const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb(),fenceIssuer=randomUUID();
  const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
  const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
  const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
- const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
+ const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,effectFence:r.effect_fence??"untracked",retirementProof:r.retirement_proof?JSON.parse(r.retirement_proof):null,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
  function base(selection,ctx){
   same();const run=jobs.getJobRun(selection.projectId,selection.runId),job=run&&jobs.getJob(selection.projectId,run.job_id);
   if(!run||!job||run.project_id!==selection.projectId||run.organization_id!==job.organization_id||run.job_id!==job.id||run.job_revision!==job.revision||run.schedule_revision!==job.schedule_revision||run.effective_service_principal_id!==job.service_principal_id||!jobs.isJobRunAuthorizationCurrent(run.project_id,run.id))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
@@ -41,14 +41,28 @@ export function createCore126Owner(ports){
   return {...value,run};
  }
  const cas=(r,fields)=>{
-  const allowed=new Set(["phase","original_container_id","credential_id","material_consumed_at","result_json","retirement_proof","outcome_consumed_at","container_removed_at"]);
+  const allowed=new Set(["phase","effect_fence","original_container_id","credential_id","material_consumed_at","result_json","retirement_proof","outcome_consumed_at","container_removed_at"]);
   const entries=Object.entries(fields);if(entries.some(([k])=>!allowed.has(k)))fail("MANAGED_JOB_INVALID_WRITE");
   const changed=db.prepare(`UPDATE job_run_managed_execution SET ${entries.map(([k])=>k+"=?").join(",")},revision=revision+1,updated_at=? WHERE run_id=? AND revision=?`).run(...entries.map(([,v])=>v),clock().toISOString(),r.run_id,r.revision).changes;
   if(changed!==1)fail("MANAGED_JOB_REVISION_CONFLICT");return read(r.run_id).a;
  };
  const fence=(runId,key,action)=>{const c=current(runId,action);if(!key||Object.keys(key).some(k=>!["attemptId","revision","specHash","kind","containerId","phase","proof"].includes(k))||key.attemptId!==c.a.attemptId||key.specHash!==c.a.specHash||key.revision!==c.r.revision)fail("MANAGED_JOB_REVISION_CONFLICT");return c;};
+ const noCreateProof=c=>{
+  const {r,a}=c,p=a.retirementProof;
+  if(r.effect_fence!=="closed-no-create-v1"||r.phase!=="retired"||r.original_container_id||r.material_consumed_at||r.credential_id||r.result_json||db.prepare("SELECT 1 FROM job_run_mcp_credentials WHERE run_id=?").get(r.run_id)
+    ||!p||p.schemaVersion!==1||p.kind!=="core-no-create-effect-v1"||p.runId!==r.run_id||p.attemptId!==r.attempt_id||p.specHash!==r.spec_hash||p.runIdentityHash!==r.run_identity_hash||p.effectFence!==r.effect_fence||!Number.isSafeInteger(p.closedRevision)||p.closedRevision>r.revision||p.closedRevision<1||!Number.isFinite(Date.parse(p.closedAt)))fail("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
+  return p;
+ };
  const manager=ctx=>{requireManager(ctx);same();};
  return Object.freeze({
+  factsForImagePreparation(selection,ctx){
+   if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
+   return base(selection,ctx);
+  },
+  factsForOriginalImageCheck(runId){
+   const {r}=current(runId,"inspect");
+   return base({runId,projectId:r.project_id,runtimeId:r.runtime_id,workspaceId:r.workspace_id});
+  },
   async prepare(selection,ctx){
    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
    const before=base(selection,ctx);if(row(selection.runId))return current(selection.runId,"launch").a;if(before.run.status!=="running")fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
@@ -56,19 +70,23 @@ export function createCore126Owner(ports){
    const after=base(selection,ctx);if(originalJobRunIdentity(after.run)!==originalJobRunIdentity(before.run)||sha(after.agentConfig)!==sha(before.agentConfig)||after.runtime.revision!==before.runtime.revision)fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
    if(profile?.qualified!==true||!Number.isFinite(profile.expiresAt)||profile.expiresAt<=clock().getTime()||!scopes(profile.approvedScopes)||!/^[a-f0-9]{64}$/.test(profile.hash??"")||!/^[a-f0-9]{64}$/.test(profile.modelBindingHash??"")||profile.imageId!==profile.parentImageId||!/^sha256:[a-f0-9]{64}$/.test(profile.imageId)||!profile.resourceAdmissionId||!profile.daemonId||!Number.isSafeInteger(profile.provisioningRevision))fail("MANAGED_JOB_PROFILE_UNAVAILABLE");
    const deadline=new Date(Math.min(clock().getTime()+after.job.timeout_minutes*60_000,Date.parse(after.runtime.absoluteExpiresAt),profile.expiresAt)).toISOString();
-   const a={runId:after.run.id,jobId:after.job.id,projectId:after.job.project_id,organizationId:after.job.organization_id,ownerUserId:after.runtime.ownerUserId,attemptId:id(),runtimeId:after.runtime.id,runtimeRevision:after.runtime.revision,provisioningRevision:profile.provisioningRevision,parentContainerId:after.runtime.backendContainerId,workspaceId:after.workspace.id,bindingHash:after.workspace.storageMappingHash,bindingEpoch:after.workspace.securityEpoch,jobRevision:after.run.job_revision,scheduleRevision:after.run.schedule_revision,grantRevision:after.run.authorization_revision,principalSecurityEpoch:after.principalEpoch,profileId:profile.id,profileHash:profile.hash,promptHash:sha(after.job.prompt_template),daemonId:profile.daemonId,imageId:profile.imageId,approvedScopes:[...profile.approvedScopes].sort(),resourceAdmissionId:profile.resourceAdmissionId,agentHash:sha(after.agentConfig),modelBindingHash:profile.modelBindingHash,model:profile.model,limits:profile.limits,projectName:profile.projectName,deadlineAt:deadline};a.specHash=sha(a);
+   const a={runId:after.run.id,jobId:after.job.id,projectId:after.job.project_id,organizationId:after.job.organization_id,ownerUserId:after.runtime.ownerUserId,attemptId:id(),runtimeId:after.runtime.id,runtimeRevision:after.runtime.revision,provisioningRevision:profile.provisioningRevision,parentContainerId:after.runtime.backendContainerId,workspaceId:after.workspace.id,bindingHash:after.workspace.storageMappingHash,bindingEpoch:after.workspace.securityEpoch,jobRevision:after.run.job_revision,scheduleRevision:after.run.schedule_revision,effectFenceIssuer:fenceIssuer,grantRevision:after.run.authorization_revision,principalSecurityEpoch:after.principalEpoch,profileId:profile.id,profileHash:profile.hash,promptHash:sha(after.job.prompt_template),daemonId:profile.daemonId,imageId:profile.imageId,approvedScopes:[...profile.approvedScopes].sort(),resourceAdmissionId:profile.resourceAdmissionId,agentHash:sha(after.agentConfig),modelBindingHash:profile.modelBindingHash,model:profile.model,limits:profile.limits,projectName:profile.projectName,deadlineAt:deadline};a.specHash=sha(a);
    return write(()=>{
-    base(selection,ctx);if(row(a.runId))return current(a.runId,"launch").a;
-    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:a.profileId,profile_hash:a.profileHash,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:"prepared",resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:originalJobRunIdentity(after.run),deadline_at:deadline,created_at:clock().toISOString(),updated_at:clock().toISOString()};
+    const currentFacts=base(selection,ctx);if(row(a.runId))return current(a.runId,"launch").a;
+    profiles.assertCurrent({...a,phase:"prepared",revision:0,containerId:null,cancelRequested:false,outcomeConsumed:false},currentFacts);
+    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:a.profileId,profile_hash:a.profileHash,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:"prepared",effect_fence:"open-v1",resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:originalJobRunIdentity(after.run),deadline_at:deadline,created_at:clock().toISOString(),updated_at:clock().toISOString()};
     db.prepare(`INSERT INTO job_run_managed_execution (${Object.keys(columns).join(",")}) VALUES (${Object.keys(columns).map(()=>"?").join(",")})`).run(...Object.values(columns));return read(a.runId).a;
    });
   },
-  admit(runId,action,ctx){manager(ctx);if(!["launch","inspect","cancel","cleanup"].includes(action))fail("MANAGED_JOB_INVALID_ACTION");if(action==="cancel"&&hasCancelIntent(runId)&&read(runId).r.phase!=="retired")return write(()=>{const {r}=current(runId,"inspect");return r.phase==="cancel_requested"?read(runId).a:cas(r,{phase:"cancel_requested"});});return current(runId,action).a;},
-  claimEffect(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch"),expected=key.kind==="create"?"prepared":key.kind==="start"?"created":null;if(!expected||r.phase!==expected||a.cancelRequested)return {accepted:false};const admission=cas(r,{phase:key.kind+"_intent"});return {accepted:true,admission};});},
+  admit(runId,action,ctx){manager(ctx);if(!["launch","inspect","cancel","cleanup"].includes(action))fail("MANAGED_JOB_INVALID_ACTION");if(action==="cancel"&&hasCancelIntent(runId)&&read(runId).r.phase!=="retired")return write(()=>{const {r}=current(runId,"inspect");return r.phase==="cancel_requested"?read(runId).a:cas(r,{phase:"cancel_requested"});});const c=current(runId,action);if(c.r.effect_fence==="closed-no-create-v1")noCreateProof(c);return c.a;},
+  claimEffect(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch"),expected=key.kind==="create"?"prepared":key.kind==="start"?"created":null;if(!expected||a.effectFenceIssuer!==fenceIssuer||r.phase!==expected||a.cancelRequested||(key.kind==="create"&&(r.effect_fence!=="material-admitted-v1"||!r.material_consumed_at||!r.credential_id))||(key.kind==="start"&&r.effect_fence!=="create-admitted-v1"))return {accepted:false};const admission=cas(r,{phase:key.kind+"_intent",...(key.kind==="create"?{effect_fence:"create-admitted-v1"}:{})});return {accepted:true,admission};});},
   recordCreated(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch");if(r.phase!=="create_intent"||r.original_container_id||!/^[a-f0-9]{64}$/.test(key.containerId)||key.containerId===a.parentContainerId)fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{original_container_id:key.containerId,phase:"created"});});},
   recordStarted(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"launch");if(r.phase!=="start_intent")fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{phase:"running"});});},
   recordUnknown(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"inspect");if(r.phase==="cancel_requested")return read(runId).a;if(!["create","start"].includes(key.phase)||r.phase!==key.phase+"_intent")fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{phase:key.phase+"_unknown"});});},
-  async launchMaterial(runId,key,ctx){manager(ctx);const before=fence(runId,key,"launch");if(before.r.phase!=="prepared"||before.r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
+  async launchMaterial(runId,key,ctx){manager(ctx);let before=fence(runId,key,"launch");if(before.r.phase!=="prepared"||before.r.effect_fence!=="open-v1"||before.a.effectFenceIssuer!==fenceIssuer||before.r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
+   // Accepted material requests are fenced BEFORE any await/credential work, even if their acknowledgement is lost.
+   write(()=>{const c=fence(runId,key,"launch");if(c.r.effect_fence!=="open-v1")fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");cas(c.r,{effect_fence:"material-admitted-v1"});});
+   before=current(runId,"launch");key={attemptId:before.a.attemptId,revision:before.r.revision,specHash:before.a.specHash};
    const facts=base({runId,projectId:before.a.projectId,runtimeId:before.a.runtimeId,workspaceId:before.a.workspaceId});const profile=await profiles.qualify(facts);
    if(!profile.qualified||profile.hash!==before.a.profileHash||profile.modelBindingHash!==before.a.modelBindingHash)fail("MANAGED_JOB_PROFILE_UNAVAILABLE");
    manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch");if(r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
@@ -78,14 +96,23 @@ export function createCore126Owner(ports){
     return {admission:updated,runId,attemptId:a.attemptId,credentialRunId:runId,profileQualified:true,capability:credential.token,provision:{runtimeId:a.runtimeId,backendName:"ingenium-runtime-"+a.runtimeId.replaceAll("-",""),organizationId:a.organizationId,projectId:a.projectId,projectName:a.projectName,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storagePath:workspace.storagePath,storageMappingHash:a.bindingHash,securityEpoch:a.bindingEpoch,revision:a.provisioningRevision,capability:credential.token,capabilityExpiresAt:credential.expiresAt,limits:a.limits}};
    });
   },
-  recordRetired(runId,key,ctx){manager(ctx);return write(()=>{const {r,a,run}=fence(runId,key,"inspect"),p=key.proof;if(!p||Object.keys(p).sort().join("|")!=="attemptId|containerId|daemonId|exitCode|kind|runId|schemaVersion|specHash"||p.schemaVersion!==1||p.runId!==runId||p.attemptId!==a.attemptId||p.containerId!==r.original_container_id||p.daemonId!==a.daemonId||p.specHash!==a.specHash||p.kind!=="original-daemon-container-wait-join"||!Number.isInteger(p.exitCode))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");
+  closeNoCreate(runId,key,ctx){manager(ctx);return write(()=>{
+   const c=fence(runId,key,"inspect"),{r,a,run}=c;
+   if(r.effect_fence!=="open-v1"||a.effectFenceIssuer!==fenceIssuer||!["prepared","cancel_requested"].includes(r.phase)||r.original_container_id||r.material_consumed_at||r.credential_id||r.result_json||r.retirement_proof||db.prepare("SELECT 1 FROM job_run_mcp_credentials WHERE run_id=?").get(runId)||!["running","queued"].includes(run.status))fail("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
+   const proof={schemaVersion:1,kind:"core-no-create-effect-v1",runId,attemptId:a.attemptId,specHash:a.specHash,runIdentityHash:r.run_identity_hash,effectFence:"closed-no-create-v1",closedRevision:r.revision+1,closedAt:clock().toISOString()};
+   const cancelled=r.phase==="cancel_requested"||hasCancelIntent(runId);
+   cas(r,{effect_fence:"closed-no-create-v1",phase:"retired",retirement_proof:JSON.stringify(proof)});
+   if(cancelled)jobs.cancelJobRun(r.project_id,runId);else jobs.finishJobRun(r.project_id,runId,"failed",null);
+   const closed=current(runId,"inspect");noCreateProof(closed);return closed.a;
+  });},
+  recordRetired(runId,key,ctx){manager(ctx);return write(()=>{const {r,a,run}=fence(runId,key,"inspect"),p=key.proof;if(!["create-admitted-v1","untracked"].includes(r.effect_fence)||!r.original_container_id||!/^[a-f0-9]{64}$/.test(r.original_container_id)||!p||Object.keys(p).sort().join("|")!=="attemptId|containerId|daemonId|exitCode|kind|runId|schemaVersion|specHash"||p.schemaVersion!==1||p.runId!==runId||p.attemptId!==a.attemptId||p.containerId!==r.original_container_id||p.daemonId!==a.daemonId||p.specHash!==a.specHash||p.kind!=="original-daemon-container-wait-join"||!Number.isInteger(p.exitCode))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");
    const cancelled=r.phase==="cancel_requested";cas(r,{phase:"retired",retirement_proof:JSON.stringify(p)});credentials.revokeManagedJobCredential(runId);
    const result=r.result_json?JSON.parse(r.result_json):null;
    if(["running","queued"].includes(run.status)){if(cancelled)jobs.cancelJobRun(r.project_id,runId);else jobs.finishJobRun(r.project_id,runId,clock().getTime()>=Date.parse(r.deadline_at)?"timeout":p.exitCode===0&&result?.exitCode===0&&result?.verified?"success":"failed",p.exitCode);}
    return read(runId).a;
   });},
   consume(runId,ctx){manager(ctx);return write(()=>{const {r,run}=current(runId,"inspect");if(r.phase!=="retired"||!r.retirement_proof||!["success","failed","cancelled","timeout"].includes(run.status)||!db.prepare("SELECT 1 FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.state') IN ('success','failed','cancelled') LIMIT 1").get(runId))fail("MANAGED_JOB_OUTCOME_UNAVAILABLE");return r.outcome_consumed_at?read(runId).a:cas(r,{outcome_consumed_at:clock().toISOString()});});},
-  recordRemoved(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"cleanup");if(r.phase!=="retired"||!r.outcome_consumed_at||!r.retirement_proof)fail("MANAGED_JOB_CLEANUP_UNAVAILABLE");return cas(r,{container_removed_at:clock().toISOString()});});},
+  recordRemoved(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"cleanup");if(r.phase!=="retired"||r.effect_fence==="closed-no-create-v1"||!r.original_container_id||!r.outcome_consumed_at||!r.retirement_proof)fail("MANAGED_JOB_CLEANUP_UNAVAILABLE");return cas(r,{container_removed_at:clock().toISOString()});});},
   readOriginalRun(runId,scope,ctx){const {r,a,run}=current(runId,"inspect"),principal=ctx?.revalidate?.();
    if(!principal||scope.projectId!==r.project_id||scope.organizationId!==r.organization_id||scope.ownerUserId!==r.owner_user_id||scope.executionBindingId!==r.workspace_id||!authorization.requireProjectPermission(principal,r.project_id,"jobs","read").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");
    const job=jobs.getJob(r.project_id,r.job_id);if(job.visibility==="private"&&(!["browser-user","user-token"].includes(principal.type)||principal.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");return run;

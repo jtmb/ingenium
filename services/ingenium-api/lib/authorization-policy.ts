@@ -3,7 +3,7 @@ import { authentication, authorization, projects, securityAudit } from "ingenium
 import { AppError } from "./middleware/errors.js";
 import { isRuntimeGatewayPrivateRequest, type RequestPrincipal } from "./middleware/auth.js";
 
-export type PolicyTarget = "installation" | "organization" | "project" | "private" | "gateway-private" | "runtime-capability" | "public";
+export type PolicyTarget = "native-governance" | "installation" | "organization" | "project" | "private" | "gateway-private" | "runtime-capability" | "public";
 export type PolicyPermission = authorization.AuthorizationPermission;
 
 export interface AuthorizationPolicy {
@@ -75,6 +75,11 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
 
 export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
+  const nativeGovernance = req.method === "GET"
+    && /^\/api\/v1\/native-customize\/(identity|enrollments\/[^/]+|operations(?:\/[^/]+)?)$/.test(req.path)
+    || req.method === "POST" && /^\/api\/v1\/native-customize\/(enrollments|read|effects)$/.test(req.path);
+  if (nativeGovernance) return { action: "native-governance." + (req.method === "GET" ? "read" : "request"),
+    resource: "skills", permission: "read", target: "native-governance", browserSessionOnly: true, sensitive: req.method === "POST" };
   if ((req.method === "GET" && req.path === "/auth/callback") || PUBLIC_AUTH_PATHS.has(route)) return PUBLIC_POLICY;
   if (req.path === "/api/v1/health") return PUBLIC_POLICY;
   if (req.path.startsWith("/_ingenium/")) return { action: "child-mcp.execute", resource: "child-mcp", permission: "execute", target: "project", sensitive: true };
@@ -311,6 +316,11 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
   if (policy.browserSessionOnly && (req.principal.type !== "user" || !req.principal.session)) {
     audit(req.principal, policy, "denied");
     throw new AppError("A browser installation administrator is required", "FORBIDDEN", 403);
+  }
+  if (policy.target === "native-governance") {
+    // Authentication-only admission; the closed Core owner reauthorizes mapped project/command atomically.
+    audit(req.principal, policy, "success");
+    return next();
   }
   if (policy.target === "gateway-private") {
     if (req.principal.type !== "runtime-service" || req.principal.id !== "runtime-gateway"

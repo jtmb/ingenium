@@ -1,4 +1,6 @@
 import express from "express";
+import {createCore126Ingress} from "../lib/dot-v2/core126-ingress.js";
+import {actualManagedJobHandlers} from "../lib/dot-v2/core126-runtime.js";
 import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
@@ -8,6 +10,8 @@ import { getEmailEncryptionKeyFingerprint } from "ingenium-email/lib/credential-
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { createNativeCustomizeRouter } from "../lib/routes/native-customize.js";
+import { createNativeCustomizeContextOwner } from "../lib/routes/native-customize-context.js";
 import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
@@ -152,6 +156,8 @@ app.use((req, res, next) => isExactRepositorySyncRequest(req)
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
 app.use(authPreflightReadRateLimit);
 app.use(rateLimit);
+// Dedicated manager/job-run audiences authenticate in their original owners.
+app.use(createCore126Ingress(actualManagedJobHandlers));
 app.use(authMiddleware);
 app.use(recordCandidateAuthenticationFailure);
 app.use(authenticatedReadRateLimit);
@@ -181,6 +187,8 @@ app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
 app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
+// Root injects the actual verified Native context. Undefined means enrollment/effects fail closed.
+app.use("/api/v1/native-customize", createNativeCustomizeRouter({ context: createNativeCustomizeContextOwner() }));
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
