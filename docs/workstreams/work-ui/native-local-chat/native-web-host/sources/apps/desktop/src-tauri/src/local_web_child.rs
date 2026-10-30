@@ -128,6 +128,9 @@ impl LocalWebChildren {
         entry.authority.check_current()?;
         entry.child.set_bounds(bounds).map_err(|_| "Web child bounds were not confirmed")?;
         entry.child.show().map_err(|_| "Web child visibility was not confirmed")?;
+        if entry.child.window().is_focused().unwrap_or(false) {
+            entry.child.set_focus().map_err(|_| "Web child focus was not confirmed")?;
+        }
         if let Err(error) = entry.authority.check_current() {
             entry.cleanup_required = true;
             return match entry.child.hide() {

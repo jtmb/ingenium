@@ -48,12 +48,12 @@
     {
       "path": "native-web-host/child-delta-inputs.json",
       "bytes": 2437,
-      "sha256": "aa08b9c666efc4e81938fc9631a3ec4c4ba4b75330f9442b8533c895cd99537f"
+      "sha256": "1a5dfc4fb003025aaa3ce126533336427e05033b55f760fb80e3df7e0979fb4c"
     },
     {
       "path": "native-web-host/child-from-1fd.patch",
-      "bytes": 35169,
-      "sha256": "0a8f0c6f3bd272e4250270e3e27816b8bedd79b8bd7255b8210894a35897f858"
+      "bytes": 35333,
+      "sha256": "1add86258a4af309a745e1faa1abcb4758112d44d68629b657aee6db5a6d0a8c"
     },
     {
       "path": "native-web-host/child-integration.json",
@@ -67,8 +67,8 @@
     },
     {
       "path": "native-web-host/sources/apps/desktop/src-tauri/src/local_web_child.rs",
-      "bytes": 12555,
-      "sha256": "f6d4dec5a19c827c24679517d49b22c0f0a9327915740082bf0059ec8985c0b3"
+      "bytes": 12716,
+      "sha256": "934fdc5b2be3303500d713b2ae9e6933e2979324a4a56b790ccc2a0677ceeb8f"
     },
     {
       "path": "native-web-host/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_binding.rs",

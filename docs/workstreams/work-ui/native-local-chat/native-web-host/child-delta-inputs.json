@@ -41,10 +41,10 @@
       "preimage_lf_sha256": null,
       "requires_absent": true,
       "source": "native-web-host/sources/apps/desktop/src-tauri/src/local_web_child.rs",
-      "after_lf_sha256": "f6d4dec5a19c827c24679517d49b22c0f0a9327915740082bf0059ec8985c0b3"
+      "after_lf_sha256": "934fdc5b2be3303500d713b2ae9e6933e2979324a4a56b790ccc2a0677ceeb8f"
     }
   ],
-  "bytes": 35169,
-  "sha256": "0a8f0c6f3bd272e4250270e3e27816b8bedd79b8bd7255b8210894a35897f858",
+  "bytes": 35333,
+  "sha256": "1add86258a4af309a745e1faa1abcb4758112d44d68629b657aee6db5a6d0a8c",
   "application": "exact existing preimages/new paths absent; --unidiff-zero; Root reconciles actual current tree. Does not edit Cargo/lock/ACL/commands or implement the missing authority factory."
 }
