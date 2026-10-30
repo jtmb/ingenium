@@ -2,7 +2,7 @@
 use super::*;
 use super::memory_admission::MemorySynthesisAdmission;
 use veyra_memory::ValidatedSynthesisOutput;
-use crate::inference::{provider_queue::QueueWorker,owned_transport::CancellationHandle,registry::memory::MemorySlotReleased};
+use crate::inference::{provider_queue::QueueWorker,owned_transport::CancellationHandle,MemorySlotReleased};
 /// Only the original retained native request/result consumer may construct this
 /// after exact UUID/payload/runtime matching and actual joined retirement/resume.
 /// No Deserialize/Clone/public constructor; parsing output alone cannot mint it.

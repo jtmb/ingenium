@@ -1,7 +1,7 @@
 //! Closed generic framing; one supervisor/relay/authentication/native-retirement
 //! implementation. Existing Task aliases keep exact Task admission types.
 use super::*;
-use crate::inference::registry::memory::{MemoryCandidate,MemoryClaim};
+use crate::inference::{MemoryCandidate,MemoryClaim};
 use crate::inference::request_purpose::{MemoryTransportIdentity,RuntimeCorrelation};
 mod sealed{pub trait Sealed{}}
 pub(crate) enum TaskPurpose{}

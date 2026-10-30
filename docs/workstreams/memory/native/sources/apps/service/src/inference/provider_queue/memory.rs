@@ -76,7 +76,7 @@ impl ProviderQueue{
   *entry.phase.lock().map_err(|_|GatewayError::RuntimeUnavailable)?=MemoryPhase::Unknown;
   self.changed.notify_waiters();Ok(())
  }
- pub(crate) fn complete_memory(&self,entry:&Arc<QueuedMemory>,released:&crate::inference::registry::memory::MemorySlotReleased)->Result<(),GatewayError>{
+ pub(crate) fn complete_memory(&self,entry:&Arc<QueuedMemory>,released:&crate::inference::MemorySlotReleased)->Result<(),GatewayError>{
   let mut book=self.book.lock().map_err(|_|GatewayError::RuntimeUnavailable)?;
   let index=book.memory.entries.iter().position(|e|Arc::ptr_eq(e,entry)).ok_or(GatewayError::InvalidCorrelation)?;
   if released.identity().operation_id()!=entry.admission.original().operation_id||book.memory.reserved!=Some(index){return Err(GatewayError::InvalidCorrelation)}

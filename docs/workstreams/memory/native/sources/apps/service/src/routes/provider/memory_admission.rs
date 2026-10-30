@@ -22,11 +22,11 @@ impl MemorySynthesisAdmission{
   owner.verify_chat(store,chat).map_err(|_|GatewayError::InvalidGrant)?;
   let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|GatewayError::RuntimeUnavailable)?.as_millis();
   let now=u64::try_from(now).map_err(|_|GatewayError::RuntimeUnavailable)?;
-  let snapshot=state.goals.capture_learning(store,&owner,&state.live_agent.runtime,chat,now).map_err(|_|GatewayError::InvalidGrant)?;
+  let snapshot=state.live_agent.capture_learning(&state.goals,store,&owner,chat,now).map_err(|_|GatewayError::InvalidGrant)?;
   // A retained original is only a bounded discovery hint. Its actual user
   // message must be in the newly owner-verified completed source snapshot.
   if !snapshot.messages.iter().any(|m|m.source.role==veyra_memory::Role::User&&m.source.message_id==source_message){return Err(GatewayError::InvalidGrant)}
-  let (stamp,binding,model)=state.live_agent.runtime.memory_synthesis_model(store,&owner,chat).map_err(|_|GatewayError::BindingMismatch)?;
+  let (stamp,binding,model)=state.live_agent.memory_synthesis_model(store,&owner,chat).map_err(|_|GatewayError::BindingMismatch)?;
   if stamp!=snapshot.stamp{return Err(GatewayError::StaleEpoch)}
   state.residency.try_lock().map_err(|_|GatewayError::RequestBusy)?.validate_observed_ready(&binding).map_err(|_|GatewayError::LeaseDenied)?;
   let payload=ClosedSynthesisPayload::prepare(original_uuid,snapshot,model,budget).map_err(|_|GatewayError::InvalidBody)?;
@@ -49,9 +49,9 @@ impl MemorySynthesisAdmission{
   let store=projects.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
   let original=self.original();
   self.owner.verify_chat(store,&original.snapshot.chat_id).map_err(|_|GatewayError::InvalidGrant)?;
-  let (stamp,binding,model)=state.live_agent.runtime.memory_synthesis_model(store,&self.owner,&original.snapshot.chat_id).map_err(|_|GatewayError::BindingMismatch)?;
+  let (stamp,binding,model)=state.live_agent.memory_synthesis_model(store,&self.owner,&original.snapshot.chat_id).map_err(|_|GatewayError::BindingMismatch)?;
   if stamp!=original.snapshot.stamp||binding!=self.binding||model!=original.model{return Err(GatewayError::StaleEpoch)}
-  state.goals.verify_learning(store,&self.owner,&state.live_agent.runtime,&original.snapshot).map_err(|_|GatewayError::InvalidGrant)?;
+  state.live_agent.verify_learning(&state.goals,store,&self.owner,&original.snapshot).map_err(|_|GatewayError::InvalidGrant)?;
   Ok(())
  }
  /// Provider-private: only its opaque known-result consumer calls this after
@@ -73,7 +73,7 @@ impl MemorySynthesisAdmission{
   self.check_current(state)?;
   let projects=state.projects.try_lock().map_err(|_|GatewayError::RequestBusy)?;
   let store=projects.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
-  state.goals.accept_learning(store,&self.owner,&state.live_agent.runtime,&original.snapshot,&original.operation_id,entry)
+  state.live_agent.accept_learning(&state.goals,store,&self.owner,&original.snapshot,&original.operation_id,entry)
    .map_err(|_|GatewayError::InvalidGrant)?;
   Ok(())
  }

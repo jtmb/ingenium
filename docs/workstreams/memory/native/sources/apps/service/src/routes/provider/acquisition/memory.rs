@@ -3,7 +3,7 @@
 use super::*;
 use crate::inference::{
  provider_queue::{ProviderQueue,QueuedMemory,QueueWorker},
- registry::memory::{MemoryCandidate,MemoryClaim,MemorySlotReleased},
+ MemoryCandidate,MemoryClaim,MemorySlotReleased,
  request_purpose::MemoryTransportIdentity,
  owned_transport::{MemoryPreparedTransport,NativePhaseBook,RetirementBudget,RetiredRequest,ResumedTransport,NativePhaseKind},
 };

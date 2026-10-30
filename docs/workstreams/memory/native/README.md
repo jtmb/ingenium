@@ -5,12 +5,19 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
-proposal.json contains 124 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 126 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
 
 ## Original owners and preservation
+
+The service visibility follow-up also supplies visibility-facade-delta.json:
+11 exact preimages against current Root Native source plus one absent facade.
+Its read-only generator prepares that delta without applying it. Narrow internal
+inference reexports keep registry private; four specific LiveAgent operations
+forward learning capture/model inspection/verification/acceptance to the same
+original runtime and Goals owner. No runtime getter or generic callback is added.
 
 - Original GoalStore, Goals.store mutex, uncertainty refusal, ACL helper and
   atomic replacement own additive learned-memory-v1.json. Legacy goals.json v1,

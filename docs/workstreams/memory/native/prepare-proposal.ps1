@@ -58,6 +58,8 @@ ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' $recordCapture $re
 ReplaceOnce 'apps/service/src/routes.rs' 'mod provider;' ('mod provider;'+[char]10+'pub(crate) use provider::memory_admission::MemorySynthesisAdmission;')
 ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod queue;' ('mod queue;'+[char]10+'pub(super) mod memory_admission;'+[char]10+'pub(super) mod memory_synthesis;')
 ReplaceOnce 'apps/service/src/inference/mod.rs' 'mod request;' ('mod request;'+[char]10+'pub(crate) mod request_purpose;')
+ReplaceOnce 'apps/service/src/inference/mod.rs' 'pub use registry::{GatewayRegistry, SessionGrant};' ('pub use registry::{GatewayRegistry, SessionGrant};'+[char]10+'pub(crate) use registry::memory::{MemoryCandidate,MemoryClaim,MemorySlotReleased};')
+ReplaceOnce 'apps/service/src/routes/live_agent.rs' 'mod main_prompt;' ('mod main_prompt;'+[char]10+'mod memory_learning;')
 ReplaceOnce 'apps/service/src/inference/registry.rs' 'mod request_admission;' ('mod request_admission;'+[char]10+'pub(crate) mod memory;'+[char]10+'use super::request_purpose::TransportRequestIdentity;')
 ReplaceOnce 'apps/service/src/inference/registry.rs' '    request: Mutex<Option<RequestIdentity>>,' '    request: Mutex<Option<TransportRequestIdentity>>,'
 $active=@'

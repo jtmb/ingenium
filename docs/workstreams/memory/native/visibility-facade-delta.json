@@ -1,0 +1,88 @@
+{
+  "status": "unapplied-uncompiled-current-Root-source-delta",
+  "native_root": "\\\\wsl.localhost\\Ubuntu\\home\\brajam\\.local\\state\\ingenium-release\\skill-zen-fix-1792810845\\real-gmail-ui\\veyra-phase-1\\windows-source",
+  "preservation": "registry and LiveAgent.runtime remain private; same original runtime/Goals/store/owner checks; no general getter/callback",
+  "exact_types_verified": {
+    "model_path": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
+    "goals_path": "apps/service/src/routes/goal_runtime/learned.rs",
+    "goals_sha256": "70329df5e68c633ab85924ebef29dd2c880daf1bcb2c3b22671edc5c7e81d71e",
+    "model_sha256": "e27cceebd2a7415edc8983dc9f54b2018055144d37aa3b43612dce371e38a412"
+  },
+  "operations": [
+    {
+      "path": "apps/service/src/inference/mod.rs",
+      "preimage_sha256": "42ed210ba0d1ac68649368ffe3a4c1f369a535bfb3b2a4aa76df3b052c94a08a",
+      "find": "pub use registry::{GatewayRegistry, SessionGrant};",
+      "replacement": "pub use registry::{GatewayRegistry, SessionGrant};\npub(crate) use registry::memory::{MemoryCandidate,MemoryClaim,MemorySlotReleased};"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "preimage_sha256": "e099b272c87efa3bff47d2e5ac6aa14aa230f7a8ff7a83dff7b767ae6ebe933e",
+      "find": "mod main_prompt;",
+      "replacement": "mod main_prompt;\nmod memory_learning;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+      "find": "state.goals.capture_learning(store,&owner,&state.live_agent.runtime,chat,now)",
+      "replacement": "state.live_agent.capture_learning(&state.goals,store,&owner,chat,now)"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+      "find": "state.live_agent.runtime.memory_synthesis_model(store,&owner,chat)",
+      "replacement": "state.live_agent.memory_synthesis_model(store,&owner,chat)"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+      "find": "state.live_agent.runtime.memory_synthesis_model(store,&self.owner,&original.snapshot.chat_id)",
+      "replacement": "state.live_agent.memory_synthesis_model(store,&self.owner,&original.snapshot.chat_id)"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+      "find": "state.goals.verify_learning(store,&self.owner,&state.live_agent.runtime,&original.snapshot)",
+      "replacement": "state.live_agent.verify_learning(&state.goals,store,&self.owner,&original.snapshot)"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+      "find": "state.goals.accept_learning(store,&self.owner,&state.live_agent.runtime,&original.snapshot,&original.operation_id,entry)",
+      "replacement": "state.live_agent.accept_learning(&state.goals,store,&self.owner,&original.snapshot,&original.operation_id,entry)"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/memory.rs",
+      "preimage_sha256": "dc0e22a8a2df961f0c857ce2b8563ac5eba75283f05c685b166717a31119e3b7",
+      "find": "registry::memory::{MemoryCandidate,MemoryClaim,MemorySlotReleased},",
+      "replacement": "MemoryCandidate,MemoryClaim,MemorySlotReleased,"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_synthesis.rs",
+      "preimage_sha256": "3b86c187bc3034bea7169716d80a4a3eb495296b953beec165c2ea2b48d459f7",
+      "find": "registry::memory::MemorySlotReleased",
+      "replacement": "MemorySlotReleased"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/purpose.rs",
+      "preimage_sha256": "10c9d10e7dbe00a56f24df3977682294bc6daa614b78eeda6c937edcead06b13",
+      "find": "use crate::inference::registry::memory::{MemoryCandidate,MemoryClaim};",
+      "replacement": "use crate::inference::{MemoryCandidate,MemoryClaim};"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue/memory.rs",
+      "preimage_sha256": "c9c04590e7834898d3c33cbdc7154397616028feff1f64ad8e96bae2e2032eb8",
+      "find": "&crate::inference::registry::memory::MemorySlotReleased",
+      "replacement": "&crate::inference::MemorySlotReleased"
+    }
+  ],
+  "sources": [
+    {
+      "source": "sources/apps/service/src/routes/live_agent/memory_learning.rs",
+      "target": "apps/service/src/routes/live_agent/memory_learning.rs",
+      "required_preimage": "absent",
+      "bytes": 1522,
+      "sha256": "661de09eaf01e6a77341d755f73704ee893aecbe836f381e2b70ac17725efccb"
+    }
+  ]
+}
