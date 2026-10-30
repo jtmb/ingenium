@@ -1,0 +1,21 @@
+{
+  "source": "services/ingenium-api/lib/job-runner.ts",
+  "sourceSha256": "d88145f2402c91c591d28a46d1a75ba00a290d8f5c8478968c0619daa49680c4",
+  "patchSha256": "9f701da3bd6263645c2ed4e8851215c99a4263842c44e98ec329e56438748918",
+  "helperSha256": "a0b66b56e47f21b91e361b38ef8953986a7845a2e75387fb0d5d6b1ce6fdcde7",
+  "state": "unapplied proposal",
+  "owner": "01a18935-103f-7432-98b0-cd2c51f8c8ab",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "retention": "At most 256 eligible compact retired receipts, plus lifecycle-pending receipts protected until a later retirement trims them; unresolved ownership never evicted",
+  "protected": "Shared runner, process registries, runtime/vault data, existing central fixtures unchanged",
+  "validation": {
+    "command": "/home/brajam/.local/bin/node --test docs/workstreams/dot/settlement-proposal.cpu.mjs",
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0,
+    "patchApplyCheck": "PASS against worker original shared runner (read-only --unidiff-zero --check)",
+    "proposedWholeModuleParse": "PASS using built-in stripTypeScriptTypes; not a typecheck",
+    "runtimeAcceptance": "Open: no actual runner import, process, signal, timer, DB, service, model, compiler or platform test",
+    "testOutputSha256": "ca4f51280bc0d0f6284acf98e31df819926c4789171f18e5ef94e96ddf9bb91b"
+  }
+}

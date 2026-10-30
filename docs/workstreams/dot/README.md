@@ -49,3 +49,5 @@ Initial run: five schedule tests passed; service import failed because strip-onl
 Follow [integration.md](integration.md). The coordinator alone allocates migration numbering, mounts routers, binds existing auth/session/CSRF/policy, changes scheduler selection, compiles the merged source and performs visual/native/cluster acceptance. Projectless execution is deliberately unavailable in the current core-job adapter; never map it to a synthetic global project. Scheduling remains inactive until those bindings pass.
 
 Request composition and remaining owner contracts: [request-binding.md](request-binding.md).
+
+Existing runner settlement source proposal: [settlement-proposal.md](settlement-proposal.md).
