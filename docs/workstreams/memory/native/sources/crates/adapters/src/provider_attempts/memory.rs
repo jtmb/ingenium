@@ -24,6 +24,17 @@ fn encode(value:&MemoryAttemptMetadata)->Result<String,ProviderAttemptStoreError
 }
 pub struct MemoryAttemptYielded{metadata:MemoryAttemptMetadata,seal:Arc<StoreSeal>}
 impl ProviderAttemptStore{
+ /// Read-only early refusal in the SAME journal. Final commit repeats the
+ /// check transactionally; this read does not grant a slot or native effect.
+ pub fn can_admit_memory_input(&self,request:&str,scope:&str,input:&str)->Result<(),ProviderAttemptStoreError>{
+  if !validation::uuid_id(request)||!hex(scope)||!hex(input){return Err(ProviderAttemptStoreError::Invalid)}
+  validation::validate_schema(&self.connection)?;
+  let count:u64=self.connection.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get(0))?;
+  if count>=4096{return Err(ProviderAttemptStoreError::Conflict)}
+  let spent:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM attempts WHERE request_id=?1) OR EXISTS(SELECT 1 FROM memory_attempts WHERE request_id=?1 OR (scope_hash=?2 AND input_hash=?3))",
+   params![request,scope,input],|r|r.get(0))?;
+  if spent{return Err(ProviderAttemptStoreError::Conflict)}Ok(())
+ }
  pub fn commit_memory_once(&mut self,value:&MemoryAttemptMetadata)->Result<(),ProviderAttemptStoreError>{
   let record=encode(value)?;
   let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;

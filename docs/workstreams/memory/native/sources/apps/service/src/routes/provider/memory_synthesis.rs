@@ -28,6 +28,7 @@ pub(in crate::routes) async fn synthesize(
   let cancellation=CancellationHandle::new();
   running(&owner,Instant::now()+Duration::from_secs(10),&cancellation)?;
   let provider=owner.provider.try_lock().map_err(unavailable)?;provider.journal.can_admit()?;
+  provider.journal.can_admit_memory_input(authority.original())?;
   if provider.registry.active_purpose_request()?.is_some(){return Err(GatewayError::RequestBusy)}
   let residency=owner.residency.try_lock().map_err(unavailable)?;
   if residency.execution_holder().is_some()||residency.queued_transitions()!=0{return Err(GatewayError::RequestBusy)}

@@ -21,6 +21,7 @@ pub(super) struct MemorySlots{
  retired:OnceLock<RetiredRequest>,resumed:OnceLock<ResumedTransport>,
  observation:OnceLock<ResumedRequestObservation>,controls:OnceLock<RetiredRequestControls>,
  yielded:OnceLock<MemoryAttemptYielded>,released:OnceLock<MemorySlotReleased>,
+ resume_deadline:OnceLock<Instant>,
  result:Mutex<Option<Result<KnownMemorySynthesisResult,GatewayError>>>,
 }
 pub(super) struct MemoryOriginals{
@@ -43,7 +44,7 @@ impl Originals{
 }
 impl MemorySlots{
  fn new()->Arc<Self>{Arc::new(Self{retired:OnceLock::new(),resumed:OnceLock::new(),observation:OnceLock::new(),controls:OnceLock::new(),
-  yielded:OnceLock::new(),released:OnceLock::new(),result:Mutex::new(None)})}
+  yielded:OnceLock::new(),released:OnceLock::new(),resume_deadline:OnceLock::new(),result:Mutex::new(None)})}
 }
 impl ProviderAcquisition{
  pub(in crate::routes::provider) fn memory_inhibit(&self){
@@ -84,6 +85,38 @@ impl ProviderAcquisition{
   let held=self.originals.try_lock().map_err(metadata_contention)?;
   let Originals::Memory(o)=&*held else{return Err(GatewayError::InvalidCorrelation)};
   compare_resume_original(state,o,observation)
+ }
+ fn memory_resume_ready(&self,state:&ServiceState)->Result<(),GatewayError>{
+  let held=self.originals.try_lock().map_err(metadata_contention)?;
+  let Originals::Memory(o)=&*held else{return Err(GatewayError::InvalidCorrelation)};
+  if self.unknown.load(Ordering::SeqCst){return Err(GatewayError::RuntimeUnavailable)}
+  match &o.shutdown{
+   None=>match state.model_work.check_resume_admission(){
+    Ok(())=>Ok(()),
+    Err(crate::routes::model_work::ModelWorkError::Busy) if state.shutdown_original.get().is_some()=>Err(GatewayError::RequestBusy),
+    Err(_)=>Err(GatewayError::RuntimeUnavailable),
+   },
+   #[cfg(windows)]
+   Some(parent)=>{
+    o.captured_phases.get().ok_or(GatewayError::RuntimeUnavailable)?.check_current(&o.phases)?;
+    parent.check_resume_progress(state).map_err(unavailable)
+   },
+   #[cfg(not(windows))]
+   Some(_)=>Err(GatewayError::RuntimeUnavailable),
+  }
+ }
+ async fn memory_wait_resume_ready(&self,state:&ServiceState,slots:&MemorySlots,budget:&RetirementBudget)->Result<(),GatewayError>{
+  // One original cap across metadata retries. No new Native work is launched
+  // until ordinary or actual captured-shutdown admission is established.
+  let deadline=*slots.resume_deadline.get_or_init(||Instant::now()+Duration::from_secs(3));
+  loop{
+   budget.phase_deadline(deadline)?;
+   match self.memory_resume_ready(state){
+    Ok(())=>return Ok(()),
+    Err(GatewayError::RequestBusy)=>{budget.wait(Some(deadline),tokio::time::sleep(Duration::from_millis(25))).await?;},
+    Err(error)=>return Err(error),
+   }
+  }
  }
  fn memory_capture_convert(&self,state:&ServiceState,runtime:&tokio::runtime::Handle)->Result<(),GatewayError>{
   self.memory_step(Phase::Enrolled,Phase::Converted,|o|{
@@ -338,6 +371,7 @@ pub(in crate::routes::provider) async fn drive(state:Arc<ServiceState>,queue:Arc
   let mut provider=authority.provider.try_lock().map_err(unavailable)?;
   if !same_optional_record(provider.acquisition.as_ref(),previous.as_ref()){return Err(GatewayError::RequestBusy)}
   provider.journal.can_admit()?;
+  provider.journal.can_admit_memory_input(candidate.admission.original())?;
   if provider.registry.active_purpose_request()?.is_some(){return Err(GatewayError::RequestBusy)}
   if !book.reserve_memory(&candidate)?{return Err(GatewayError::RequestBusy)}
   let sequence=match &previous{Some(p)=>slot_yield::check_reusable(p)?.checked_add(1).filter(|v|*v<=128).ok_or(GatewayError::RequestBusy)?,None=>1};
@@ -401,15 +435,18 @@ async fn run_original(state:Arc<ServiceState>,record:Arc<ProviderAcquisition>)->
  state.provider_transports.wait_relay_completion(&identity).await?;
  let retired=state.provider_transports.request_retirement(&identity).await?;
  slots.retired.set(retired).map_err(|_|GatewayError::Conflict)?;
+ record.memory_wait_resume_ready(&state,&slots,&budget).await?;
  let resumed=state.provider_transports.resume_request(slots.retired.get().ok_or(GatewayError::RuntimeUnavailable)?).await?
   .ok_or(GatewayError::RuntimeUnavailable)?;
  slots.resumed.set(resumed).map_err(|_|GatewayError::Conflict)?;
  let observation_slots=slots.clone();let observer_state=state.clone();let observer_budget=budget.clone();let observer_record=record.clone();
  state.provider_workers.run(move||{
+  observer_record.memory_resume_ready(&observer_state)?;
   let phase=observer_budget.enter_phase(NativePhaseKind::Observation,Instant::now()+Duration::from_secs(3))?;
   let observation=observer_state.provider_transports.observe_resumed(observation_slots.resumed.get().ok_or(GatewayError::RuntimeUnavailable)?,phase.deadline())?;
   observation_slots.observation.set(observation).map_err(|_|GatewayError::Conflict)?;phase.returned();
   observer_record.memory_compare_resume(&observer_state,observation_slots.observation.get().ok_or(GatewayError::RuntimeUnavailable)?)?;
+  observer_record.memory_resume_ready(&observer_state)?;
   let phase=observer_budget.enter_phase(NativePhaseKind::Controls,Instant::now()+Duration::from_secs(3))?;
   let controls=observer_state.provider_transports.retire_request_controls(
    observation_slots.retired.get().ok_or(GatewayError::RuntimeUnavailable)?,

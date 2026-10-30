@@ -99,6 +99,9 @@ original, rather than bypassing the busy ModelWork owner. The original shutdown
 admission flow joins the same queue workers outside Serial before final cleanup
 eligibility. Waiting no-native entries are joined too; a model/shutdown fence is
 rechecked before any queued entry can acquire a new utility lease or original.
+Resume waits under one retained metadata deadline for ordinary or actual
+captured-parent admission before starting its Native phase. Observation and
+control retirement recheck that admission. Metadata retry starts no Native work.
 
 Original ProviderHistory retains those same Memory phase captures (or captures
 already-retired historical books), checking complete mixed-chain membership and
@@ -132,6 +135,9 @@ record-byte preservation, cross-purpose spent UUIDs, scoped input dedup after
 yielded metadata, strict content-free-column shape, and failed-migration
 rollback. Existing five JS adapter/source-manifest tests remain included.
 Rust budget/UUID/payload/result tests are authored, not executed.
+The same attempt journal now refuses spent UUID/scoped inputs or full capacity
+at enrollment and again before utility lease acquisition, before socket/native
+setup. Final commit repeats the exact check transactionally.
 
 No Native apply, Cargo/rustc/npm/build, engine/model process, GPU/inference,
 service, external write or desktop control occurred. Actual Native compile and

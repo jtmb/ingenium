@@ -115,24 +115,24 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_synthesis.rs",
     "target": "apps/service/src/routes/provider/memory_synthesis.rs",
     "required_preimage": "absent",
-    "sha256": "25a4320bf38f7c07fbf9aa3b4a91e00645a148ff8045be72130d6ec9ce25658f",
-    "bytes": 3731,
+    "sha256": "3b86c187bc3034bea7169716d80a4a3eb495296b953beec165c2ea2b48d459f7",
+    "bytes": 3797,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/acquisition/memory.rs",
     "target": "apps/service/src/routes/provider/acquisition/memory.rs",
     "required_preimage": "absent",
-    "sha256": "7e5f09b2749cd14f53ef6a8451a8eec819af3b8956460607f4e5f869947097d1",
-    "bytes": 30781,
+    "sha256": "dc0e22a8a2df961f0c857ce2b8563ac5eba75283f05c685b166717a31119e3b7",
+    "bytes": 32651,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/journal/memory.rs",
     "target": "apps/service/src/routes/provider/journal/memory.rs",
     "required_preimage": "absent",
-    "sha256": "9f418a599d837709c91d3a33b942e00b5e367e7e68157233999a6ee465fd4dc7",
-    "bytes": 1003,
+    "sha256": "0573f127655c3cb7cfc7b3ca912a208118d713cefa9230ce4569b658eaacadb7",
+    "bytes": 1521,
     "transform": null
   },
   {
@@ -187,8 +187,8 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/provider_attempts/memory.rs",
     "target": "crates/adapters/src/provider_attempts/memory.rs",
     "required_preimage": "absent",
-    "sha256": "020aa53ca80940eb501c90c13b55c19d8dc9f71bca160bad341f7f1a817dd138",
-    "bytes": 7186,
+    "sha256": "e4016ab50588d16dce8a8c8ded6682daac3a8c324fe3691fc5cdcf61a323b839",
+    "bytes": 8093,
     "transform": null
   },
   {
