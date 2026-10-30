@@ -1,0 +1,263 @@
+{
+  "nativeTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+  "nativeSchemaAllocation": 6,
+  "nodeMigrationsChanged": false,
+  "existingInputs": [
+    {
+      "path": "apps/service/src/routes.rs",
+      "baseBlob": "cdd13f467919794b5282682b3ebf51614437f9f3",
+      "proposedSha256": "c792fdad43c393c095b81a5ce992ad7432dbae048c68874756ca0d1ac05f2e6a",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/remote_control/proxy.rs",
+      "baseBlob": "a2e63d498f66bbf2f02d0649a1cde7741c004cf9",
+      "proposedSha256": "4e6f49bcd5e7059d244f9fb5708f64d56b73ac7cc72b9718d68723dd3eb51331",
+      "changed": false
+    },
+    {
+      "path": "apps/service/src/routes/state_startup/assembly.rs",
+      "baseBlob": "b91782227a7fca4663349d35f273c6f93d1eac0e",
+      "proposedSha256": "d1441adff1c449dd37900db0de8e82fad3981ade54bf797d1da2d69e19487786",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/interactive_terminal.rs",
+      "baseBlob": "71f81961df2fb0366203f93ec49d3e3489c3f5ee",
+      "proposedSha256": "c2e8d0da3bb6f50d193cfc2e5d7fd6ec91e573367edab42f22df8cb04c66ee1a",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/lib.rs",
+      "baseBlob": "57fbd1b8516be1cd525a7d928d7d9dfdd47de478",
+      "proposedSha256": "c339ef3f7b226fa620e041e3732945a536bbe55e1b012ba33567e04c3764633f",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "baseBlob": "b7a87c01af74b914c8fbd04f6329d1ecf83bc42f",
+      "proposedSha256": "03551c49fe7d92524aeb50ecf8201c8ce91043ab55c268096d39531616b1cc45",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "baseBlob": "ea07d39b8371fcb4cd61ed69b45303bcd09b4208",
+      "proposedSha256": "47deec3e83c258b8f921d5388e588565ca279951dac5572ceaf6ae842d11e013",
+      "changed": true
+    },
+    {
+      "path": "crates/contracts/src/lib.rs",
+      "baseBlob": "2bf07f372dda8b6f5d11c20001b7139ca5f11ce3",
+      "proposedSha256": "4eff550b2c35bcf0b6f94c01132eab58fa551d9b68cddb845348cc91aaf53804",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "baseBlob": "27eba510d1d8528250ccf20d82cc1ebd640f4d70",
+      "proposedSha256": "319e2283080f6260721660b54eb498a591f187003b8d2e4a1669c8f71f7dd046",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/workspace_retirement.rs",
+      "baseBlob": "1319b041bb36e60ef0508ca9f56a9740240b6cc4",
+      "proposedSha256": "b48e4b6e925439950783af8c302e5be48a6658bac97229eab26e17af0d1c77d0",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/wsl_workspace.rs",
+      "baseBlob": "9316c3f6042f74b15af5e424e5f757f09fbca836",
+      "proposedSha256": "1b92a8af9d16d4fb52ae343b27a664c2971e63a6d4cdb58a5671fad31b4e00ed",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/windows_acl.rs",
+      "baseBlob": "f181fa87f0f41f2193c7a1405c21eaf9fed5ea51",
+      "proposedSha256": "0f64ed9d59cd9bfc0001df4ddbc69aadff0d027ef420e19268351acb907fa1b4",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/state_startup/effects.rs",
+      "baseBlob": "52851bafde41c72c8715826059438499915efcea",
+      "proposedSha256": "500cb085e1a70d19807ef38929265b14a4da8725bb0c1adf9f2585555f707ee3",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/state_startup/legacy.rs",
+      "baseBlob": "dac8d6e8246743f9c16af223ef95db33e25fa0be",
+      "proposedSha256": "9ab548adc3aec64d79534f6d2d2c5c63d2175e23b2a7355935ff419ca2782f52",
+      "changed": true
+    },
+    {
+      "path": "apps/service/src/routes/state_startup.rs",
+      "baseBlob": "f1fbb49d7fceeebffc2145b04863a6874be2a2a9",
+      "proposedSha256": "beef265402d0855491047f8f9dad26c1c487f972bf3bc3df85e9d5ade39f48c0",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/close.rs",
+      "baseBlob": "a1b3c36eefc9fd68d3b8ce4132bb0b543a856fe2",
+      "proposedSha256": "b9b8dc3f844a6f875e7fbc4a50d75d12e8211af6bf8c88c0e85ea4d32032da78",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/task_workspaces.rs",
+      "baseBlob": "6096614e56b1a5190827f6070888d47732bd2c77",
+      "proposedSha256": "81f894e25db7d08288efde3f7cfc8d0fb7397cd009464386b7bc3eb06a48e379",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/task_workspaces/windows.rs",
+      "baseBlob": "acadb4a622b5c4fb1dc609503765af5efe0bb701",
+      "proposedSha256": "e82fda70075460f497ed8c68429fe247ca33806228b08e5fca2d53284185f445",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/service_registration/guards/native.rs",
+      "baseBlob": "e61349c111b9c2d32ef5862d7897bfb75d0ce86e",
+      "proposedSha256": "9e29bd301519935ae6899d8620c8eeb0cd781b35bf220533c42af135ae90d48d",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/close/tests.rs",
+      "baseBlob": "8e454b413e29b8971a3e14593db2fca0f789329c",
+      "proposedSha256": "a2a5abfbfd533a4eb2a428e5925008d2e7a858559e51b9146adda220a114f8eb",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs",
+      "baseBlob": "a70ae5b9a42288199e5a085467cf805dd951d39b",
+      "proposedSha256": "89b7727cfe90401d2c39e6731820ba591f15854acd4f222de5dccabf30fc3761",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/task_names/tests.rs",
+      "baseBlob": "b4eafe6fac90583e9d70e1e378600d8333a3e1a2",
+      "proposedSha256": "ca48ee71c12b2d88be264a8929033ae735fddf606c3a28b2e8f51996693efc4c",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/tests.rs",
+      "baseBlob": "902eeaade35c8037c6a0cf9f6b188a13c083ecdc",
+      "proposedSha256": "b2532437d779329b185bd5b87d07ee5cbd7a9c4b1e6b870bef631007f9f9ba17",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/saved_metadata_search/tests.rs",
+      "baseBlob": "f611adf86dae6559b34f54de4ea977f264eb38a0",
+      "proposedSha256": "811c2bce6b987fdaa7e0cd1c71ce79b2d0006ad07e8749f4c818f7774d5d5c44",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/test_support/busy.rs",
+      "baseBlob": "77dc964ccdc5b72f0fa75f5645789d80ccc2583d",
+      "proposedSha256": "b17a25e89bcebccfbcab306d416c1e56faec034758946845df49dec5eccec3db",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/configuration.rs",
+      "baseBlob": "1f7a8ce816671f7f0525bb711e90cd3472487b36",
+      "proposedSha256": "b8a088d519a28a0438f22104f833dc1d3c837d131f6346becfee76c2864a383c",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation.rs",
+      "baseBlob": "d3643797fe668e028b2f196737afc04952a9762f",
+      "proposedSha256": "5ab7d0896bbf40b0e18f084ebf5d5241fbbd782b426a6ac6f864693288d8bd2c",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/presentation/task_names/saved_metadata.rs",
+      "baseBlob": "c42ea61c54f5524af88c17fee38aebacae264e5f",
+      "proposedSha256": "995fbec1ed263a0c19847354ddd015df62f5ff7da55bf72b8f891816a436a5f8",
+      "changed": true
+    },
+    {
+      "path": "crates/adapters/src/projects/saved_metadata_search.rs",
+      "baseBlob": "528026f1dc534e87f435e4e1c8a6280c93d29694",
+      "proposedSha256": "53a9290ea7550490a5746c2a8c94c08aba024ec27f3f2aa6cdf6f9263b16d1b7",
+      "changed": true
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "apps/service/src/routes/local_workspaces/git.rs",
+      "bytes": 6494,
+      "sha256": "f1f21f998556d7ad40b290ae75e7a043e59ef00488e6cd7aa59a228cf2e5ab73"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "bytes": 12582,
+      "sha256": "e47c830a5496d3d1a305ed232be47d2019d8352502c58ef00f84eabdbc69ac55"
+    },
+    {
+      "path": "apps/service/src/routes/state_startup/local_custody.rs",
+      "bytes": 1128,
+      "sha256": "bf5c76a14b528ef3172bbc985cadbf59cf7a6d767ba64a9e7cb623b96bf0cb9d"
+    },
+    {
+      "path": "crates/adapters/src/interactive_terminal/local_workspaces.rs",
+      "bytes": 6447,
+      "sha256": "e3836384f57084f1c1f33abc9351e3a3edeadc9f1e4bbe2038b614692adaa017"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/linux.rs",
+      "bytes": 2908,
+      "sha256": "b6fbee2efee14b44400e13c5f2bd3636267550af8bc4beeb650e154c3bbbd4ce"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/windows.rs",
+      "bytes": 2502,
+      "sha256": "00f47eb66fe964d8dedecbabe856b82a0607a44871ea33f9e7f7e0985a859efe"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/wsl-helper.py",
+      "bytes": 9656,
+      "sha256": "f425127e3d5af39a5bb47d299a4cd11dd77016d368e8a6733faa2c3b90ffee4e"
+    },
+    {
+      "path": "crates/adapters/src/local_custody.rs",
+      "bytes": 9593,
+      "sha256": "fa1985cc2bfb1f69ca785e3a4c737b7518c45910a69275a529a582d2031e20b3"
+    },
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "bytes": 5611,
+      "sha256": "f40c2e36163b6dc76ee1ad75a8a18bcecb17e466ae75529d121a5b71fd635518"
+    },
+    {
+      "path": "crates/adapters/src/local_git_launch.rs",
+      "bytes": 1084,
+      "sha256": "97dc0f57a1c786a7a7f1a9ea593ed49e1f122126861484cb2c9be987b4913141"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "bytes": 2745,
+      "sha256": "6b50d9138fb8db22b06acd14dbd62d2a87980e34f9dff1a59723df97c33aa596"
+    },
+    {
+      "path": "crates/adapters/src/projects/0006.sql",
+      "bytes": 3903,
+      "sha256": "971f65f481f820435105fa5c824f4136e0583df11a8fbece2d2020d9a7bbaa30"
+    },
+    {
+      "path": "crates/adapters/src/projects/local_workspaces.rs",
+      "bytes": 19251,
+      "sha256": "c4faed0aad10153313e3976a93c2f65b966cac5b8d31b40d202fe7dc6d5c88a5"
+    },
+    {
+      "path": "crates/adapters/src/task_workspaces/private.rs",
+      "bytes": 5004,
+      "sha256": "cf2914e14eb014464680c19a278b4aed82d28e30d713d807a516f5201543dae5"
+    },
+    {
+      "path": "crates/contracts/src/local_workspaces.rs",
+      "bytes": 2716,
+      "sha256": "21217ee03740d91303085eb73ce87ef5cb8c2d199f57515c14e71b43828a63c7"
+    }
+  ],
+  "integrationPatchSha256": "90d37c21fcf27624a2b33becf3b185e7d11e31e865eee1a89c315fafad5fa9f6",
+  "nativeCheckoutWritten": false,
+  "applied": false,
+  "compiled": false,
+  "runtimeOrStateMigrationRun": false
+}

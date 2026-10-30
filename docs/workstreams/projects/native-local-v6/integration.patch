@@ -1,0 +1,714 @@
+--- a/apps/service/src/routes.rs
++++ b/apps/service/src/routes.rs
+@@ -33,6 +33,8 @@
+ )]
+ mod background_observations;
+ mod catalog;
++#[cfg(windows)]
++mod local_workspaces;
+ #[cfg(windows)]
+ mod configuration_work;
+ mod git_review;
+@@ -146,6 +148,23 @@
+     veyra_adapters::projects::ProjectStore::open(&directory.join("workspace.db"))
+         .map_err(|_| "Workspace database unavailable; original data was preserved".into())
+ }
++#[cfg(windows)]
++fn workspace_store_local(directory: &FsPath,original:Arc<dyn veyra_adapters::local_custody::OriginalStateGuardSource>) -> Result<veyra_adapters::projects::ProjectStore, String> {
++    // Capture original OS/root custody BEFORE any migration or identity write.
++    let custody=veyra_adapters::local_custody::LocalCustody::from_original_state(directory,original)?;
++    let utility=directory.join("utility-operations");
++    if utility.exists() {
++        let original=custody.capture_related(&utility)?;
++        for name in ["originals.db","originals.db-wal","originals.db-shm"] {
++            let path=utility.join(name);
++            if path.exists(){original.verify_private_file(&path)?;}
++        }
++    }
++    // This is the ORIGINAL library/bootstrap owner, not a new account registry.
++    let library=veyra_adapters::utility_operations::Store::open(directory)?.library_id()?;
++    veyra_adapters::projects::ProjectStore::open_local(&directory.join("workspace.db"),custody,&library)
++        .map_err(|_|"Local workspace custody refused; preserve the original state without reassignment".into())
++}
+ 
+ pub(crate) type Runtime = Result<Box<dyn ModelRuntime>, String>;
+ #[derive(Clone, Copy, PartialEq, Eq)]
+@@ -225,6 +244,8 @@
+     serial: Arc<tokio::sync::Mutex<()>>,
+     pub shutdown: tokio::sync::watch::Sender<bool>,
+     draining: AtomicBool,
++    #[cfg(windows)]
++    local_workspaces: Arc<local_workspaces::Runtime>,
+     projects: Mutex<Option<veyra_adapters::projects::ProjectStore>>,
+     tasks: Mutex<Option<veyra_adapters::task_store::TaskStore>>,
+     effect_fences: Mutex<crate::tasks::effect_fences::EffectFences>,
+@@ -670,6 +691,8 @@
+         .route("/v1/package-selection/{id}/startup/{original_instance}", get(package_selection::startup));
+     #[cfg(windows)]
+     let app = app
++        .nest("/v1/local-workspaces",local_workspaces::router().route_layer(
++            middleware::from_fn_with_state(state.clone(),interactive_terminal::admission)))
+         .route("/v1/tasks/{id}/activity", get(task_activity::read::get))
+         .route("/v1/tasks/{id}/inputs", get(task_activity::inputs::get))
+         .route("/v1/tasks/{id}/input-replies", post(task_activity::inputs::submit))
+@@ -876,7 +899,7 @@
+ async fn authenticate(
+     State(state): State<Arc<ServiceState>>,
+     headers: HeaderMap,
+-    request: axum::extract::Request,
++    mut request: axum::extract::Request,
+     next: Next,
+ ) -> Response {
+     if headers.contains_key("origin")
+@@ -888,6 +911,10 @@
+             ErrorCode::InvalidRequest,
+             "Authenticated native service connection required",
+         );
++    }
++    #[cfg(windows)]
++    if request.uri().path()=="/v1/local-workspaces"||request.uri().path().starts_with("/v1/local-workspaces/"){
++        request.extensions_mut().insert(local_workspaces::LocalRequest::from_existing_admission(&state));
+     }
+     next.run(request).await
+ }
+--- a/apps/service/src/routes/state_startup/assembly.rs
++++ b/apps/service/src/routes/state_startup/assembly.rs
+@@ -140,6 +140,8 @@
+             ),
+             legacy_task_storage: self.legacy_task_storage,
+             live_agent: Arc::new(live_agent::LiveAgent::new(&self.directory)),
++            #[cfg(windows)]
++            local_workspaces: Arc::new(local_workspaces::Runtime::from_store(&parts.workspace)),
+             workbench: Arc::new(workbench::Workbench::new()),
+             productivity_workers: Arc::new(productivity::Workers::default()),
+             admitted_requests: Arc::new(productivity::Workers::default()),
+--- a/crates/adapters/src/interactive_terminal.rs
++++ b/crates/adapters/src/interactive_terminal.rs
+@@ -11,6 +11,10 @@
+ use veyra_contracts::{ExecutionEnvironment, Project};
+ #[path = "interactive_terminal/shells.rs"]
+ pub mod shells;
++#[cfg(windows)]
++mod local_workspaces;
++#[cfg(windows)]
++pub use local_workspaces::LocalTerminals;
+ 
+ const MAX_TERMINALS: usize = 16;
+ const MAX_CLOSED_TERMINALS: usize = 128;
+--- a/crates/adapters/src/lib.rs
++++ b/crates/adapters/src/lib.rs
+@@ -1,4 +1,8 @@
+ //! Platform effects. Domain policy belongs in veyra-core.
++pub mod local_custody;
++pub mod local_execution;
++#[cfg(windows)]
++pub mod local_git_launch;
+ pub mod access_profiles;
+ pub mod account_vault;
+ pub mod artifact_jobs;
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -29,6 +29,7 @@
+ 
+ const START_TIMEOUT: Duration = Duration::from_secs(15);
+ mod creation;
++mod local_workspaces;
+ mod prompt_original;
+ mod review_result;
+ mod live_events;
+@@ -2230,6 +2231,12 @@
+         files: &[super::attachments::PromptFile], skill_ids: &[String], require_idle: bool,
+         original: Option<&veyra_contracts::PromptOriginal>,
+     ) -> Result<Value, RuntimeError> {
++        self.prompt_scoped_checked_local(id,directory,request_id,text,files,skill_ids,require_idle,original,None)
++    }
++    fn prompt_scoped_checked_local(&self,id:&str,directory:&str,request_id:&str,text:&str,
++        files:&[super::attachments::PromptFile],skill_ids:&[String],require_idle:bool,
++        original:Option<&veyra_contracts::PromptOriginal>,local:Option<&crate::local_execution::LocalWorkspaceBinding>,
++    )->Result<Value,RuntimeError>{
+         if let Some(saved) = self.prompt_original_receipt(request_id)? {
+             if !saved["original"].is_null() {
+                 if original.is_none() || saved["original"] != json!(original) { return Err(RuntimeError::RequestConflict); }
+@@ -2247,6 +2254,7 @@
+             return Err(RuntimeError::Unavailable("prompt request is invalid"));
+         }
+         let engine = self.lock_engine_for_directory(directory)?;
++        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}
+         if let Some(original) = original { self.check_prompt_engine(&engine,original,true)?; }
+         if files.iter().any(|file| file.uri.starts_with("data:image/")) && !engine.model.vision {
+             return Err(RuntimeError::Unavailable(
+@@ -2415,6 +2423,7 @@
+             );
+             previous
+         };
++        if let Some(binding)=local {local_workspaces::require_local_engine(&engine,binding)?;}
+         let admission = if files.is_empty() && skill_ids.is_empty() {
+             engine.client()?.prompt(id, &record.message_id, text, true)
+         } else {
+--- a/crates/adapters/src/projects.rs
++++ b/crates/adapters/src/projects.rs
+@@ -1,4 +1,6 @@
+ //! Transactional workspace storage, owned by the single Veyra service.
++mod local_workspaces;
++pub use local_workspaces::LocalWorkspaceRecord;
+ mod backup;
+ mod close;
+ pub mod configuration;
+@@ -43,6 +45,8 @@
+ 
+ pub struct ProjectStore {
+     connection: Connection,
++    local_custody: Option<std::sync::Arc<crate::local_custody::LocalCustody>>,
++    local_installation_id: Option<String>,
+ }
+ 
+ impl ProjectStore {
+@@ -146,7 +150,7 @@
+         }
+         validate_schema(&migration, SCHEMA_VERSION)?;
+         migration.commit()?;
+-        Ok(Self { connection })
++        Ok(Self { connection, local_custody: None, local_installation_id: None })
+     }
+ 
+     pub fn create(&mut self, draft: ProjectDraft) -> Result<Project, StoreError> {
+@@ -177,6 +181,9 @@
+         let id = normalized_id(id)?;
+         validate_draft(original)?;
+         validate_draft(&canonical)?;
++        if self.lookup_creation(&id,original)?.is_none(){
++            self.require_private_namespace_separation(&canonical.environment,&canonical.primary_root,&canonical.roots)?;
++        }
+         let original_json = serde_json::to_string(original).map_err(|_| StoreError::Invalid)?;
+         let environment =
+             serde_json::to_string(&canonical.environment).map_err(|_| StoreError::Invalid)?;
+@@ -213,7 +220,7 @@
+         let connection = Connection::open_with_flags(path,
+             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+         connection.busy_timeout(std::time::Duration::from_secs(2))?;
+-        if schema_version(&connection)? != SCHEMA_VERSION { return Err(StoreError::Corrupt); }
++        if ![SCHEMA_VERSION, 6].contains(&schema_version(&connection)?) { return Err(StoreError::Corrupt); }
+         read_project(&connection, &normalized_id(id)?)
+     }
+ 
+@@ -228,7 +235,11 @@
+         pinned: Option<bool>,
+         archived: Option<bool>,
+     ) -> Result<(), StoreError> {
+-        check_update(&self.get(id)?, expected_revision, name, pinned, archived).map(|_| ())
++        let current=self.get(id)?;
++        if current.archived&&archived==Some(false){
++            self.require_private_namespace_separation(&current.environment,&current.primary_root,&current.roots)?;
++        }
++        check_update(&current, expected_revision, name, pinned, archived).map(|_| ())
+     }
+ 
+     /// Keyset paging uses normalized UUID order, independently of mutable names
+@@ -262,6 +273,10 @@
+         let id = normalized_id(id)?;
+         if name.is_none() && pinned.is_none() && archived.is_none() {
+             return Err(StoreError::Invalid);
++        }
++        let current=self.get(&id)?;
++        if current.archived&&archived==Some(false){
++            self.require_private_namespace_separation(&current.environment,&current.primary_root,&current.roots)?;
+         }
+         let transaction = self
+             .connection
+@@ -324,7 +339,7 @@
+         connection.execute_batch(include_str!("projects/0004.sql"))?;
+         connection.execute_batch(include_str!("projects/0005.sql"))?;
+         validate_schema(&connection, SCHEMA_VERSION)?;
+-        Ok(ProjectStore { connection })
++        Ok(ProjectStore { connection, local_custody: None, local_installation_id: None })
+     }
+     pub fn deny_writes(store: &mut ProjectStore) -> Result<(), StoreError> {
+         store.connection.pragma_update(None, "query_only", true)?;
+--- a/crates/contracts/src/lib.rs
++++ b/crates/contracts/src/lib.rs
+@@ -1,4 +1,5 @@
+ //! Public, transport-safe Veyra contracts. Runtime paths and credentials never cross this boundary.
++pub mod local_workspaces;
+ use serde::{Deserialize, Serialize};
+ use ts_rs::TS;
+ mod desktop_connection;
+--- a/apps/service/src/routes/live_agent.rs
++++ b/apps/service/src/routes/live_agent.rs
+@@ -54,6 +54,16 @@
+     replies: veyra_adapters::public_reply_store::ReplyStore,
+ }
+ impl LiveAgent {
++    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str)->Result<Value,String>{
++        self.runtime.create_local_session(binding,request,title,agent).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
++    }
++    pub(super) fn prompt_local(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str,request:&str,text:&str)->Result<Value,String>{
++        self.runtime.prompt_local(binding,session,request,text).map_err(|_|"private prompt original outcome unknown".into())
++    }
++    pub(super) fn local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,session:&str)->Result<Value,String>{
++        self.runtime.local_session(binding,session).and_then(|s|serde_json::to_value(s).map_err(|_|RuntimeError::Binding)).map_err(|_|"private session unavailable".into())
++    }
++
+     pub(super) fn attachment_owned<T>(&self, owner:&Value, environment:&Environment, model:&ModelSelection, effect:impl FnOnce(&dyn Fn()->Result<(),RuntimeError>)->T)->Result<T,RuntimeError> {
+         self.runtime.attachment_owned(owner,environment,model,effect)
+     }
+--- a/apps/service/src/routes/workspace_retirement.rs
++++ b/apps/service/src/routes/workspace_retirement.rs
+@@ -141,6 +141,11 @@
+             || super::model_operations::shutdown_blocked(state)?
+         {
+             return Err(unavailable());
++        }
++        #[cfg(windows)]
++        {
++            if !state.live_agent.credentials_stopped(){return Err("Private engine custody must retire before workspace originals".into());}
++            state.local_workspaces.finish_until(self.deadline)?;
+         }
+         #[cfg(windows)]
+         state.task_activity.check_storage_closed_idle()?;
+--- a/crates/adapters/src/wsl_workspace.rs
++++ b/crates/adapters/src/wsl_workspace.rs
+@@ -21,7 +21,7 @@
+ use veyra_contracts::{ExecutionEnvironment, Project};
+ 
+ const LIMIT: usize = 24 * 1024 * 1024;
+-const SCRIPT: &str = r#"
++const SCRIPT: &str = concat!(include_str!("local_custody/wsl-helper.py"), r#"
+ import base64, ctypes, errno, fcntl, json, os, pathlib, pwd, secrets, stat, sys, tempfile
+ 
+ def fail(code, recovery_path=None):
+@@ -159,6 +159,10 @@
+ try:
+     req = json.load(sys.stdin)
+     op, a = req['operation'], req.get('args', {})
++    if op=='local_private':
++        result=local_private_operation(a)
++        print(json.dumps({'ok':True,'result':result},separators=(',',':')))
++        raise SystemExit(0)
+     if op in ('global_snapshot','global_instruction_snapshot','global_save'):
+         if not isinstance(a,dict) and not (op in ('global_snapshot','global_instruction_snapshot') and a is None): fail('invalid')
+         result=global_operation(op,a or {})
+@@ -609,7 +613,7 @@
+     fail('not_found')
+ except Exception:
+     fail('unavailable')
+-"#;
++"#);
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum Error {
+@@ -678,6 +682,9 @@
+     capture_save_errors: bool,
+     guard: &dyn Fn() -> bool,
+ ) -> Result<Value, Error> {
++    // Old Project-granted facades cannot invoke the separately typed local owner.
++    if operation=="local_private"{return Err(Error::Invalid);}
++
+     let (distro, user) = match &project.environment {
+         ExecutionEnvironment::Wsl {
+             distro,
+@@ -1066,3 +1073,15 @@
+     }
+     retain_pending(if reaped { None } else { Some(child) }, workers);
+ }
++
++/// Separate typed local owner, never a synthetic Project. Uses the same fixed
++/// helper and original retained run_wsl process/pipe/deadline supervisor.
++pub fn local_private_request(environment:&veyra_contracts::local_workspaces::LocalEnvironment,args:Value,guard:&dyn Fn()->bool)->Result<Value,Error>{
++ let veyra_contracts::local_workspaces::LocalEnvironment::Wsl{distro,user}=environment else{return Err(Error::Unsupported);};
++ if distro.is_empty()||user.is_empty()||[distro,user].iter().any(|s|s.len()>128||s.starts_with('-')||s.chars().any(|c|c.is_control()||matches!(c,'/'|'\\'|':'))){return Err(Error::Invalid);}
++ if !guard(){return Err(Error::Unavailable);}
++ let input=serde_json::to_vec(&json!({"operation":"local_private","args":args})).map_err(|_|Error::Invalid)?;
++ if input.len()>LIMIT{return Err(Error::TooLarge);}
++ #[cfg(windows)] {run_wsl(distro,user,input,false,guard)}
++ #[cfg(not(windows))] {let _=(distro,user,input);Err(Error::Unsupported)}
++}
+--- a/crates/adapters/src/windows_acl.rs
++++ b/crates/adapters/src/windows_acl.rs
+@@ -385,6 +385,14 @@
+             .map_err(|_| "Private file protection is unavailable".to_string())?)
+ }
+ pub(crate) fn verify_owner_only(file: &File, kind: ProtectedAclKind) -> Result<(), String> {
++    verify_owner_only_inner(file,kind,false)
++}
++/// SQLite siblings may inherit the one exact owner ACE from the held protected
++/// root. No broad ACE, different owner, changed descriptor or ACL repair.
++pub(crate) fn verify_private_inherited_file(file: &File) -> Result<(), String> {
++    verify_owner_only_inner(file,ProtectedAclKind::File,true)
++}
++fn verify_owner_only_inner(file: &File, kind: ProtectedAclKind, inherited_file: bool) -> Result<(), String> {
+     let descriptor = security(file)?;
+     let owner = descriptor_owner(&descriptor)?;
+     if sid_text(owner)?
+@@ -399,7 +407,7 @@
+     let mut defaulted = 0;
+     let mut dacl = ptr::null_mut();
+     if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0
+-        || control & SE_DACL_PROTECTED == 0
++        || (!inherited_file && control & SE_DACL_PROTECTED == 0)
+         || unsafe {
+             GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
+         } == 0
+@@ -429,7 +437,7 @@
+     let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+     // First validate the fixed header and enough bytes for the SID header;
+     // only then interpret this variable-size entry as an allowed ACE.
+-    if header.AceType != 0 || header.AceFlags != kind.flags() || (header.AceSize as usize) < 16 {
++    if header.AceType != 0 || (header.AceFlags != kind.flags() && !(inherited_file && header.AceFlags == INHERITED_ACE as u8)) || (header.AceSize as usize) < 16 {
+         return Err("Private file protection is unavailable".to_string());
+     }
+     let sid = unsafe { ace.cast::<u8>().add(8) };
+--- a/apps/service/src/routes/state_startup/effects.rs
++++ b/apps/service/src/routes/state_startup/effects.rs
+@@ -45,15 +45,24 @@
+ 
+ pub(super) struct ProductionStateStartupEffects {
+     #[cfg(windows)]
++    local_custody: Option<Arc<super::local_custody::OriginalStateGuard>>,
++    #[cfg(windows)]
+     task_storage: Option<
+         super::task_storage::TaskStorageStartup<super::native_task_storage::NativeTaskStorage>,
+     >,
+ }
+ impl ProductionStateStartupEffects {
++    #[cfg(windows)]
++    pub(super) fn with_local_custody(guards:Arc<crate::server::guard_reader::GuardOriginal<veyra_adapters::service_registration::ServiceGuards>>)->Self{
++        Self{task_storage:None,local_custody:Some(super::local_custody::OriginalStateGuard::new(guards))}
++    }
++
+     pub(super) fn without_task_storage() -> Self {
+         Self {
+             #[cfg(windows)]
+             task_storage: None,
++            #[cfg(windows)]
++            local_custody: None,
+         }
+     }
+ 
+@@ -67,6 +76,7 @@
+         >,
+     ) -> Self {
+         Self {
++            local_custody: Some(super::local_custody::OriginalStateGuard::new(guards.clone())),
+             task_storage: Some(super::task_storage::TaskStorageStartup::prepare(
+                 super::native_task_storage::NativeTaskStorage::prepare(input, guards),
+                 input.first_deadline,
+@@ -155,6 +165,11 @@
+         &self,
+         directory: &Path,
+     ) -> Result<veyra_adapters::projects::ProjectStore, String> {
++        #[cfg(windows)]
++        if let Some(original)=&self.local_custody{
++            return workspace_store_local(directory,original.clone());
++        }
++        // Explicit unenrolled Source/legacy constructor remains version5.
+         workspace_store(directory)
+     }
+ 
+--- a/apps/service/src/routes/state_startup/legacy.rs
++++ b/apps/service/src/routes/state_startup/legacy.rs
+@@ -21,7 +21,7 @@
+     let _activity = effects.activity(directory);
+     let receipts = effects.receipts(directory)?;
+     let diagnostics = effects.diagnostics(directory);
+-    let workspace = effects.workspace(directory)?;
++    let workspace = workspace_store(directory)?;
+     let provider = effects.provider(directory);
+     let selection_journal = effects.selection_journal(directory, &instance_id);
+     let shell = AssemblyShell::prepare(
+--- a/apps/service/src/routes/state_startup.rs
++++ b/apps/service/src/routes/state_startup.rs
+@@ -17,6 +17,8 @@
+ 
+ mod assembly;
+ mod effects;
++#[cfg(windows)]
++mod local_custody;
+ mod legacy;
+ #[cfg(windows)]
+ mod native_task_storage;
+@@ -187,8 +189,7 @@
+         // default-VFS enrollment cannot currently establish physical retirement.
+         // Preserve the guard graph and legacy bytes; never reinterpret a failed
+         // acquisition as absence.
+-        let _same_original_guards = guards;
+-        let effects = ProductionStateStartupEffects::without_task_storage();
++        let effects = ProductionStateStartupEffects::with_local_custody(guards);
+         Self::prepare_with_storage(
+             input,
+             Arc::new(effects),
+--- a/crates/adapters/src/projects/close.rs
++++ b/crates/adapters/src/projects/close.rs
+@@ -37,10 +37,10 @@
+     ///
+     /// SQLite close is synchronous and does not establish a wall-clock bound.
+     pub fn close(self) -> Result<ProjectStoreClosed, (Self, ProjectStoreCloseError)> {
+-        let Self { connection } = self;
++        let Self { connection, local_custody, local_installation_id } = self;
+         match connection.close() {
+             Ok(()) => Ok(ProjectStoreClosed { _closed: () }),
+-            Err((connection, error)) => Err((Self { connection }, bounded_reason(&error))),
++            Err((connection, error)) => Err((Self { connection, local_custody, local_installation_id }, bounded_reason(&error))),
+         }
+     }
+ }
+--- a/crates/adapters/src/task_workspaces.rs
++++ b/crates/adapters/src/task_workspaces.rs
+@@ -7,6 +7,8 @@
+ #[cfg(windows)]
+ use windows::Capture;
+ mod task;
++mod private;
++pub use private::{PrivateRootCustody,NativeRootSeparation};
+ pub use task::{TaskWorkspace, TaskWorkspaceBinding, TaskWorkspaceRetirement};
+ #[cfg(not(windows))]
+ #[derive(Default)]
+--- a/crates/adapters/src/task_workspaces/windows.rs
++++ b/crates/adapters/src/task_workspaces/windows.rs
+@@ -74,6 +74,9 @@
+         })
+     }
+     fn invoke(&mut self, destination: &mut Option<ManuallyDrop<File>>) -> Result<(), Error> {
++        self.invoke_with_security(destination,false)
++    }
++    fn invoke_with_security(&mut self,destination:&mut Option<ManuallyDrop<File>>,security:bool)->Result<(),Error>{
+         if self.attempted || destination.is_some() {
+             return Err(Error::Consumed);
+         }
+@@ -82,7 +85,7 @@
+         let status = unsafe {
+             NtCreateFile(
+                 self.output.get(),
+-                FILE_READ_ATTRIBUTES | FILE_TRAVERSE | 0x00100000,
++                FILE_READ_ATTRIBUTES | FILE_TRAVERSE | 0x00100000 | if security { 0x00020000 } else { 0 },
+                 &*self.attributes,
+                 self.completion.get(),
+                 ptr::null(),
+@@ -256,10 +259,39 @@
+ // under the census's private mutex. No raw handle is shared for another close.
+ unsafe impl Send for Capture {}
+ impl Capture {
++    // These Win32 information calls are synchronous and have fixed stack
++    // outputs. They never reset a retained NT acquisition/query deadline.
++    pub(super) fn pinned_private_root(&self)->Result<(&File,(u64,[u8;16])),Error>{
++        for node in &self.nodes{
++            let file=node.file.as_deref().ok_or(Error::Unknown)?;
++            let mut id:FILE_ID_INFO=unsafe{std::mem::zeroed()};
++            let mut attributes:FILE_ATTRIBUTE_TAG_INFO=unsafe{std::mem::zeroed()};
++            let handle=file.as_raw_handle().cast();
++            if unsafe{GetFileInformationByHandleEx(handle,FileIdInfo,(&mut id as *mut FILE_ID_INFO).cast(),size_of::<FILE_ID_INFO>() as u32)}==0
++                ||unsafe{GetFileInformationByHandleEx(handle,FileAttributeTagInfo,(&mut attributes as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32)}==0
++                ||attributes.FileAttributes&FILE_ATTRIBUTE_REPARSE_POINT!=0
++                ||attributes.FileAttributes&FILE_ATTRIBUTE_DIRECTORY==0
++                ||node.identity!=Some(Identity(id.VolumeSerialNumber,id.FileId.Identifier))
++            {return Err(Error::Unknown);}
++        }
++        self.private_root()
++    }
++    pub(super) fn private_root(&self)->Result<(&File,(u64,[u8;16])),Error>{
++        let index=*self.chains.first().ok_or(Error::Unknown)?.1.last().ok_or(Error::Unknown)?;
++        let node=self.nodes.get(index).ok_or(Error::Unknown)?;
++        let id=node.identity.ok_or(Error::Unknown)?;
++        Ok((node.file.as_deref().ok_or(Error::Unknown)?,(id.0,id.1)))
++    }
+     pub(super) fn never_invoked(&self) -> bool {
+         self.nodes.iter().all(|node| !node.open.attempted)
+     }
+     pub(super) fn acquire(&mut self, plans: &[Plan], deadline: Instant) -> Result<(), Error> {
++        self.acquire_inner(plans,deadline,false)
++    }
++    pub(super) fn acquire_private(&mut self,plans:&[Plan],deadline:Instant)->Result<(),Error>{
++        self.acquire_inner(plans,deadline,true)
++    }
++    fn acquire_inner(&mut self,plans:&[Plan],deadline:Instant,security:bool)->Result<(),Error>{
+         if !self.nodes.is_empty() || !self.chains.is_empty() {
+             return Err(Error::Consumed);
+         }
+@@ -288,7 +320,9 @@
+                 let index = self.nodes.len() - 1;
+                 let node = &mut self.nodes[index];
+                 live(deadline)?;
+-                node.open.invoke(&mut node.file)?;
++                if security && name==plan.names.last().ok_or(Error::Path)?{
++                    node.open.invoke_with_security(&mut node.file,true)?;
++                }else{node.open.invoke(&mut node.file)?;}
+                 live(deadline)?;
+                 let identity = node.inspect(deadline)?;
+                 if let Some(parent) = chain.last() {
+--- a/crates/adapters/src/service_registration/guards/native.rs
++++ b/crates/adapters/src/service_registration/guards/native.rs
+@@ -111,6 +111,18 @@
+     guard: &'g ServiceGuards,
+ }
+ impl<'g> ServiceGuardDirectory<'g> {
++    /// Actual original guard identity and process SID; no path reopen or clone.
++    pub fn local_custody_observation(&self,root:&std::path::Path)->Result<crate::local_custody::LocalStateObservation,String>{
++        let prepared=self.guard.prepared.as_ref().ok_or("Original native preparation unavailable")?;
++        if prepared.directory!=root{return Err("Original state spelling changed".into());}
++        let (file,identity)=self.original_directory().map_err(|_|"Original native directory unavailable")?;
++        crate::windows_acl::verify_owner_only(file,crate::windows_acl::ProtectedAclKind::Directory)?;
++        Ok(crate::local_custody::LocalStateObservation{
++            subject:crate::windows_acl::owner_sid()?,
++            physical:serde_json::to_string(&identity).map_err(|_|"Original native identity unavailable")?,
++        })
++    }
++
+     pub(crate) fn same_guard_identity(&self) -> usize {
+         self.guard
+             .bound
+--- a/crates/adapters/src/projects/close/tests.rs
++++ b/crates/adapters/src/projects/close/tests.rs
+@@ -17,7 +17,7 @@
+         .execute_batch(include_str!("../0004.sql"))
+         .unwrap();
+     super::super::validate_schema(&connection, super::super::SCHEMA_VERSION).unwrap();
+-    ProjectStore { connection }
++    ProjectStore { local_custody: None, local_installation_id: None, connection }
+ }
+ 
+ struct OwnedStatement(NonNull<ffi::sqlite3_stmt>);
+--- a/crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs
++++ b/crates/adapters/src/projects/presentation/task_names/saved_metadata/tests.rs
+@@ -15,7 +15,7 @@
+     ] {
+         connection.execute_batch(sql).unwrap();
+     }
+-    ProjectStore { connection }
++    ProjectStore { local_custody: None, local_installation_id: None, connection }
+ }
+ 
+ fn project_draft(index: u32) -> ProjectDraft {
+--- a/crates/adapters/src/projects/presentation/task_names/tests.rs
++++ b/crates/adapters/src/projects/presentation/task_names/tests.rs
+@@ -19,7 +19,7 @@
+ fn workspace() -> ProjectStore {
+     let connection = Connection::open_in_memory().unwrap();
+     initialize(&connection);
+-    ProjectStore { connection }
++    ProjectStore { local_custody: None, local_installation_id: None, connection }
+ }
+ fn public_project(store: &mut ProjectStore) -> Project {
+     store
+@@ -203,6 +203,7 @@
+ fn invalid_targets_and_names_refuse_before_any_schema_or_sql_access() {
+     // Deliberately no schema: validating after SQL would produce the wrong error.
+     let mut store = ProjectStore {
++        local_custody: None, local_installation_id: None,
+         connection: Connection::open_in_memory().unwrap(),
+     };
+     let target = |id: &str| ValidatedSidebarTarget {
+@@ -448,8 +449,9 @@
+     let connection = Connection::open_with_flags(&uri, flags).unwrap();
+     initialize(&connection);
+     let second_connection = Connection::open_with_flags(&uri, flags).unwrap();
+-    let mut first = ProjectStore { connection };
++    let mut first = ProjectStore { local_custody: None, local_installation_id: None, connection };
+     let mut second = ProjectStore {
++        local_custody: None, local_installation_id: None,
+         connection: second_connection,
+     };
+     let project = public_project(&mut first);
+--- a/crates/adapters/src/projects/presentation/tests.rs
++++ b/crates/adapters/src/projects/presentation/tests.rs
+@@ -15,7 +15,7 @@
+     connection
+         .execute_batch(include_str!("../0004.sql"))
+         .unwrap();
+-    ProjectStore { connection }
++    ProjectStore { local_custody: None, local_installation_id: None, connection }
+ }
+ fn project(store: &mut ProjectStore) -> veyra_contracts::Project {
+     store
+@@ -415,8 +415,9 @@
+         connection
+             .execute_batch(include_str!("../0004.sql"))
+             .unwrap();
+-        let mut first = ProjectStore { connection };
++        let mut first = ProjectStore { local_custody: None, local_installation_id: None, connection };
+         let mut second = ProjectStore {
++            local_custody: None, local_installation_id: None,
+             connection: Connection::open(&path).unwrap(),
+         };
+         assert_eq!(first.sidebar_preferences().unwrap().revision, 0);
+@@ -441,6 +442,7 @@
+     }
+     {
+         let reopened = ProjectStore {
++            local_custody: None, local_installation_id: None,
+             connection: Connection::open(&path).unwrap(),
+         };
+         assert_eq!(
+--- a/crates/adapters/src/projects/saved_metadata_search/tests.rs
++++ b/crates/adapters/src/projects/saved_metadata_search/tests.rs
+@@ -15,7 +15,7 @@
+     ] {
+         connection.execute_batch(migration).unwrap();
+     }
+-    ProjectStore { connection }
++    ProjectStore { local_custody: None, local_installation_id: None, connection }
+ }
+ 
+ fn draft(name: String) -> ProjectDraft {
+--- a/crates/adapters/src/projects/test_support/busy.rs
++++ b/crates/adapters/src/projects/test_support/busy.rs
+@@ -92,7 +92,7 @@
+     if statement.statement.is_none() {
+         return Err(StoreError::Invalid);
+     }
+-    Ok((ProjectStore { connection }, statement))
++    Ok((ProjectStore { local_custody: None, local_installation_id: None, connection }, statement))
+ }
+ 
+ #[cfg(test)]
+--- a/crates/adapters/src/projects/configuration.rs
++++ b/crates/adapters/src/projects/configuration.rs
+@@ -324,6 +324,9 @@
+         else {
+             return Err(StoreError::Invalid);
+         };
++        if resolved.as_ref()==Some(resolved_destination){
++            self.require_private_namespace_separation(&resolved_destination.environment,&resolved_destination.primary_root,&resolved_destination.roots)?;
++        }
+         let tx = self
+             .connection
+             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+--- a/crates/adapters/src/projects/presentation.rs
++++ b/crates/adapters/src/projects/presentation.rs
+@@ -201,7 +201,7 @@
+     }
+ }
+ fn validate(connection: &Connection) -> Result<(), StoreError> {
+-    if super::schema_version(connection)? != super::SCHEMA_VERSION {
++    if ![super::SCHEMA_VERSION,6].contains(&super::schema_version(connection)?) {
+         return Err(StoreError::Corrupt);
+     }
+     super::validate_schema(connection, super::SCHEMA_VERSION)
+--- a/crates/adapters/src/projects/presentation/task_names/saved_metadata.rs
++++ b/crates/adapters/src/projects/presentation/task_names/saved_metadata.rs
+@@ -40,10 +40,10 @@
+ 
+         let transaction = self.connection.unchecked_transaction()?;
+         let version = super::super::super::schema_version(&transaction)?;
+-        if version > super::super::super::SCHEMA_VERSION {
++        if version > 6 {
+             return Err(StoreError::NewerSchema);
+         }
+-        if version != super::super::super::SCHEMA_VERSION {
++        if ![super::super::super::SCHEMA_VERSION,6].contains(&version) {
+             return Err(StoreError::Corrupt);
+         }
+         super::super::super::validate_schema_shape(&transaction, version)?;
+--- a/crates/adapters/src/projects/saved_metadata_search.rs
++++ b/crates/adapters/src/projects/saved_metadata_search.rs
+@@ -40,10 +40,10 @@
+         let after_id = after_id.map(canonical_cursor).transpose()?;
+         let transaction = self.connection.unchecked_transaction()?;
+         let version = super::schema_version(&transaction)?;
+-        if version > super::SCHEMA_VERSION {
++        if version > 6 {
+             return Err(StoreError::NewerSchema);
+         }
+-        if version != super::SCHEMA_VERSION {
++        if ![super::SCHEMA_VERSION,6].contains(&version) {
+             return Err(StoreError::Corrupt);
+         }
+         super::validate_schema_shape(&transaction, version)?;

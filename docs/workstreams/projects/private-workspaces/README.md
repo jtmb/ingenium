@@ -1,5 +1,7 @@
 # True private projectless execution proposal
 
+**Superseded source design:** use [native local custody v6](../native-local-v6/README.md) for actual protected local-bearer and original OS-custodian integration. Preserve this earlier abstract-port source and patch as unique design evidence; do not apply both proposals.
+
 This is the bounded source proposal requested by the coordinator after inspection found no existing non-project native owner. It is **unapplied and uncompiled**. The route is intentionally unmounted. It does not turn current native projectless controls on.
 
 ## Current evidence and boundary

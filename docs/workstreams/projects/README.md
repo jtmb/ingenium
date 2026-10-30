@@ -84,3 +84,7 @@ Owner: projects stream; generated-output root and physical volume remain the ori
 The coordinator-requested bounded native proposal is in [private-workspaces/README.md](private-workspaces/README.md). It adds no hidden Project or scratch/global fallback. The seven-file patch and schema-v6 copy fixture are unapplied; the proposed native route stays unmounted until existing authenticated actor and actual custody/execution owner ports are provided. Thirteen source/model/migration tests cover negative admission and reconnect preservation. This is not a claim that native projectless execution is already available.
 
 Request execution composition and native ownership follow-through are documented in [request-integration.md](request-integration.md).
+
+## Native local custody follow-on
+
+See [native-local-v6/README.md](native-local-v6/README.md) for the unapplied actual local-bearer/OS-custodian schema-6 and typed execution proposal, exact original-file preimages, native integration recipe, 91 passing CPU tests and nine real Linux FD metadata checks. Native compilation, original resource retirement and full Windows/WSL/hosted/UI acceptance remain open. The earlier abstract private-workspace proposal is superseded; Node migrations 122–124 are unchanged.
