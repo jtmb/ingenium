@@ -1,0 +1,64 @@
+{
+  "existingDeltas": [
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "baseSha256": "e69d49b35f15ba8be1ccb2370d28ee1c5faaf58ae56b9a17ff6ba40b6447e494",
+      "proposedSha256": "bd93eda023eff7921e219a120005c949fc5578addbb36413b1bb55d678e0cc23"
+    },
+    {
+      "path": "crates/adapters/src/local_custody.rs",
+      "baseSha256": "fa1985cc2bfb1f69ca785e3a4c737b7518c45910a69275a529a582d2031e20b3",
+      "proposedSha256": "b8ccc9f200ab181a4ef2ae4247f88188ad716b531aa990477fc2fe13d5066d18"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_files.rs",
+      "baseSha256": "f86651cb8145b7ecf50e57181e61f0acf300436bf1d5f231c2a0aef68794c303",
+      "proposedSha256": "c1a5ccc96417fb3780819df9a59b9348811bf281cd3c43f06624c58bb6c34855"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "baseSha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2",
+      "proposedSha256": "cc46387a61bfc22c32b710ac32736b3586fef4bf6ce08ef74e7e512ea885bfde"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "baseSha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817",
+      "proposedSha256": "932d1cb68e9092608cfe7b5d8c24c8cabdf589e968c6603b8c119ed3275e6b4d"
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "crates/adapters/src/local_execution/windows_web_read/native.rs",
+      "bytes": 7786,
+      "sha256": "efd4ecb1e4cd7b313c249065e84009e0658abf32dafeaaa7a0dc40030a3fa637"
+    },
+    {
+      "path": "crates/adapters/src/local_execution/windows_web_read.rs",
+      "bytes": 8687,
+      "sha256": "e4198e30685d38fb5ba369821f7065e4e862ffc05dbad2e8a131392367df6e79"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_files/windows_inputs.rs",
+      "bytes": 2131,
+      "sha256": "d846cb7b8fe50663ec84c56c4ce95c1b3fa7beb03ef0c6760e9bd6b00cf0e0f8"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs",
+      "bytes": 7070,
+      "sha256": "1c08f4978115680539bf5832e4d6c11c874f1293ae53508a2dff38249721cd09"
+    }
+  ],
+  "patchSha256": "ddc94937498ad6a25293f909b9b92f6b18d45dc738823a396f05911dc2152a42",
+  "sharedWritten": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "dispatchActivated": false,
+  "actualAckJoinAdapterPresent": false,
+  "constructors": [
+    "LiveRuntime::hold_local_windows_web_read",
+    "LiveRuntime::check_local_windows_web_read"
+  ],
+  "originalOwnership": "LocalCustodyOriginals inventory owns carrier before OS opens; one active original only",
+  "bounds": "Existing8MiB aggregate including original inline inputs /32files unchanged;30s admission deadline never releases sent uncertainty",
+  "remaining": "Root/Work1 actual single-send journal token + joined ACK/private request owner + original engine closure proof adapter required; no copied DTO/callback join API"
+}

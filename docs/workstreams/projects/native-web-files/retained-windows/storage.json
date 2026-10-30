@@ -1,0 +1,12 @@
+{
+  "owner": "existing Projects and execution task/chat",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "volume": "existing authorized C-backed Ubuntu VHDX",
+  "generatedPaths": [
+    "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/native-web-files/retained-windows"
+  ],
+  "estimatedDiskPeakBytes": 1048576,
+  "regeneration": "strict prepare-proposal.py and Root resource-leased Rust tests; no worker build/runtime",
+  "protected": "all original/shared source, locks, actual data/evidence; no shared writes",
+  "cleanup": "No filesystem fixture or build/cache/dependency outputs; keep minimal source/patch/tests/receipts for actual Root composition"
+}
