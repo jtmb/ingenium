@@ -1,0 +1,49 @@
+.native-customize { display: flex; flex-wrap: wrap; width: 100%; height: 100%; min-height: 0; min-width: 0; overflow: auto; background: var(--canvas); color: var(--text); font: inherit; }
+.native-customize [hidden] { display: none !important; }
+.native-customize button, .native-customize input { font: inherit; color: inherit; }
+.native-customize button { cursor: pointer; border: 1px solid transparent; border-radius: 8px; padding: 8px 11px; background: transparent; text-align: left; overflow-wrap: anywhere; }
+.native-customize button:hover { background: var(--control); }
+.native-customize button:disabled { cursor: not-allowed; opacity: .55; }
+.native-customize :is(button,input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.native-customize-sidebar { flex: 1 1 14rem; max-width: 22rem; min-width: 0; padding: 16px 12px; background: var(--sidebar); border-right: 1px solid var(--border); }
+.native-customize-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; padding: 4px 10px 18px; }
+.native-customize-brand > span { color: var(--accent); font-size: 22px; font-weight: 800; }
+.native-customize-sidebar nav { display: grid; gap: 4px; }
+.native-customize-sidebar nav button { display: flex; align-items: center; gap: 10px; width: 100%; }
+.native-customize-sidebar button[aria-current=page] { background: var(--control); }
+.native-customize h2 { font-size: .95rem; font-weight: 600; }
+.native-customize-sidebar h2 { margin: 24px 10px 10px; font-size: .8rem; color: var(--muted); }
+.native-customize-sidebar p { color: var(--muted); font-size: .8rem; line-height: 1.5; padding: 0 10px; }
+.native-customize-sidebar ul { margin: 0 0 24px; padding: 0; list-style: none; max-height: 17rem; overflow: auto; }
+.native-customize-sidebar li button { width: 100%; }
+.native-customize-owner { overflow-wrap: anywhere; margin-top: 24px; }
+.native-customize-main { flex: 999 1 38rem; min-width: min(100%, 22rem); padding: clamp(16px, 3vw, 40px); overflow-wrap: anywhere; }
+.native-customize-main > div:not(.native-customize-manager), .native-customize-manager-heading { max-width: 56rem; margin-inline: auto; }
+.native-customize-main header { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
+.native-customize h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
+.native-customize-main header p, .native-customize-installed > p { color: var(--muted); font-size: .85rem; line-height: 1.6; }
+.native-customize-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; }
+.native-customize-actions label { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 7px 10px; max-width: 100%; }
+.native-customize-actions input { width: 11rem; min-width: 0; background: transparent; border: 0; outline-offset: 5px; }
+.native-customize-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.native-customize-actions .native-customize-add { background: var(--text); color: var(--canvas); border-radius: 999px; padding-inline: 17px; }
+.native-customize-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); column-gap: 28px; row-gap: 4px; }
+.native-customize-card { display: flex; align-items: center; gap: 12px; min-width: 0; width: 100%; }
+.native-customize-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; color: var(--accent); background: var(--control); border-radius: 10px; }
+.native-customize-card > span:nth-child(2) { min-width: 0; flex: 1; }
+.native-customize-card strong, .native-customize-card small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.native-customize-card strong { font-size: .9rem; font-weight: 600; }
+.native-customize-card small { color: var(--muted); font-size: .75rem; line-height: 1.6; }
+.native-customize-installed { margin-bottom: 24px; }
+.native-customize-installed h2 { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.native-customize-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-block: 18px; }
+.native-customize-scopes button { border-radius: 999px; font-size: .8rem; max-width: 100%; }
+.native-customize-scopes button[aria-pressed=true] { background: var(--control); }
+.native-customize-message { color: var(--muted); line-height: 1.6; margin-block: 20px; }
+.native-customize-detail { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 20px; }
+.native-customize-path { font-family: Cascadia Mono, Consolas, monospace; overflow-wrap: anywhere; }
+.native-customize-manager { min-width: 0; }
+.native-customize-manager-heading button { display: flex; align-items: center; gap: 8px; }
+.native-customize-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 900px) { .native-customize-sidebar { max-width: none; flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--border); } .native-customize-sidebar ul { max-height: 7rem; } .native-customize-sidebar nav { grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); } }
+@media (prefers-reduced-motion: reduce) { .native-customize *, .native-customize *::before, .native-customize *::after { scroll-behavior: auto; animation: none; transition: none; } }

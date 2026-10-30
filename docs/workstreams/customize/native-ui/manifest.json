@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "sourceTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+  "canonicalization": "UTF-8 without BOM; CRLF to LF; otherwise bytes preserved",
+  "mode": "new files only; no native integration/index/lock/route/root mutation",
+  "files": [
+    {
+      "path": "apps/web/src/features/customize/NativeCustomize.test.tsx",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "b37209bb1df4593cb30c55f000e5b087bd34dcea073ffcb1cdb0f984e6d21bf3",
+      "bytes": 6663
+    },
+    {
+      "path": "apps/web/src/features/customize/NativeCustomize.tsx",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "857a21513c545aaa22d13453c89f52416e598bf296d08c2d9b63d4afda08ec9e",
+      "bytes": 15270
+    },
+    {
+      "path": "apps/web/src/features/customize/native-customize.css",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "ec49d18941e185a4ba0c2127c55484d4f99660ce05fc2057ed315f0c73f6fd55",
+      "bytes": 5431
+    },
+    {
+      "path": "apps/web/src/features/customize/nativeCatalog.node.mjs",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "e97a08616a4271ad741c942f0a6f507090e4f5f204b973aab10b05826eab9d54",
+      "bytes": 5492
+    },
+    {
+      "path": "apps/web/src/features/customize/nativeCatalog.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "d473d9ed00c19917beca5302ae4666e5715559b792e8db401f3a7ab43ee11cc6",
+      "bytes": 6628
+    }
+  ],
+  "prerequisites": [
+    {
+      "path": "apps/web/src/app/App.tsx",
+      "baselineBlob": "3822b6bbc6fb7605d0d4146a1449d1b90ec98ab7",
+      "canonicalPreSha256": "ccdcb554cd126fde673696525e8aad7f518121b3766fb8761538ba8890c483c4",
+      "baselineRawSha256": "ccdcb554cd126fde673696525e8aad7f518121b3766fb8761538ba8890c483c4",
+      "observedRawSha256": "ccdcb554cd126fde673696525e8aad7f518121b3766fb8761538ba8890c483c4",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkDesktop.tsx",
+      "baselineBlob": "c12593cb791fee9907e5d32e3d6f9f124cd2fbc5",
+      "canonicalPreSha256": "12bbc442cb533fa04a8cb183132876aaf8e99af362190aab15b0ec9e7cd639fb",
+      "baselineRawSha256": "12bbc442cb533fa04a8cb183132876aaf8e99af362190aab15b0ec9e7cd639fb",
+      "observedRawSha256": "12bbc442cb533fa04a8cb183132876aaf8e99af362190aab15b0ec9e7cd639fb",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/extensions/PluginPackages.tsx",
+      "baselineBlob": "0ec764c4483ed9f1a3a6cf946d0457de77add16e",
+      "canonicalPreSha256": "bdef4c58d3b2271c9000cc604b87964a16f5591a621a3363da0cbbb183a0cccd",
+      "baselineRawSha256": "bdef4c58d3b2271c9000cc604b87964a16f5591a621a3363da0cbbb183a0cccd",
+      "observedRawSha256": "bdef4c58d3b2271c9000cc604b87964a16f5591a621a3363da0cbbb183a0cccd",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/extensions/SkillWorkspace.tsx",
+      "baselineBlob": "0fec2e01919f6ce0fe288e11f911fa9360a8d374",
+      "canonicalPreSha256": "e057eace9a4ffeada98d1def46405a52dde70123819eb870d1e19f5de2fef58f",
+      "baselineRawSha256": "e057eace9a4ffeada98d1def46405a52dde70123819eb870d1e19f5de2fef58f",
+      "observedRawSha256": "e057eace9a4ffeada98d1def46405a52dde70123819eb870d1e19f5de2fef58f",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/extensions/ExtensionsPanel.tsx",
+      "baselineBlob": "9eae9b590dbb915076d7f5fec57c086dc38050b8",
+      "canonicalPreSha256": "fbdc1fb9bfbc39034e413dc3c3e99197fc324ce9cf3fdf3d41f636e0827d267a",
+      "baselineRawSha256": "fbdc1fb9bfbc39034e413dc3c3e99197fc324ce9cf3fdf3d41f636e0827d267a",
+      "observedRawSha256": "fbdc1fb9bfbc39034e413dc3c3e99197fc324ce9cf3fdf3d41f636e0827d267a",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/extensions/InstructionEditor.tsx",
+      "baselineBlob": "387cc7738f99678c123734631e7fef434cbe8ab5",
+      "canonicalPreSha256": "5a86f1f28872ed5a95b980f9fce95db30017600f4f9da16e7077c2503b806b45",
+      "baselineRawSha256": "5a86f1f28872ed5a95b980f9fce95db30017600f4f9da16e7077c2503b806b45",
+      "observedRawSha256": "5a86f1f28872ed5a95b980f9fce95db30017600f4f9da16e7077c2503b806b45",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/extensions/ScopedEngineSettings.tsx",
+      "baselineBlob": "ea98f4bced7c8a721fa08ed2f14fb67f67759984",
+      "canonicalPreSha256": "da7f3ea269549d2ec222863028cf5fc71eacfbfc07b63bb6ab9cf8b2dca073a8",
+      "baselineRawSha256": "da7f3ea269549d2ec222863028cf5fc71eacfbfc07b63bb6ab9cf8b2dca073a8",
+      "observedRawSha256": "da7f3ea269549d2ec222863028cf5fc71eacfbfc07b63bb6ab9cf8b2dca073a8",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/platform/types.ts",
+      "baselineBlob": "248023932212f3614cd1d4c4a8a5f95212fa0c88",
+      "canonicalPreSha256": "43979d7fe5c7f43be1fa43667eb06130c2af248b3a8bfd4dddc4e8787ba0f955",
+      "baselineRawSha256": "43979d7fe5c7f43be1fa43667eb06130c2af248b3a8bfd4dddc4e8787ba0f955",
+      "observedRawSha256": "43979d7fe5c7f43be1fa43667eb06130c2af248b3a8bfd4dddc4e8787ba0f955",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/service/src/routes/plugin_packages.rs",
+      "baselineBlob": "d69ba81d53aa21f5642872274dc5ff7c92cdd665",
+      "canonicalPreSha256": "42524f2e080a627e455859d1708fb5e5daef3df00699209fc2eb91e214574b13",
+      "baselineRawSha256": "42524f2e080a627e455859d1708fb5e5daef3df00699209fc2eb91e214574b13",
+      "observedRawSha256": "42524f2e080a627e455859d1708fb5e5daef3df00699209fc2eb91e214574b13",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/service/src/routes/extension_config/skill_workspace.rs",
+      "baselineBlob": "daa8345800ecbb87f17574aa6c631f753c3be64e",
+      "canonicalPreSha256": "bd62647b71e953259d2444cfea181f3d90acc3fc6e920dbbd2273329601a9ebc",
+      "baselineRawSha256": "bd62647b71e953259d2444cfea181f3d90acc3fc6e920dbbd2273329601a9ebc",
+      "observedRawSha256": "bd62647b71e953259d2444cfea181f3d90acc3fc6e920dbbd2273329601a9ebc",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "crates/adapters/src/plugin_packages.rs",
+      "baselineBlob": "60f6adb8b2a343930d8da0b4e8beaef8e688eae8",
+      "canonicalPreSha256": "e3c2e487008b57cad60089293f1ff4c65d87cb27809a45795deb6cd0c733258d",
+      "baselineRawSha256": "e3c2e487008b57cad60089293f1ff4c65d87cb27809a45795deb6cd0c733258d",
+      "observedRawSha256": "e3c2e487008b57cad60089293f1ff4c65d87cb27809a45795deb6cd0c733258d",
+      "currentCanonicalMatchesBaseline": true
+    }
+  ],
+  "patchSha256": "cfe21277fa83b90282c52b52a1ff4ce13fceb2d80fd2a9dec11b93912ae72767",
+  "generatedDisposableOutputs": [],
+  "requiredConsumer": "Coordinator reviewed application, native semantic tests and browser/native qualification",
+  "endCondition": "Keep minimal durable source/patch/manifest receipts; coordinator reconciles its own build outputs"
+}

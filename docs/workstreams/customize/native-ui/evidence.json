@@ -1,0 +1,64 @@
+{
+  "cleanup": {
+    "removedPaths": [],
+    "retained": [
+      "Canonical source5 files",
+      "Add-only patch",
+      "SHA256/preimage manifest",
+      "Preparation recipe",
+      "README/evidence"
+    ],
+    "removedBytes": 0,
+    "consumer": "Coordinator application, review and qualification",
+    "generatedDisposablePaths": [],
+    "protectedSourceChanged": false
+  },
+  "checks": [
+    {
+      "passed": 9,
+      "note": "Node22 type stripping emitted a module-type fallback warning under the APP checkout package; no package change or runtime output",
+      "firstFailure": null,
+      "skipped": 0,
+      "name": "native DTO semantic tests",
+      "failed": 0,
+      "command": "node --test files/apps/web/src/features/customize/nativeCatalog.node.mjs"
+    },
+    {
+      "files": [
+        "nativeCatalog.ts",
+        "NativeCustomize.tsx",
+        "NativeCustomize.test.tsx"
+      ],
+      "name": "TypeScript syntax",
+      "diagnostics": 0
+    },
+    {
+      "name": "Isolated pure controller strict noEmit",
+      "diagnostics": 0,
+      "file": "nativeCatalog.ts",
+      "emittedFiles": 0
+    },
+    {
+      "name": "Baseline prerequisites",
+      "reader": "Windows Git exact per-command safe.directory/core.longpaths; no index mutation",
+      "count": 11,
+      "canonicalDrift": []
+    },
+    {
+      "sourceMutation": false,
+      "outcome": "PASS on final explicit-null patch cfe21277fa83b90282c52b52a1ff4ce13fceb2d80fd2a9dec11b93912ae72767; existing native source/index unchanged",
+      "name": "Native add-only patch preflight",
+      "command": "Windows Git apply --check with exact per-command safe.directory/core.longpaths"
+    }
+  ],
+  "pending": [
+    "Coordinator six native component cases",
+    "Full native TypeScript noEmit",
+    "Root/App/Work slot application",
+    "Actual browser/native screenshots and lifecycle qualification",
+    "Authenticated hosted governance bridge and full preserved workflows"
+  ],
+  "classification": "Source delivery and narrow semantic evidence, not native/browser acceptance",
+  "sourceTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+  "sourceReviewFirstFailure": "Windows receipt rewrite introduced CRLF in this new owned evidence file; normalized only that file to LF and reran staged whitespace validation."
+}

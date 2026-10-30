@@ -1,0 +1,477 @@
+diff --git a/apps/web/src/features/customize/NativeCustomize.test.tsx b/apps/web/src/features/customize/NativeCustomize.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/NativeCustomize.test.tsx
+@@ -0,0 +1,80 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { useState } from "react";
++import type { Project } from "@veyra/contracts";
++import type { Gateway } from "../../platform/types";
++import { NativeCustomize } from "./NativeCustomize";
++
++vi.mock("../extensions/PluginPackages", () => ({PluginPackages: () => <p>Existing package registration owner</p>}));
++vi.mock("../extensions/SkillWorkspace", () => ({SkillWorkspace: () => {
++  const [draft, setDraft] = useState("");
++  return <label>Existing skill draft<input value={draft} onChange={event => setDraft(event.target.value)}/></label>;
++}}));
++vi.mock("../extensions/ExtensionsPanel", () => ({ExtensionsPanel: () => <p>Existing MCP and permission owner</p>}));
++vi.mock("../extensions/InstructionEditor", () => ({InstructionEditor: () => <p>Existing instruction owner</p>}));
++vi.mock("../extensions/ScopedEngineSettings", () => ({ScopedEngineSettings: () => <p>Existing settings owner</p>}));
++const project: Project = {id: "project", name: "Local project", revision: 4, environment: {kind: "windows"}, primary_root: "C:/fixture", roots: ["C:/fixture"], archived: false, pinned: false};
++const request = vi.fn();
++const gateway = {workbench: request} as unknown as Gateway;
++function reply(path: string, id = project.id) {
++  const shared = {service_instance_id: "service", project_id: id, project_revision: 4};
++  return path.includes("skill-workspace")
++    ? {...shared, revision: "a", supported: true, reason: null, skills: [{id: "release", name: "Release", description: "Source", path: ".agents/skills/release/SKILL.md", content: "# Source", editable: true, reason: null}]}
++    : {...shared, revision: 1, restart_required: true, engine_stopped: true, packages: [{id: "tools", selected_sha256: "a", versions: [{sha256: "a", manifest: {id: "tools", version: "1", license: "MIT"}}], enabled: false, removed: false, activation: "Restart and observe actual inventory"}]};
++}
++const legacy = () => <p>Existing agents hooks and notes</p>;
++beforeEach(() => { request.mockReset().mockImplementation(async (_method: string, path: string) => reply(path)); });
++afterEach(cleanup);
++describe("native Customize owner integration", () => {
++  it("shows real registered-disabled state and leaves unsupported scopes unavailable without extra reads", async () => {
++    render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++    await screen.findByRole("button", {name: "tools, Registered · disabled", exact: true});
++    fireEvent.click(screen.getByRole("button", {name: "Personal", exact: true}));
++    expect(screen.getByText(/Personal catalog is unavailable/)).toBeTruthy();
++    expect(request).toHaveBeenCalledTimes(2);
++    expect(request.mock.calls.every(([method]) => method === "GET")).toBe(true);
++  });
++  it("keeps the exact existing skill draft owner mounted while navigating catalog pages", async () => {
++    render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++    await screen.findByRole("button", {name: "tools, Registered · disabled", exact: true});
++    fireEvent.click(screen.getByRole("button", {name: "Skills", exact: true}));
++    fireEvent.click(screen.getByRole("button", {name: "Add", exact: true}));
++    fireEvent.change(await screen.findByRole("textbox", {name: "Existing skill draft"}), {target: {value: "Exact unsaved draft"}});
++    fireEvent.click(screen.getByRole("button", {name: "Back to catalog"}));
++    fireEvent.click(await screen.findByRole("button", {name: "Open source editor"}));
++    expect((screen.getByRole("textbox", {name: "Existing skill draft"}) as HTMLInputElement).value).toBe("Exact unsaved draft");
++  });
++  it("does not infer a project or dispatch a native catalog read from a projectless view", () => {
++    render(<NativeCustomize gateway={gateway} project={null} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++    expect(screen.getAllByText(/No global project is selected/).length).toBeGreaterThan(0);
++    expect(request).not.toHaveBeenCalled();
++  });
++  it("discards late source rows from a previous project", async () => {
++    let complete!: (value: unknown) => void;
++    request.mockImplementation((_method: string, path: string) => path.includes("project_id=project&")
++      ? new Promise(resolve => {if (path.includes("plugin-packages")) complete = resolve;})
++      : Promise.resolve(reply(path, "other")));
++    const view = render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    view.rerender(<NativeCustomize gateway={gateway} project={{...project, id: "other"}} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++    await screen.findByRole("button", {name: "tools, Registered · disabled", exact: true});
++    await act(async () => {complete({...reply("/v1/plugin-packages/"), packages: []});});
++    expect(screen.getByRole("button", {name: "tools, Registered · disabled", exact: true})).toBeTruthy();
++  });
++  it("does not treat a mismatched governance slot as authenticated hosted lifecycle", async () => {
++    render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}
++      hostedGovernance={{serviceInstanceId: "foreign", projectId: "project", projectRevision: 4, actorId: "actor", installationId: "installation", hostedProjectId: "hosted-project", content: <p>Wrong owner secret</p>}}/>);
++    fireEvent.click(screen.getByRole("button", {name: "Hosted skill governance", exact: true}));
++    expect(screen.getByText("Hosted skill governance is unavailable")).toBeTruthy();
++    expect(screen.queryByText("Wrong owner secret")).toBeNull();
++  });
++});
++
++it("admits an explicitly projectless hosted owner without synthesizing native project reads", () => {
++  render(<NativeCustomize gateway={gateway} project={null} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}
++    hostedGovernance={{serviceInstanceId: "service", projectId: null, projectRevision: null, actorId: "actor",
++      installationId: "installation", hostedProjectId: null, content: <p>Authenticated private governance fixture</p>}}/>);
++  fireEvent.click(screen.getByRole("button", {name: "Hosted skill governance", exact: true}));
++  expect(screen.getByText("Authenticated private governance fixture")).toBeTruthy();
++  expect(request).not.toHaveBeenCalled();
++});
+diff --git a/apps/web/src/features/customize/NativeCustomize.tsx b/apps/web/src/features/customize/NativeCustomize.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/NativeCustomize.tsx
+@@ -0,0 +1,176 @@
++import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
++import { ArrowLeft, BookOpen, Check, Package, Plus, RefreshCw, Search, Settings2 } from "lucide-react";
++import type { Project } from "@veyra/contracts";
++import type { Gateway } from "../../platform/types";
++import { decodeNativeCatalog, filterNativeEntries, hostedGovernanceMatches, nativeCatalogPath, nativeOwnerKey, type HostedGovernanceBinding, type NativeCatalog, type NativeEntry, type NativeKind } from "./nativeCatalog";
++import "./native-customize.css";
++
++const Packages = lazy(() => import("../extensions/PluginPackages").then(m => ({default: m.PluginPackages})));
++const Skills = lazy(() => import("../extensions/SkillWorkspace").then(m => ({default: m.SkillWorkspace})));
++const Extensions = lazy(() => import("../extensions/ExtensionsPanel").then(m => ({default: m.ExtensionsPanel})));
++const Instructions = lazy(() => import("../extensions/InstructionEditor").then(m => ({default: m.InstructionEditor})));
++const EngineSettings = lazy(() => import("../extensions/ScopedEngineSettings").then(m => ({default: m.ScopedEngineSettings})));
++type Panel = "packages" | "skills" | "extensions" | "instructions" | "engine" | "legacy" | "hosted";
++type ReadState = {status: "loading" | "ready" | "error"; catalog?: NativeCatalog; error?: string};
++type Props = Readonly<{
++  gateway: Gateway; project: Project | null; connected: boolean; serviceInstanceId: string;
++  /** Reuse the coordinator's existing Productivity element with its callbacks. */
++  renderLegacyWorkflows: (gateway: Gateway) => ReactNode;
++  /** Render only the coordinator's authenticated, owner-bound governance adapter. */
++  hostedGovernance?: HostedGovernanceBinding & Readonly<{content: ReactNode}>;
++}>;
++const waiting: ReadState = {status: "loading"};
++const names: Record<Panel, string> = {packages: "Plugin packages", skills: "Skill source editor", extensions: "MCP, tools & connections",
++  instructions: "Instructions & references", engine: "Engine settings", legacy: "Other Customize workflows", hosted: "Hosted skill governance"};
++
++export function NativeCustomize(props: Props) {
++  const project = props.project;
++  const owner = project ? nativeOwnerKey({serviceInstanceId: props.serviceInstanceId, projectId: project.id, projectRevision: project.revision},
++    [project.primary_root, project.environment]) : JSON.stringify([props.serviceInstanceId, null]);
++  return <CustomizeOwner key={owner} {...props}/>;
++}
++
++function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance}: Props) {
++  const [kind, setKind] = useState<NativeKind>("plugin"), [query, setQuery] = useState("");
++  const [scope, setScope] = useState("project"), [expanded, setExpanded] = useState(false), [limit, setLimit] = useState(50);
++  const [pluginRead, setPluginRead] = useState<ReadState>(waiting), [skillRead, setSkillRead] = useState<ReadState>(waiting);
++  const [refresh, setRefresh] = useState(0), [selected, setSelected] = useState<NativeEntry | null>(null);
++  const [panel, setPanel] = useState<Panel | null>(null), [visited, setVisited] = useState<Panel[]>([]);
++  const detailHeading = useRef<HTMLHeadingElement>(null), detailOrigin = useRef<HTMLElement | null>(null);
++  const back = useRef<HTMLButtonElement>(null), origin = useRef<HTMLElement | null>(null), pageHeading = useRef<HTMLHeadingElement>(null);
++  const admitted = !!(project && !project.archived && connected && serviceInstanceId && gateway.workbench);
++  const fencedGateway = useMemo(() => admitted ? gateway : {...gateway, workbench: undefined}, [admitted, gateway]);
++  const hostedMatches = hostedGovernanceMatches(hostedGovernance, serviceInstanceId, project, connected);
++  const readOwner = useMemo(() => project ? {serviceInstanceId, projectId: project.id, projectRevision: project.revision} : null, [serviceInstanceId, project?.id, project?.revision]);
++  useEffect(() => {
++    let active = true;
++    setPluginRead(waiting); setSkillRead(waiting); setSelected(null);
++    if (!admitted || !readOwner || !gateway.workbench) return () => { active = false; };
++    const owner = readOwner;
++    const transport = gateway.workbench;
++    const read = async (resource: NativeKind, set: (state: ReadState) => void) => {
++      try {
++        const response = await transport("GET", nativeCatalogPath(resource, owner), undefined, () => active);
++        if (active) set({status: "ready", catalog: decodeNativeCatalog(resource, response, owner)});
++      } catch (cause) {
++        if (active) set({status: "error", error: cause instanceof Error ? cause.message : "The catalog could not be read."});
++      }
++    };
++    void read("plugin", setPluginRead); void read("skill", setSkillRead);
++    return () => { active = false; };
++  }, [admitted, gateway.workbench, readOwner, refresh]);
++  useEffect(() => { setLimit(50); }, [kind, query]);
++  useEffect(() => { if (panel) back.current?.focus(); }, [panel]);
++  useEffect(() => { if (selected) detailHeading.current?.focus(); }, [selected]);
++  const openPanel = (next: Panel) => {
++    origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
++    setVisited(value => value.includes(next) ? value : [...value, next]); setPanel(next); setSelected(null);
++  };
++  const returnToCatalog = () => {
++    setPanel(null); setRefresh(value => value + 1);
++    requestAnimationFrame(() => {
++      if (origin.current?.isConnected) origin.current.focus(); else pageHeading.current?.focus();
++    });
++  };
++  const current = kind === "plugin" ? pluginRead : skillRead;
++  const catalog = admitted ? current.catalog : undefined;
++  const filtered = filterNativeEntries(catalog?.entries ?? [], query);
++  const present = filtered.filter(row => row.present);
++  const sidePlugins = admitted ? pluginRead.catalog?.entries.filter(row => row.present) ?? [] : [];
++  const title = kind === "plugin" ? "Plugins" : "Skills";
++  const manager: Panel = kind === "plugin" ? "packages" : "skills";
++  const readMessage = !project ? "Choose a project to inspect its resource catalog. No global project is selected for you."
++    : project.archived ? "This project is archived. Restore it through Projects before managing resources."
++    : !admitted ? "Connect to the current service to read the catalog." : null;
++
++  function card(row: NativeEntry) {
++    return <button type="button" key={row.key} className="native-customize-card" onClick={() => { detailOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected(row); }}
++      aria-label={row.name + ", " + row.state}>
++      <span aria-hidden="true" className="native-customize-icon">{row.kind === "plugin" ? <Package size={19}/> : <BookOpen size={19}/>}</span>
++      <span><strong>{row.name}</strong><small>{row.description || row.id}</small><small>{row.state}</small></span>
++      {row.present && <Check size={14} aria-hidden="true"/>}
++    </button>;
++  }
++  return <section className="native-customize" aria-label="Customize">
++    <aside className="native-customize-sidebar">
++      <div className="native-customize-brand"><span aria-hidden="true">V</span> Customize</div>
++      <nav aria-label="Customize pages">
++        {(["plugin", "skill"] as const).map(value => <button type="button" key={value} aria-current={kind === value ? "page" : undefined}
++          onClick={() => { setKind(value); setScope("project"); setSelected(null); setPanel(null); setRefresh(value => value + 1); }}>
++          {value === "plugin" ? <Package size={16}/> : <BookOpen size={16}/>} {value === "plugin" ? "Plugins" : "Skills"}
++        </button>)}
++      </nav>
++      <h2>Registered plugins</h2>
++      {readMessage ? <p>{readMessage}</p> : pluginRead.status === "loading" ? <p role="status">Loading registrations…</p>
++        : pluginRead.status === "error" ? <p>Plugin registrations unavailable</p> : sidePlugins.length === 0 ? <p>No plugin packages registered</p> : null}
++      <ul>{sidePlugins.slice(0, 50).map(row => <li key={row.key}><button type="button" onClick={() => {setKind("plugin"); setSelected(row); setPanel(null);}}>
++        {row.name}{row.enabled === false ? " · disabled" : ""}
++      </button></li>)}</ul>
++      {sidePlugins.length > 50 && <p>Search the Plugins catalog to inspect all {sidePlugins.length} registrations.</p>}
++      <nav aria-label="Customize controls">
++        {(["extensions", "instructions", "engine", "legacy", "hosted"] as const).map(value => <button type="button" key={value}
++          onClick={() => openPanel(value)}>{names[value]}</button>)}
++      </nav>
++      {project && <p className="native-customize-owner">Project: {project.name}</p>}
++    </aside>
++    <div className="native-customize-main">
++      <div hidden={panel !== null} inert={panel !== null}>
++        <header><div><h1 ref={pageHeading} tabIndex={-1}>{title}</h1><p>{kind === "plugin" ? "Connect packages and tools to Veyra" : "Extend Veyra with project skills"}</p></div>
++          <div className="native-customize-actions">
++            <label><Search size={14} aria-hidden="true"/><span className="native-customize-sr">Search {title.toLowerCase()}</span>
++              <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={"Search " + title.toLowerCase()}/></label>
++            <button type="button" aria-label={"Refresh " + title.toLowerCase()} onClick={() => setRefresh(value => value + 1)} disabled={!admitted || current.status === "loading"}><RefreshCw size={16}/></button>
++            <button type="button" aria-label="Customize settings" onClick={() => openPanel("extensions")}><Settings2 size={16}/></button>
++            <button type="button" className="native-customize-add" onClick={() => openPanel(manager)} disabled={!admitted}><Plus size={14}/> Add</button>
++          </div>
++        </header>
++        {readMessage && <p role="status" className="native-customize-message">{readMessage}</p>}
++        {admitted && current.status === "loading" && <p role="status" className="native-customize-message">Loading {title.toLowerCase()}…</p>}
++        {admitted && current.status === "error" && <div role="alert" className="native-customize-message"><p>{current.error}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Retry catalog</button></div>}
++        {admitted && catalog && <>
++          {kind === "skill" && <section aria-label="Present project skill sources" className="native-customize-installed">
++            <h2>Project skill sources</h2><p>Presence on disk does not establish engine activation. Select deliberate skill attachments in the session composer after engine discovery.</p>
++            <div className="native-customize-grid">{(expanded ? present.slice(0, 256) : present.slice(0, 6)).map(card)}</div>
++            {present.length > 6 && <button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? "Show fewer" : "See more project sources"}</button>}
++          </section>}
++          {!catalog.supported && <p role="status" className="native-customize-message">{catalog.reason || "This environment does not support guarded skill editing."}</p>}
++        </>}
++        <div className="native-customize-scopes" role="group" aria-label="Catalog scope">
++          {["project", "public", "personal", "system"].map(value => <button type="button" key={value} aria-pressed={scope === value}
++            onClick={() => {setScope(value); setSelected(null);}}>{value === "project" ? project?.name || "Project" : value[0].toUpperCase() + value.slice(1)}</button>)}
++        </div>
++        {scope !== "project" ? <p role="status" className="native-customize-message">
++          {scope[0].toUpperCase() + scope.slice(1)} catalog is unavailable through the current native resource owner. No project resource is relabelled into this scope.
++        </p> : admitted && current.status === "ready" && catalog && <section aria-label={"Project " + title.toLowerCase() + " catalog"}>
++          <h2>{kind === "plugin" ? "Project registrations" : "Project sources"}</h2>
++          <div className="native-customize-grid">{filtered.slice(0, limit).map(card)}</div>
++          {filtered.length === 0 && <p className="native-customize-message">{query ? "No matching resources." : "No resources were returned by this project owner."}</p>}
++          {filtered.length > limit && <button type="button" onClick={() => setLimit(value => value + 50)}>Show more catalog entries ({filtered.length - limit} remaining)</button>}
++          <button type="button" onClick={() => openPanel(manager)} disabled={!admitted}>{kind === "plugin" ? "Discover local packages & manage registrations" : "Open source editor"}</button>
++        </section>}
++        {selected && <section className="native-customize-detail" aria-label={"Details for " + selected.name}>
++          <button type="button" onClick={() => {setSelected(null); requestAnimationFrame(() => detailOrigin.current?.focus());}} aria-label="Close resource details">Close</button>
++          <h2 ref={detailHeading} tabIndex={-1}>{selected.name}</h2><p>{selected.description}</p><p>{selected.state}</p><p>{selected.activation}</p>
++          {selected.path && <p className="native-customize-path">{selected.path}</p>}{selected.reason && <p>{selected.reason}</p>}
++          <button type="button" disabled={!admitted} onClick={() => openPanel(selected.kind === "plugin" ? "packages" : "skills")}>Open existing management controls</button>
++        </section>}
++      </div>
++      {panel && <header className="native-customize-manager-heading"><button ref={back} type="button" onClick={returnToCatalog}><ArrowLeft size={16}/> Back to catalog</button><h1>{names[panel]}</h1></header>}
++      {/* Keep visited mutation owners alive while changing presentation; their original ledgers remain authoritative. */}
++      {visited.map(value => <div key={value} hidden={panel !== value} inert={panel !== value} className="native-customize-manager">
++        <Suspense fallback={<p role="status">Opening {names[value]}…</p>}>
++          {value === "legacy" ? renderLegacyWorkflows(fencedGateway)
++            : value === "hosted" ? hostedMatches ? <div key={JSON.stringify([hostedGovernance?.actorId, hostedGovernance?.installationId, hostedGovernance?.hostedProjectId])}>{hostedGovernance?.content}</div> : <div role="status">
++              <h2>Hosted skill governance is unavailable</h2><p>Archive, restore, proposal review, synthesis and hosted activation require an authenticated bridge to their existing API owner. Native file removal is not archive. No request was submitted.</p>
++            </div>
++            : !project ? <p role="status">Choose a project to use {names[value]}.</p>
++            : value === "packages" ? <Packages gateway={fencedGateway} project={project} connected={admitted}/>
++            : value === "skills" ? <Skills gateway={fencedGateway} project={project} connected={admitted}/>
++            : value === "extensions" ? <Extensions gateway={fencedGateway} project={project} connected={admitted}/>
++            : value === "instructions" ? <Instructions gateway={fencedGateway} project={project} connected={admitted}/>
++            : <EngineSettings gateway={fencedGateway} project={project} connected={admitted}/>}
++        </Suspense>
++      </div>)}
++    </div>
++  </section>;
++}
+diff --git a/apps/web/src/features/customize/native-customize.css b/apps/web/src/features/customize/native-customize.css
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/native-customize.css
+@@ -0,0 +1,49 @@
++.native-customize { display: flex; flex-wrap: wrap; width: 100%; height: 100%; min-height: 0; min-width: 0; overflow: auto; background: var(--canvas); color: var(--text); font: inherit; }
++.native-customize [hidden] { display: none !important; }
++.native-customize button, .native-customize input { font: inherit; color: inherit; }
++.native-customize button { cursor: pointer; border: 1px solid transparent; border-radius: 8px; padding: 8px 11px; background: transparent; text-align: left; overflow-wrap: anywhere; }
++.native-customize button:hover { background: var(--control); }
++.native-customize button:disabled { cursor: not-allowed; opacity: .55; }
++.native-customize :is(button,input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.native-customize-sidebar { flex: 1 1 14rem; max-width: 22rem; min-width: 0; padding: 16px 12px; background: var(--sidebar); border-right: 1px solid var(--border); }
++.native-customize-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; padding: 4px 10px 18px; }
++.native-customize-brand > span { color: var(--accent); font-size: 22px; font-weight: 800; }
++.native-customize-sidebar nav { display: grid; gap: 4px; }
++.native-customize-sidebar nav button { display: flex; align-items: center; gap: 10px; width: 100%; }
++.native-customize-sidebar button[aria-current=page] { background: var(--control); }
++.native-customize h2 { font-size: .95rem; font-weight: 600; }
++.native-customize-sidebar h2 { margin: 24px 10px 10px; font-size: .8rem; color: var(--muted); }
++.native-customize-sidebar p { color: var(--muted); font-size: .8rem; line-height: 1.5; padding: 0 10px; }
++.native-customize-sidebar ul { margin: 0 0 24px; padding: 0; list-style: none; max-height: 17rem; overflow: auto; }
++.native-customize-sidebar li button { width: 100%; }
++.native-customize-owner { overflow-wrap: anywhere; margin-top: 24px; }
++.native-customize-main { flex: 999 1 38rem; min-width: min(100%, 22rem); padding: clamp(16px, 3vw, 40px); overflow-wrap: anywhere; }
++.native-customize-main > div:not(.native-customize-manager), .native-customize-manager-heading { max-width: 56rem; margin-inline: auto; }
++.native-customize-main header { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
++.native-customize h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
++.native-customize-main header p, .native-customize-installed > p { color: var(--muted); font-size: .85rem; line-height: 1.6; }
++.native-customize-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; }
++.native-customize-actions label { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 7px 10px; max-width: 100%; }
++.native-customize-actions input { width: 11rem; min-width: 0; background: transparent; border: 0; outline-offset: 5px; }
++.native-customize-actions button { display: inline-flex; align-items: center; gap: 6px; }
++.native-customize-actions .native-customize-add { background: var(--text); color: var(--canvas); border-radius: 999px; padding-inline: 17px; }
++.native-customize-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); column-gap: 28px; row-gap: 4px; }
++.native-customize-card { display: flex; align-items: center; gap: 12px; min-width: 0; width: 100%; }
++.native-customize-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; color: var(--accent); background: var(--control); border-radius: 10px; }
++.native-customize-card > span:nth-child(2) { min-width: 0; flex: 1; }
++.native-customize-card strong, .native-customize-card small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
++.native-customize-card strong { font-size: .9rem; font-weight: 600; }
++.native-customize-card small { color: var(--muted); font-size: .75rem; line-height: 1.6; }
++.native-customize-installed { margin-bottom: 24px; }
++.native-customize-installed h2 { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
++.native-customize-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-block: 18px; }
++.native-customize-scopes button { border-radius: 999px; font-size: .8rem; max-width: 100%; }
++.native-customize-scopes button[aria-pressed=true] { background: var(--control); }
++.native-customize-message { color: var(--muted); line-height: 1.6; margin-block: 20px; }
++.native-customize-detail { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 20px; }
++.native-customize-path { font-family: Cascadia Mono, Consolas, monospace; overflow-wrap: anywhere; }
++.native-customize-manager { min-width: 0; }
++.native-customize-manager-heading button { display: flex; align-items: center; gap: 8px; }
++.native-customize-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
++@media (max-width: 900px) { .native-customize-sidebar { max-width: none; flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--border); } .native-customize-sidebar ul { max-height: 7rem; } .native-customize-sidebar nav { grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); } }
++@media (prefers-reduced-motion: reduce) { .native-customize *, .native-customize *::before, .native-customize *::after { scroll-behavior: auto; animation: none; transition: none; } }
+diff --git a/apps/web/src/features/customize/nativeCatalog.node.mjs b/apps/web/src/features/customize/nativeCatalog.node.mjs
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/nativeCatalog.node.mjs
+@@ -0,0 +1,65 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { decodeNativeCatalog, filterNativeEntries, hostedGovernanceMatches, nativeCatalogPath, nativeOwnerKey } from "./nativeCatalog.ts";
++const scope = {serviceInstanceId: "service-a", projectId: "project-a", projectRevision: 7};
++const plugin = (extra = {}) => ({id: "review-tools", selected_sha256: "a".repeat(64), enabled: false, removed: false,
++  versions: [{sha256: "a".repeat(64), manifest: {id: "review-tools", version: "1.2.3", license: "MIT"}}],
++  activation: "registered; engine restart and real inventory observation required", ...extra});
++const registry = (packages = [plugin()]) => ({service_instance_id: scope.serviceInstanceId, project_id: scope.projectId,
++  project_revision: scope.projectRevision, revision: 3, restart_required: true, engine_stopped: true, packages});
++const source = (extra = {}) => ({id: "release", name: "Release", description: "Real project source",
++  path: ".agents/skills/release/SKILL.md", content: "# Source", editable: true, reason: null, ...extra});
++const workspace = (skills = [source()]) => ({service_instance_id: scope.serviceInstanceId, project_id: scope.projectId,
++  project_revision: scope.projectRevision, revision: "revision", supported: true, reason: null, skills});
++test("native paths retain exact project revision without synthetic global ownership", () => {
++  const params = new URL("https://fixture.invalid" + nativeCatalogPath("skill", {...scope, projectId: "id/?x"})).searchParams;
++  assert.equal(params.get("project_id"), "id/?x"); assert.equal(params.get("project_revision"), "7");
++  assert.throws(() => nativeCatalogPath("skill", {...scope, projectId: ""}), /exact native/);
++});
++test("disabled stays registered; removed retains versions without claiming activation", () => {
++  const disabled = decodeNativeCatalog("plugin", registry(), scope).entries[0];
++  assert.equal(disabled.present, true); assert.equal(disabled.enabled, false); assert.equal(disabled.state, "Registered · disabled");
++  assert.match(disabled.activation, /inventory observation required/);
++  const removed = decodeNativeCatalog("plugin", registry([plugin({removed: true})]), scope).entries[0];
++  assert.equal(removed.present, false); assert.match(removed.state, /versions retained/);
++});
++test("project source presence and read-only reasons never imply enabled or engine loaded", () => {
++  const row = decodeNativeCatalog("skill", workspace([source({editable: false, reason: "Duplicate source ID"})]), scope).entries[0];
++  assert.equal(row.present, true); assert.equal(row.enabled, null); assert.match(row.state, /read-only/);
++  assert.equal(row.reason, "Duplicate source ID"); assert.match(row.activation, /not reported/);
++});
++test("cross-service cross-project and stale revision snapshots fail closed", () => {
++  for (const value of [{...registry(), service_instance_id: "other"}, {...registry(), project_id: "other"}, {...registry(), project_revision: 8}]) {
++    assert.throws(() => decodeNativeCatalog("plugin", value, scope), /current service/);
++  }
++});
++test("inconsistent selected registration cannot be displayed as installed", () => {
++  assert.throws(() => decodeNativeCatalog("plugin", registry([plugin({selected_sha256: "b".repeat(64)})]), scope), /selected plugin version/);
++  assert.throws(() => decodeNativeCatalog("plugin", registry([plugin(), plugin()]), scope), /duplicate/);
++});
++test("alternate skill sources remain distinct while duplicate physical sources are rejected", () => {
++  const value = workspace([source(), source({path: ".opencode/skills/release/SKILL.md", editable: false})]);
++  assert.equal(decodeNativeCatalog("skill", value, scope).entries.length, 2);
++  assert.throws(() => decodeNativeCatalog("skill", workspace([source(), source()]), scope), /duplicate/);
++});
++test("unsupported snapshots remain unavailable and malformed replies are not empty success", () => {
++  const result = decodeNativeCatalog("skill", {...workspace([]), supported: false, reason: "WSL not qualified"}, scope);
++  assert.equal(result.supported, false); assert.equal(result.reason, "WSL not qualified");
++  assert.throws(() => decodeNativeCatalog("skill", {...workspace(), skills: undefined}, scope), /incomplete/);
++});
++test("filtering and owner keys preserve original records and actual service boundaries", () => {
++  const rows = decodeNativeCatalog("plugin", registry(), scope).entries, original = JSON.stringify(rows);
++  assert.equal(filterNativeEntries(rows, "REVIEW").length, 1); assert.equal(filterNativeEntries(rows, "missing").length, 0);
++  assert.equal(JSON.stringify(rows), original);
++  assert.notEqual(nativeOwnerKey(scope, {kind: "windows"}), nativeOwnerKey({...scope, serviceInstanceId: "b"}, {kind: "windows"}));
++});
++
++test("hosted composition admits explicit null only with actual actor installation and current native service", () => {
++  const binding = {serviceInstanceId: "service-a", projectId: null, projectRevision: null, actorId: "actor",
++    installationId: "installation", hostedProjectId: null};
++  assert.equal(hostedGovernanceMatches(binding, "service-a", null, true), true);
++  assert.equal(hostedGovernanceMatches({...binding, projectId: "global-default"}, "service-a", null, true), false);
++  assert.equal(hostedGovernanceMatches(binding, "service-b", null, true), false);
++  assert.equal(hostedGovernanceMatches({...binding, actorId: ""}, "service-a", null, true), false);
++  assert.equal(hostedGovernanceMatches(binding, "service-a", null, false), false);
++});
+diff --git a/apps/web/src/features/customize/nativeCatalog.ts b/apps/web/src/features/customize/nativeCatalog.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/nativeCatalog.ts
+@@ -0,0 +1,82 @@
++/** Read-only projections of the existing native owners; no resource registry. */
++export type NativeKind = "plugin" | "skill";
++export type NativeScope = Readonly<{ serviceInstanceId: string; projectId: string; projectRevision: number }>;
++export type NativeEntry = Readonly<{
++  key: string; id: string; kind: NativeKind; name: string; description: string;
++  present: boolean; enabled: boolean | null; state: string; activation: string;
++  version?: string; path?: string; reason?: string;
++}>;
++export type NativeCatalog = Readonly<{ entries: readonly NativeEntry[]; revision: string; supported: boolean; reason: string | null }>;
++const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
++const nonempty = (v: unknown): v is string => typeof v === "string" && !!v.trim();
++const integer = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
++function owner(v: unknown, scope: NativeScope): asserts v is Record<string, unknown> {
++  if (!record(v) || !nonempty(scope.serviceInstanceId) || !nonempty(scope.projectId) || !integer(scope.projectRevision)
++    || v.service_instance_id !== scope.serviceInstanceId || v.project_id !== scope.projectId || v.project_revision !== scope.projectRevision) {
++    throw new Error("The catalog does not match the current service and saved project revision.");
++  }
++}
++export function nativeCatalogPath(kind: NativeKind, scope: NativeScope): string {
++  if (!["plugin", "skill"].includes(kind) || !nonempty(scope.serviceInstanceId) || !nonempty(scope.projectId) || !integer(scope.projectRevision)) throw new Error("An exact native resource owner is required.");
++  const query = new URLSearchParams({project_id: scope.projectId, project_revision: String(scope.projectRevision)});
++  return (kind === "plugin" ? "/v1/plugin-packages/" : "/v1/extension-config/skill-workspace") + "?" + query;
++}
++export function decodeNativeCatalog(kind: NativeKind, value: unknown, scope: NativeScope): NativeCatalog {
++  owner(value, scope);
++  const seen = new Set<string>();
++  const unique = (key: string) => { if (seen.has(key)) throw new Error("The service returned duplicate catalog identities."); seen.add(key); };
++  if (kind === "plugin") {
++    if (!integer(value.revision) || typeof value.engine_stopped !== "boolean" || typeof value.restart_required !== "boolean"
++      || !Array.isArray(value.packages) || value.packages.length > 4096) throw new Error("The native plugin registry is incomplete.");
++    const entries = value.packages.map((row): NativeEntry => {
++      if (!record(row) || !nonempty(row.id) || !nonempty(row.selected_sha256) || typeof row.enabled !== "boolean"
++        || typeof row.removed !== "boolean" || !Array.isArray(row.versions) || !nonempty(row.activation)) throw new Error("Invalid plugin registration.");
++      const selected = row.versions.filter(v => record(v) && v.sha256 === row.selected_sha256);
++      if (selected.length !== 1 || !record(selected[0]) || !record(selected[0].manifest)) throw new Error("The selected plugin version is unavailable.");
++      const manifest = selected[0].manifest;
++      if (manifest.id !== row.id || !nonempty(manifest.version) || !nonempty(manifest.license)) throw new Error("The selected plugin manifest is inconsistent.");
++      unique(row.id);
++      return {key: "plugin:" + row.id, id: row.id, kind, name: row.id, version: manifest.version,
++        description: "Version " + manifest.version + " · " + manifest.license,
++        present: !row.removed, enabled: row.removed ? false : row.enabled,
++        state: row.removed ? "Unregistered · versions retained" : row.enabled ? "Registered" : "Registered · disabled",
++        activation: row.activation};
++    });
++    return {entries, revision: String(value.revision), supported: true, reason: null};
++  }
++  if (kind !== "skill" || typeof value.revision !== "string" || typeof value.supported !== "boolean"
++    || !(value.reason === undefined || value.reason === null || typeof value.reason === "string")
++    || !Array.isArray(value.skills) || value.skills.length > 256) throw new Error("The project skill source snapshot is incomplete.");
++  const entries = value.skills.map((row): NativeEntry => {
++    if (!record(row) || !nonempty(row.id) || typeof row.name !== "string" || typeof row.description !== "string"
++      || typeof row.path !== "string" || typeof row.content !== "string" || new TextEncoder().encode(row.content).length > 64 * 1024 || typeof row.editable !== "boolean"
++      || !(row.reason === undefined || row.reason === null || typeof row.reason === "string")
++      || ![".agents/skills/" + row.id + "/SKILL.md", ".opencode/skills/" + row.id + "/SKILL.md"].includes(row.path)) throw new Error("Invalid project skill source.");
++    unique(row.path);
++    return {key: "skill:" + row.path, id: row.id, kind, name: row.name || row.id, description: row.description,
++      present: true, enabled: null, path: row.path, reason: row.reason ?? undefined,
++      state: row.editable ? "Project source" : "Project source · read-only",
++      activation: "Engine activation is not reported by this source catalog."};
++  });
++  return {entries, revision: value.revision, supported: value.supported, reason: typeof value.reason === "string" ? value.reason : null};
++}
++export function filterNativeEntries(entries: readonly NativeEntry[], query: string): NativeEntry[] {
++  const term = query.trim().toLocaleLowerCase();
++  return entries.filter(row => !term || [row.name, row.id, row.description, row.state].some(v => v.toLocaleLowerCase().includes(term)));
++}
++export function nativeOwnerKey(scope: NativeScope, environment: unknown): string {
++  return JSON.stringify([scope.serviceInstanceId, scope.projectId, scope.projectRevision, environment]);
++}
++
++export type HostedGovernanceBinding = Readonly<{
++  serviceInstanceId: string; projectId: string | null; projectRevision: number | null;
++  actorId: string; installationId: string; hostedProjectId: string | null;
++}>;
++export function hostedGovernanceMatches(binding: HostedGovernanceBinding | undefined, service: string,
++  project: Readonly<{id: string; revision: number; archived: boolean}> | null, connected: boolean): boolean {
++  return !!(connected && nonempty(service) && binding && binding.serviceInstanceId === service
++    && nonempty(binding.actorId) && nonempty(binding.installationId)
++    && (binding.hostedProjectId === null || nonempty(binding.hostedProjectId))
++    && (project ? !project.archived && binding.projectId === project.id && binding.projectRevision === project.revision
++      : binding.projectId === null && binding.projectRevision === null));
++}
