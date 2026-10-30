@@ -1,0 +1,317 @@
+{
+  "frozenChains": [
+    {
+      "name": "waiting",
+      "commit": "597cf298fe5711dcee0d00aa2be1f9f4dc0e4209",
+      "patch": "candidate-original-manager.patch",
+      "patchSha256": "44166230a52b9760a9f3b8073810ae9a026e2a04716e2ebd43677c8b7b907610"
+    },
+    {
+      "name": "finite",
+      "commit": "3c0e7016dd26218cd81cfcda328d53aa0e6633cd",
+      "patch": "candidate-finite-program.patch",
+      "patchSha256": "10897bb951e72f3ed0961614b03d62505c29e7490449beb49b310e1e8001df3e"
+    }
+  ],
+  "overlapTargets": [
+    "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+    "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+    "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs"
+  ],
+  "characterRangeThreeWayMerge": "passed; two independent nonoverlapping frozen edit sets equal explicit composition",
+  "artifacts": 11,
+  "emitted": {
+    "js": 5,
+    "types": 5,
+    "failures": 0
+  },
+  "shellSyntax": 0,
+  "patches": [
+    {
+      "base": "root",
+      "patch": "candidate-composed-root.patch",
+      "targets": 11,
+      "sha256": "e1baf7a784819e70b99be6b87906d7e220158e2a85f3543a8cae3c0498f912b0",
+      "bytes": 75345
+    },
+    {
+      "base": "after-waiting",
+      "patch": "candidate-composed-after-waiting.patch",
+      "targets": 5,
+      "sha256": "5bc8f5408a2ecd7883ed5550810abd28d4e12ba1ef646bebe79b1ea20968e6cc",
+      "bytes": 32390
+    },
+    {
+      "base": "after-finite",
+      "patch": "candidate-composed-after-finite.patch",
+      "targets": 9,
+      "sha256": "0f95b4fc8dc57e4eb91c7fbd5847cc31648927f775efb89c9aae73233cef1225",
+      "bytes": 48630
+    }
+  ],
+  "targets": [
+    {
+      "target": "scripts/runtime-entrypoint.sh",
+      "rootPreimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "frozenCommonPreimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "runtime-entrypoint-candidate.proposal.sh",
+      "mergedPostimageSha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02",
+      "bytes": 5138,
+      "waitingPreimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "waitingPostimageSha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "rootPreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "frozenCommonPreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-composed-bootstrap.proposal.mjs",
+      "mergedPostimageSha256": "a2b38ee4a33f6cecf98b6861368a6aa21b36e501b25bf1166ee94c1d2f1509cd",
+      "bytes": 10266,
+      "waitingPreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "waitingPostimageSha256": "2bbd3e954e5af493ad8d6c30e8b5b55e9c2d0c5af74a1ea1d03aa0377bb63eea",
+      "finitePreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "finitePostimageSha256": "834faab308463699f0a4879b837e61430fb7823e800dc9e4fee3ace888fb0aec",
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "rootPreimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "frozenCommonPreimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-carrier-readiness.d.mts",
+      "mergedPostimageSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "bytes": 2843,
+      "waitingPreimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "waitingPostimageSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "rootPreimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "frozenCommonPreimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-carrier-readiness.proposal.mjs",
+      "mergedPostimageSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "bytes": 12399,
+      "waitingPreimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "waitingPostimageSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "rootPreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "frozenCommonPreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-composed-loopback.d.mts",
+      "mergedPostimageSha256": "2f9a03f015a40194aac56a7b9722b5421c7bc32bcff99a88e2106e8dbc8921dd",
+      "bytes": 1485,
+      "waitingPreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "waitingPostimageSha256": "bce2607d5962962df4d73a8183f0da4ea968ef2d4907b9fd0b1ac790b5cc2e34",
+      "finitePreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "finitePostimageSha256": "3ab1a6f8dc9d72ee8cf7861a7de9679303c3c199e08f8e098a6e3162a00f8e87",
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "rootPreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "frozenCommonPreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-composed-loopback.proposal.mjs",
+      "mergedPostimageSha256": "3c5028809396e146bd547cdc3c5d06ed32f596e73eadf050a13d912210a38046",
+      "bytes": 8247,
+      "waitingPreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "waitingPostimageSha256": "f435ebda2f555382d7c9e1c34508d4ff1c8747039f7b1adca98ee4d13f745c77",
+      "finitePreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "finitePostimageSha256": "280a1dc1f5afdffa10d9c904338720759f83b03a3551389ee48ad20ce2ead626",
+      "rootPreimageExists": true
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "rootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "frozenCommonPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-original-manager.d.mts",
+      "mergedPostimageSha256": "4cced16b0071ca83916ffa5271f62c649bde5bb72e3620dbd227c7891a6856ba",
+      "bytes": 1312,
+      "waitingPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "waitingPostimageSha256": "4cced16b0071ca83916ffa5271f62c649bde5bb72e3620dbd227c7891a6856ba",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": false
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "rootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "frozenCommonPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-original-manager.proposal.mjs",
+      "mergedPostimageSha256": "3b53980ec1288d21c77911ab852508afc51d660dbda1f139abc593aac906e49b",
+      "bytes": 26084,
+      "waitingPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "waitingPostimageSha256": "3b53980ec1288d21c77911ab852508afc51d660dbda1f139abc593aac906e49b",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": false
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+      "rootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "frozenCommonPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-response-program.d.mts",
+      "mergedPostimageSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "bytes": 1278,
+      "waitingPreimageSha256": null,
+      "waitingPostimageSha256": null,
+      "finitePreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "finitePostimageSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "rootPreimageExists": false
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+      "rootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "frozenCommonPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "candidate-response-program.proposal.mjs",
+      "mergedPostimageSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "bytes": 11948,
+      "waitingPreimageSha256": null,
+      "waitingPostimageSha256": null,
+      "finitePreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "finitePostimageSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "rootPreimageExists": false
+    },
+    {
+      "target": "services/ingenium-api/scripts/runtime-manager.ts",
+      "rootPreimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "frozenCommonPreimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "matchesFrozenCommonPreimage": true,
+      "mergedSource": "runtime-manager-candidate-waiting.proposal.ts",
+      "mergedPostimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "bytes": 29102,
+      "waitingPreimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "waitingPostimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "finitePreimageSha256": null,
+      "finitePostimageSha256": null,
+      "rootPreimageExists": true
+    }
+  ],
+  "actualRootApplyCheck": {
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "writes": 7,
+  "sourceOnly": true,
+  "runtimeCasesRun": 0,
+  "rootSourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "rootCommit": "3e688e255ebf90c085b698ce56d390a151542ae0",
+  "validation": {
+    "sourceFixturePass": 48,
+    "sourceFixtureFail": 0,
+    "command": "/home/brajam/.local/bin/node --experimental-vm-modules --experimental-strip-types --test docs/workstreams/dot/candidate-composed.test.mjs",
+    "testSourceSha256": "89fbd736f00520a14fc062fa32498f277f3f622f939f8e4aa8049441bda8506e",
+    "limits": "29 finite-response source fixtures resolve composed loopback,17 retained-manager fixtures resolve composed loopback plus original actual carrier,2 composition/current-Core original-lease refusal controls. Synthetic VM/in-memory transport, no actual manager/auth/credential/model/native/runtime/18cases."
+  },
+  "leaseSourceReview": [
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "sha256": "17d8b464c6fd14f54ab559773a2b1352967354c87dedb96445594478ffa68534",
+      "anchors": [
+        {
+          "line": 16,
+          "text": " const candidateLeases=new WeakMap();"
+        },
+        {
+          "line": 84,
+          "text": "    const lease=Object.freeze({});candidateLeases.set(lease,{db,admission:Object.freeze(structuredClone(a)),intent,selectionSha256});return lease;"
+        },
+        {
+          "line": 88,
+          "text": "  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');candidateLifecycle.requirePrepared(r.run_id);return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},"
+        },
+        {
+          "line": 91,
+          "text": "  candidateCreateIntent:(lease,context,handle)=>candidateLifecycle.createIntent(lease,context,handle),"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+      "sha256": "2d153d5b873f44e643cb8272a11448c04f52f738939f9e16124c5f385446c604",
+      "anchors": [
+        {
+          "line": 38,
+          "text": " function lease(key){const saved=key&&candidateLeases.get(key);if(!saved||saved.db!==db)deny(\"CORE131_ORIGINAL_LEASE_UNAVAILABLE\");const value=prepared(saved.intent.run.runId);if(value.r.admission_json!==JSON.stringify(saved.admission)||value.c.selection_sha256!==saved.selectionSha256||candidateInertIntentHash(saved.intent)!==value.c.candidate_intent_hash)deny(\"CORE131_ORIGINAL_LEASE_UNAVAILABLE\");return value;}"
+        },
+        {
+          "line": 51,
+          "text": "  createIntent(key,context,handle){const value=lease(key);return transition(value.c.run_id,context,handle,\"current\",\"requireOriginalCandidateCreateIntent\",\"create_intent\",facts=>{exact(facts,[\"createEffectHash\"]);return{create_effect_hash:hash(facts.createEffectHash)};});},"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+      "sha256": "422623cf72e9242d58fc17760c70800f721f4a4df387da97819f7091e3ad56d2",
+      "anchors": []
+    }
+  ],
+  "remaining": [
+    "Root actual API owner retains original opaque prepare lease by run in SAME Core/database instance; no JSON/row/restart reconstruction, adoption or reprepare",
+    "Fixed HMAC verifier/current/control/CAS/auth transport and source/image/compiler/copier closure",
+    "Candidate-only original credential/frame/material issuer and same retained duplex delivery remain closed",
+    "Independent qualified original namespace/wait/EOF retirement and descendant/fast-exit runtime proof",
+    "Actual pinned binary/parser/tool/Core verifier/native18cases, independent image approval, Windows/cluster and phases1-7 remain open"
+  ],
+  "compositionDiagnostics": [
+    "Initial generator uniqueness assertion matched both activate method and proxy call; narrowed exact method anchor before output was accepted. Frozen bytes untouched.",
+    "Incremental overlay uses full common baseline plus selected first chain, preserving existing-file vs new-file semantics. No interim patch was applied."
+  ],
+  "cleanup": {
+    "owner": "veyra-bot existing worker slice",
+    "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "existing authorized C-backed WSL",
+    "generatedPaths": [
+      "docs/workstreams/dot/README.md",
+      "docs/workstreams/dot/candidate-composed-after-finite.patch",
+      "docs/workstreams/dot/candidate-composed-after-waiting.patch",
+      "docs/workstreams/dot/candidate-composed-bootstrap.proposal.mjs",
+      "docs/workstreams/dot/candidate-composed-freeze.py",
+      "docs/workstreams/dot/candidate-composed-loopback.d.mts",
+      "docs/workstreams/dot/candidate-composed-loopback.proposal.mjs",
+      "docs/workstreams/dot/candidate-composed-root.patch",
+      "docs/workstreams/dot/candidate-composed.json",
+      "docs/workstreams/dot/candidate-composed.md",
+      "docs/workstreams/dot/candidate-composed.test.mjs"
+    ],
+    "regeneration": "python3 docs/workstreams/dot/candidate-composed-freeze.py; --check-only writes0; env original task coordination/dot and actual source root",
+    "protected": "Both frozen source/patch/preimage/receipt chains, actual Root canonical source/SQL131 postimage hardening, original tokens/credentials/lockfiles and failure witnesses",
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retainedConsumer": "Root exact source composition/integration/review; minimal3 merged sources,3 lossless application-path patches, generator/fixtures/hash lineage/receipt only",
+    "diskRecoveryClaim": null
+  },
+  "artifactWhitespace": {
+    "sourceDiffCheck": "Required unified-diff single-space blank context rows preserved; source/receipt diff checked separately",
+    "wrapperRecords": {
+      "candidate-composed-root.patch": [
+        6,
+        418
+      ],
+      "candidate-composed-after-finite.patch": [
+        6,
+        245
+      ],
+      "candidate-composed-after-waiting.patch": []
+    }
+  }
+}

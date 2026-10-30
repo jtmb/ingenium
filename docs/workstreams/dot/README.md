@@ -70,3 +70,5 @@ Finite positive candidate provider follow-on: [candidate-finite-program.md](cand
 SQL131 source proposal: [lifecycle and closed gates](candidate-lifecycle-sql131.md), [exact Root reader audit](candidate-lifecycle-reader-audit.md), [seven-target patch](candidate-lifecycle-sql131.patch), [receipt](candidate-lifecycle-sql131.json). 42/42 source fixtures; actual runtime/phase gates remain open.
 
 Original manager waiting/readiness: [source owner and exact HMAC/remaining gates](candidate-original-manager.md), [nine-target patch](candidate-original-manager.patch), [receipt](candidate-original-manager.json). Fresh same-child challenge; issuer and final empty-scope retirement remain closed.
+
+Lossless composition of frozen waiting/readiness and finite response: [lineage, apply paths and original-lease review](candidate-composed.md), [current-Root11-target patch](candidate-composed-root.patch), [receipt](candidate-composed.json). 48source fixtures; all actual18case/full-release gates remain open.

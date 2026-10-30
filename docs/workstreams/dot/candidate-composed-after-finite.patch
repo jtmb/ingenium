@@ -1,0 +1,275 @@
+diff --git a/scripts/runtime-entrypoint.sh b/scripts/runtime-entrypoint.sh
+--- a/scripts/runtime-entrypoint.sh
++++ b/scripts/runtime-entrypoint.sh
+@@ -21,6 +21,13 @@
+ fi
+ 
+ case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
++  candidate)
++    export OPENCODE_CONFIG_PROJECT_DISABLE="1"
++    export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
++    export OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/job-opencode.json"
++    unset OPENCODE_CONFIG_CONTENT
++    exec node /app/services/ingenium-api/dist/scripts/runtime-candidate-bootstrap.js
++    ;;
+   job)
+     export OPENCODE_CONFIG_PROJECT_DISABLE="1"
+     export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs b/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs
+--- a/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs
++++ b/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs
+@@ -30,7 +30,7 @@
+  const selected=candidateSelection(inputBinding),env={...environment,INGENIUM_API_URL:CANDIDATE_CORE_ORIGIN};
+  if(env.INGENIUM_JOB_RUN_ID!==selected.runId||env.INGENIUM_JOB_ATTEMPT_ID!==selected.attemptId)candidateDenied();
+  const custody=createOriginalJobCustody();let binding,loopback,control,material,initial,broker;
+- const carrier=createCandidateChildCarrier({input:stdin,output:stdout,binding:selected,onUnknown(){void custody.withdraw().catch(()=>{});}});
++ const carrier=createCandidateChildCarrier({input:stdin,output:stdout,binding:selected,onUnknown(){void custody.withdraw().catch(()=>{});},observeOriginalReadiness:()=>loopback.currentObservation()});
+  const authority=createOriginalJobAuthority({environment:env});
+  const current=async()=>{if(carrier.closed())candidateDenied();const expected=assertCandidateBootstrapAssignment(await authority.request("bootstrap-assignment"),binding,env);if(initial&&(hash(expected)!==hash(initial)))candidateDenied();if(material)verifyCandidateAgentMaterial(material,expected.binding,expected.agent);assertOriginalJobStaticFiles(expected.staticProfile,IMAGE_INPUTS);return expected;};
+  const withdraw=async reason=>{const stopping=custody.withdraw();const recorded=await authority.request("withdraw",{runId:binding.runId,attemptId:binding.attemptId,reason}).then(()=>true,()=>false);void stopping.catch(()=>{});return{withdrawalRecorded:recorded,leaderStopRequested:true,wholeContainerRetired:false};};
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts b/services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts
+--- a/services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts
++++ b/services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts
+@@ -14,6 +14,6 @@
+ export function decodedBody(value:unknown,limit?:number):Buffer;
+ export function candidateFrames(input:Readable):AsyncGenerator<unknown>;
+ export function candidateWriter(output:Writable,options?:{deadline?:number;now?():number}):(value:unknown)=>Promise<void>;
+-export function createCandidateChildCarrier(options:{input:Readable;output:Writable;binding:unknown;now?():number;onUnknown?(value:CandidateUnknown):void}):CandidateChildCarrier;
+-export function createCandidateManagerCarrier(options:{input:Readable;output:Writable;binding:unknown;now?():number;onUnknown(value:CandidateUnknown):void;onObservation(value:Readonly<CandidateLocalObservation & {type:"observation";binding:CandidateBinding}>):void|Promise<void>;forwardOriginalRpc(value:{binding:CandidateBinding;method:string;operation:string;body:Buffer}):Promise<CandidateOriginalResponse>}):Readonly<{started:Promise<void>;finished:Promise<void>;closed():boolean;writeOriginalReleasedMaterial(frame:CandidateMaterial):Promise<void>;stop():void}>;
++export function createCandidateChildCarrier(options:{input:Readable;output:Writable;binding:unknown;now?():number;onUnknown?(value:CandidateUnknown):void;observeOriginalReadiness?():CandidateLocalObservation|Promise<CandidateLocalObservation>}):CandidateChildCarrier;
++export function createCandidateManagerCarrier(options:{input:Readable;output:Writable;binding:unknown;now?():number;onUnknown(value:CandidateUnknown):void;onObservation(value:Readonly<CandidateLocalObservation & {type:"observation";binding:CandidateBinding}>):void|Promise<void>;forwardOriginalRpc(value:{binding:CandidateBinding;method:string;operation:string;body:Buffer}):Promise<CandidateOriginalResponse>}):Readonly<{started:Promise<void>;finished:Promise<void>;closed():boolean;refreshOriginalReadiness(nonce:string):Promise<Readonly<CandidateLocalObservation & {type:"readiness";binding:CandidateBinding;nonce:string}>>;writeOriginalReleasedMaterial(frame:CandidateMaterial):Promise<void>;stop():void}>;
+ export declare const CANDIDATE_FRAME_LIMIT:number,CANDIDATE_BODY_LIMIT:number,CANDIDATE_TOTAL_LIMIT:number,CANDIDATE_FRAME_COUNT:number;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-carrier.mjs b/services/ingenium-api/lib/dot-v2/candidate-carrier.mjs
+--- a/services/ingenium-api/lib/dot-v2/candidate-carrier.mjs
++++ b/services/ingenium-api/lib/dot-v2/candidate-carrier.mjs
+@@ -23,12 +23,13 @@
+ const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});void promise.catch(()=>{});return{promise,resolve,reject};};
+ /** Transport only: READY observations and DTOs never grant Core authority. EOF/error
+  * latches unknown and rejects every waiter; this carrier never retries or retires. */
+-export function createCandidateChildCarrier({input,output,binding,now=Date.now,onUnknown=()=>{}}){
++export function createCandidateChildCarrier({input,output,binding,now=Date.now,onUnknown=()=>{},observeOriginalReadiness}){
+  const selected=candidateSelection(binding,now()),write=candidateWriter(output,{deadline:selected.expiresAt,now}),material=deferred(),pending=new Map();let expected,initialized=false,observed=false,spent=false,delivered=false,closed=false,next=0;
+  const check=()=>{if(closed||now()>=selected.expiresAt)candidateDenied();};
+  const stop=error=>{if(closed)return;closed=true;initial.reject(error);material.reject(error);for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();onUnknown({code:"ORIGINAL_CANDIDATE_CHANNEL_UNKNOWN",runId:selected.runId,attemptId:selected.attemptId});};
+  const initial=deferred();const timer=setTimeout(()=>stop(Error("Original candidate deadline expired")),Math.max(1,selected.expiresAt-now()));timer.unref?.();
+  const pump=(async()=>{try{for await(const frame of candidateFrames(input)){check();if(!initialized){exact(frame,["type","binding"]);if(frame.type!=="init")candidateDenied();const incoming=candidateBinding(frame.binding,now());if(Object.keys(selected).some(key=>selected[key]!==incoming[key]))candidateDenied();expected=incoming;initialized=true;initial.resolve();continue;}
++ if(frame.type==="readiness-challenge"){exact(frame,["type","nonce"]);if(!observed||spent||typeof frame.nonce!=="string"||!hex.test(frame.nonce)||typeof observeOriginalReadiness!=="function")candidateDenied();const value=await observeOriginalReadiness();exact(value,["catalogSha256","trapAddress","proxyAddress","pid"]);if(value.catalogSha256!==expected.catalogSha256||value.trapAddress!=="127.0.0.1:39261"||value.proxyAddress!=="127.0.0.1:39262"||!Number.isSafeInteger(value.pid)||value.pid<=0)candidateDenied();check();await write({type:"readiness",binding:expected,nonce:frame.nonce,...value});continue;}
+  if(frame.type==="material"){exact(frame,["type","capability","agentMaterial"]);if(!observed||spent||typeof frame.capability!=="string"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(frame.capability))candidateDenied();spent=true;material.resolve(Object.freeze(frame));continue;}
+  exact(frame,["type","id","status","body"]);if(frame.type!=="response"||!Number.isSafeInteger(frame.id)||!pending.has(frame.id)||!Number.isInteger(frame.status)||frame.status<200||frame.status>599)candidateDenied();const item=pending.get(frame.id);pending.delete(frame.id);clearTimeout(item.timer);item.resolve({status:frame.status,body:decodedBody(frame.body)});
+  }throw Error("Original candidate attach EOF");}catch(error){initial.reject(error);stop(error);}finally{clearTimeout(timer);}})();void pump.catch(()=>{});
+@@ -42,15 +43,17 @@
+ /** Same retained original Docker attach owner calls this; forwarding must use its
+  * original Core HTTP owner + released candidate credential. No token/URL on wire. */
+ export function createCandidateManagerCarrier({input,output,binding,forwardOriginalRpc,onObservation,onUnknown,now=Date.now}){
+- const expected=candidateBinding(binding,now()),write=candidateWriter(output,{deadline:expected.expiresAt,now});let observed=false,spent=false,closed=false,last=0;const inflight=new Set();
+- const stop=()=>{if(closed)return;closed=true;onUnknown({code:"ORIGINAL_CANDIDATE_CHANNEL_UNKNOWN",runId:expected.runId,attemptId:expected.attemptId});};
++ const expected=candidateBinding(binding,now()),write=candidateWriter(output,{deadline:expected.expiresAt,now});let observed=false,spent=false,closed=false,last=0,readiness=null;const inflight=new Set();
++ const stop=()=>{if(closed)return;closed=true;if(readiness){clearTimeout(readiness.timer);readiness.reject(Error("Original candidate readiness unknown"));readiness=null;}onUnknown({code:"ORIGINAL_CANDIDATE_CHANNEL_UNKNOWN",runId:expected.runId,attemptId:expected.attemptId});};
+  const timer=setTimeout(stop,Math.max(1,expected.expiresAt-now()));timer.unref?.();
+  const started=write({type:"init",binding:expected});
+  const finished=(async()=>{await started;try{for await(const frame of candidateFrames(input)){if(closed||now()>=expected.expiresAt)candidateDenied();if(!observed){exact(frame,["type","binding","catalogSha256","trapAddress","proxyAddress","pid"]);if(frame.type!=="observation"||JSON.stringify(frame.binding)!==JSON.stringify(expected)||frame.catalogSha256!==expected.catalogSha256||frame.trapAddress!=="127.0.0.1:39261"||frame.proxyAddress!=="127.0.0.1:39262"||!Number.isSafeInteger(frame.pid)||frame.pid<=0)candidateDenied();observed=true;await onObservation(Object.freeze(structuredClone(frame)));continue;}
++ if(frame.type==="readiness"){exact(frame,["type","binding","nonce","catalogSha256","trapAddress","proxyAddress","pid"]);if(!readiness||frame.nonce!==readiness.nonce||JSON.stringify(frame.binding)!==JSON.stringify(expected)||frame.catalogSha256!==expected.catalogSha256||frame.trapAddress!=="127.0.0.1:39261"||frame.proxyAddress!=="127.0.0.1:39262"||!Number.isSafeInteger(frame.pid)||frame.pid<=0)candidateDenied();const pending=readiness;readiness=null;clearTimeout(pending.timer);pending.resolve(Object.freeze(structuredClone(frame)));continue;}
+  exact(frame,["type","id","method","operation","body"]);if(frame.type!=="request"||!spent||!Number.isSafeInteger(frame.id)||frame.id!==last+1||inflight.size>=8)candidateDenied();last=frame.id;operationRoute(frame.method,`/api/v1/runtime/job-runs/${expected.runId}/${frame.operation}`,expected.runId);const body=decodedBody(frame.body);if(frame.method==="GET"&&body.length)candidateDenied();
+  const task=(async()=>{const response=await forwardOriginalRpc({binding:expected,method:frame.method,operation:frame.operation,body});if(closed)return;if(!response||!Number.isInteger(response.status)||response.status<200||response.status>599||!Buffer.isBuffer(response.body)||response.body.length>CANDIDATE_BODY_LIMIT)candidateDenied();await write({type:"response",id:frame.id,status:response.status,body:response.body.toString("base64")});})();inflight.add(task);void task.catch(stop).finally(()=>inflight.delete(task));
+  }stop();}catch{stop();}finally{clearTimeout(timer);}})();void finished.catch(stop);
+  return Object.freeze({started,finished,closed:()=>closed,
++ async refreshOriginalReadiness(nonce){if(closed||!observed||spent||readiness||typeof nonce!=="string"||!hex.test(nonce)||now()>=expected.expiresAt)candidateDenied();const pending=deferred();pending.nonce=nonce;pending.timer=setTimeout(()=>stop(),Math.max(1,Math.min(3000,expected.expiresAt-now())));pending.timer.unref?.();readiness=pending;try{await write({type:"readiness-challenge",nonce});}catch{stop();}return pending.promise;},
+  // Root must perform its SQL131 fresh-original readiness/material CAS BEFORE this
+  // transport write. This method neither issues material nor validates authority.
+  async writeOriginalReleasedMaterial(frame){if(closed||!observed||spent||now()>=expected.expiresAt)candidateDenied();exact(frame,["capability","agentMaterial"]);if(typeof frame.capability!=="string"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(frame.capability))candidateDenied();spent=true;await write({type:"material",...frame});},
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts b/services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts
+--- a/services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts
++++ b/services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts
+@@ -5,4 +5,4 @@
+ export function candidateRequestBody(request:IncomingMessage,limit?:number):Promise<Buffer>;
+ export function candidateTrapHandler(options?:{now?():number;stage?():string;getProgram?():import("./candidate-response-program.mjs").CandidateResponseProgram|undefined}):Readonly<{handler(request:IncomingMessage,response:ServerResponse):Promise<void>;observations():unknown[]}>;
+ export function candidateProxyHandler(carrier:CandidateChildCarrier,options?:{getProgram?():import("./candidate-response-program.mjs").CandidateResponseProgram|undefined}):Readonly<{handler(request:IncomingMessage,response:ServerResponse):Promise<void>;activate(value:string):void;clear():void}>;
+-export function openCandidateLoopback(carrier:CandidateChildCarrier):Promise<Readonly<{observation:Readonly<CandidateLocalObservation>;activate(capability:string):void;configureOriginalProgram(value:unknown,original:{agentHash:string;projectId:string}):void;programSnapshot():unknown;observations():unknown[];close():Promise<void>}>>;
++export function openCandidateLoopback(carrier:CandidateChildCarrier):Promise<Readonly<{observation:Readonly<CandidateLocalObservation>;currentObservation():Readonly<CandidateLocalObservation>;activate(capability:string):void;configureOriginalProgram(value:unknown,original:{agentHash:string;projectId:string}):void;programSnapshot():unknown;observations():unknown[];close():Promise<void>}>>;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-loopback.mjs b/services/ingenium-api/lib/dot-v2/candidate-loopback.mjs
+--- a/services/ingenium-api/lib/dot-v2/candidate-loopback.mjs
++++ b/services/ingenium-api/lib/dot-v2/candidate-loopback.mjs
+@@ -34,5 +34,5 @@
+ /** Called only INSIDE the actual waiting child. No external interface/URL/port option. */
+ export async function openCandidateLoopback(carrier){const catalog=readCandidateCatalog(carrier.binding.catalogSha256);let stage="waiting",program;const getProgram=()=>program,proxy=candidateProxyHandler(carrier,{getProgram}),trap=candidateTrapHandler({stage:()=>stage,getProgram}),trapServer=createServer(trap.handler),proxyServer=createServer(proxy.handler);
+  for(const server of [trapServer,proxyServer]){server.maxConnections=8;server.requestTimeout=15000;server.headersTimeout=5000;server.keepAliveTimeout=1;server.maxHeadersCount=16;server.on("clientError",(_error,socket)=>socket.destroy());}
+- try{await listen(trapServer,39261);await listen(proxyServer,39262);return Object.freeze({observation:Object.freeze({catalogSha256:catalog.sha256,trapAddress:"127.0.0.1:39261",proxyAddress:"127.0.0.1:39262",pid:process.pid}),activate(capability){proxy.activate(capability);stage="executing";},configureOriginalProgram(value,original){exact(original,["agentHash","projectId"]);if(stage!=="executing"||program||trap.observations().length)candidateDenied();program=createCandidateResponseProgram(value,{binding:carrier.binding,...original});},programSnapshot:()=>program?.snapshot()??null,observations:trap.observations,async close(){stage="closed";program?.close();proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);}});}catch(error){proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);throw error;}
++ try{await listen(trapServer,39261);await listen(proxyServer,39262);return Object.freeze({observation:Object.freeze({catalogSha256:catalog.sha256,trapAddress:"127.0.0.1:39261",proxyAddress:"127.0.0.1:39262",pid:process.pid}),currentObservation(){if(stage!=="waiting"||carrier.closed())candidateDenied();for(const[server,port]of[[trapServer,39261],[proxyServer,39262]]){const address=server.address();if(!server.listening||!address||typeof address==="string"||address.address!=="127.0.0.1"||address.port!==port)candidateDenied();}const measured=readCandidateCatalog(carrier.binding.catalogSha256);return Object.freeze({catalogSha256:measured.sha256,trapAddress:"127.0.0.1:39261",proxyAddress:"127.0.0.1:39262",pid:process.pid});},activate(capability){proxy.activate(capability);stage="executing";},configureOriginalProgram(value,original){exact(original,["agentHash","projectId"]);if(stage!=="executing"||program||trap.observations().length)candidateDenied();program=createCandidateResponseProgram(value,{binding:carrier.binding,...original});},programSnapshot:()=>program?.snapshot()??null,observations:trap.observations,async close(){stage="closed";program?.close();proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);}});}catch(error){proxy.clear();await Promise.all([close(trapServer),close(proxyServer)]);throw error;}
+ }
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts b/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts
+@@ -0,0 +1,4 @@
++/** Fixed original manager only; no public API, injectable transport or positive factories. */
++export interface OriginalCandidateCustodyReceipt {readonly custodyId:string;readonly runId:string;readonly attemptId:string;readonly intentHash:string;readonly specHash:string;readonly childId:string;readonly childBirthHash:string;readonly childStartHash:string;readonly deadlineAt:string;}
++export interface CandidateManagerEnvelope {readonly observation:Readonly<{schemaVersion:1;domain:'candidate-observation-v1';kind:string;runId:string;attemptId:string;candidateIntentHash:string;specHash:string;selectionSha256:string;containerId:string|null;daemonId:string;childBirthHash:string|null;childStartHash:string|null;attachIdentityHash:string|null;deadlineAt:string;expectedRevision:number;observedAt:number;expiresAt:number;facts:Readonly<Record<string,unknown>>}>;readonly signature:string;}
++export function createOriginalCandidateWaitingOwner():Readonly<{launch(runId:string):Promise<OriginalCandidateCustodyReceipt>;readiness(custodyId:string):Promise<CandidateManagerEnvelope>;stoppedObservation(custodyId:string):Promise<CandidateManagerEnvelope>;retainedUnknown():readonly Readonly<{runId:string;custodyId:string;childId:string|null;unknown:string|null;retainedSlots:readonly string[];deadlineAt:string}>[]}>;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs b/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs
+@@ -0,0 +1,123 @@
++// Fixed original runtime-manager owner. Source proposal; no runtime executed.
++import {request as httpRequest} from 'node:http';
++import {createHash,randomBytes,createHmac} from 'node:crypto';
++import {PassThrough} from 'node:stream';
++import {loadManagerToken} from '../runtime-manager-auth.js';
++import {readWorkspaceMappings,runtimeStorageMappingHash} from '../runtime-manager-contract.js';
++import {hash as canonicalHash,publicContainer} from '../../../../packages/veyra-operations/core126-image-contract.mjs';
++import {readInstalledCandidateSource} from '../../../../packages/veyra-operations/core126-candidate-observation.mjs';
++import {assertCandidateInertIntentLive,candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
++import {createCandidateManagerCarrier} from './candidate-carrier.mjs';
++import {createCandidateDockerOutput} from './candidate-docker-stream.mjs';
++import {parseStrictJobJson} from './job-bootstrap-frame.mjs';
++const digest=v=>createHash('sha256').update(v).digest('hex');
++const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
++const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(v);
++const failure=code=>Object.assign(Error(code),{code,status:503});
++const must=(v,code='CANDIDATE_ORIGINAL_MANAGER_BINDING')=>{if(!v)throw failure(code);};
++const nonce=()=>randomBytes(32).toString('hex');
++const freeze=v=>Object.freeze(v);
++const keys=(v,k)=>must(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join('|')===[...k].sort().join('|'));
++const env=n=>{const v=process.env[n];must(typeof v==='string'&&v.length>0&&v===v.trim());return v;};
++const name=i=>'ingenium-job-'+i.run.runId.replaceAll('-','')+'-'+i.run.attemptId.replaceAll('-','');
++const childLabels=(i,intentHash,specHash)=>({'com.ingenium.managed':'job-run-manager','com.ingenium.job.run':i.run.runId,'com.ingenium.job.attempt':i.run.attemptId,'com.ingenium.job.id':i.run.jobId,'com.ingenium.job.spec':specHash,'com.ingenium.runtime.id':i.parent.runtimeId,'com.ingenium.runtime.organization':i.scope.organizationId,'com.ingenium.runtime.owner':i.scope.ownerUserId,'com.ingenium.runtime.project':i.scope.projectId,'com.ingenium.runtime.workspace':i.scope.workspaceId,'com.ingenium.runtime.storage':i.scope.bindingHash,'com.ingenium.runtime.security-epoch':String(i.scope.bindingEpoch),'com.ingenium.job.purpose':'candidate-inert-v1','com.ingenium.job.intent':intentHash});
++/** No caller-supplied docker/core/clock/factory/spec/ready ports. Module import is
++ * inert. Only this private manager entry opens its fixed socket and original Core. */
++export function createOriginalCandidateWaitingOwner(){
++ const managerToken=loadManagerToken(),base=new URL(env('INGENIUM_RUNTIME_API_URL'));
++ must(base.protocol==='http:'&&!base.username&&!base.password&&base.pathname==='/api/v1'&&!base.search&&!base.hash&&/^[a-z0-9][a-z0-9.-]*$/i.test(base.hostname));
++ const active=new Map(),byRun=new Map(),launching=new Set();
++ const observationKey=createHmac('sha256',managerToken).update('candidate-observation-v1/key\0').digest();
++ function authenticate(s,kind,facts,{retirement=false}={}){
++  const observedAt=Date.now(),expiresAt=retirement?observedAt+5000:Math.min(s.deadline,observedAt+5000);must(observedAt<expiresAt);
++  const observation=freeze({schemaVersion:1,domain:'candidate-observation-v1',kind,runId:s.runId,attemptId:s.intent.run.attemptId,candidateIntentHash:s.intentHash,specHash:s.specHash,selectionSha256:s.selectionSha256,containerId:s.childId??null,daemonId:s.intent.parent.daemonId,childBirthHash:s.birthHash??null,childStartHash:s.startHash??null,attachIdentityHash:s.attachHash??null,deadlineAt:s.intent.expiresAt,expectedRevision:s.revision,observedAt,expiresAt,facts});
++  // Private fixed owner only: no exported signer or injectable positive factory.
++  return freeze({observation,signature:createHmac('sha256',observationKey).update('candidate-observation-v1/payload\0').update(canonicalHash(observation)).digest('hex')});
++ }
++ // This separate candidate endpoint is NOT installed by the source proposal.
++ // Root must authenticate it and current/control against persisted SQL131. A404
++ // refuses before Docker; no production path or fallback is used.
++ async function core(runId,operation,body,deadline){
++  const u=new URL(base);u.pathname+='/internal/original-candidate-job-runs/'+runId+'/'+operation;
++  const response=await fetch(u,{method:body===undefined?'GET':'POST',redirect:'error',headers:{Authorization:'Bearer '+managerToken,Accept:'application/json',...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1,Math.min(10000,deadline-Date.now())))});
++  must(response.status===200,'CANDIDATE_CORE_OWNER_UNAVAILABLE');must(response.body);let size=0;const chunks=[];for await(const chunk of response.body){size+=chunk.length;must(size<=65536);chunks.push(chunk);}const value=parseStrictJobJson(Buffer.concat(chunks),65536);keys(value,['data']);return value.data;
++ }
++ function markUnknown(s,code){if(!s.unknown){s.unknown=code;s.unknownAt=Date.now();}s.ready=null;}
++ function live(s){must(!s.unknown&&Date.now()<s.deadline,'CANDIDATE_ORIGINAL_OUTCOME_UNKNOWN');}
++ // Retain actual request AND IncomingMessage for every exchange. Never reissue.
++ async function exchange(s,slot,method,path,body,limit=1024*1024){
++  must(!s.io[slot],'CANDIDATE_ORIGINAL_REQUEST_REPLAY');const payload=body===undefined?Buffer.alloc(0):Buffer.from(JSON.stringify(body));must(payload.length<=512*1024);
++  const retained={method,path,request:null,response:null,bytes:null,ended:false};s.io[slot]=retained;
++  return await new Promise((resolve,reject)=>{
++   let settled=false,count=0;const chunks=[];const fail=code=>{if(settled)return;settled=true;clearTimeout(timer);markUnknown(s,code);reject(failure(code));};
++   const timer=setTimeout(()=>{fail('CANDIDATE_DOCKER_REQUEST_UNKNOWN');retained.request?.destroy();},Math.max(1,Math.min(10000,s.deadline-Date.now())));timer.unref?.();
++   try{retained.request=httpRequest({socketPath:'/var/run/docker.sock',path:'/v1.45'+path,method,headers:payload.length?{'Content-Type':'application/json','Content-Length':payload.length}:undefined},response=>{
++    retained.response=response;response.on('data',chunk=>{count+=chunk.length;if(count>limit){fail('CANDIDATE_DOCKER_RESPONSE_LIMIT');response.destroy();return;}chunks.push(Buffer.from(chunk));});response.once('error',()=>fail('CANDIDATE_DOCKER_RESPONSE_UNKNOWN'));response.once('aborted',()=>fail('CANDIDATE_DOCKER_RESPONSE_TRUNCATED'));response.once('end',()=>{if(settled)return;retained.ended=true;retained.bytes=Buffer.concat(chunks);if(response.complete!==true)return fail('CANDIDATE_DOCKER_RESPONSE_TRUNCATED');settled=true;clearTimeout(timer);resolve({status:response.statusCode,bytes:retained.bytes,value:null});});response.once('close',()=>{if(!retained.ended)fail('CANDIDATE_DOCKER_RESPONSE_TRUNCATED');});
++   });retained.request.once('error',()=>fail('CANDIDATE_DOCKER_REQUEST_UNKNOWN'));retained.request.end(payload);}catch{fail('CANDIDATE_DOCKER_REQUEST_UNKNOWN');}
++  });
++ }
++ const json=async(s,slot,method,path,body,status=200)=>{const r=await exchange(s,slot,method,path,body);must(r.status===status,'CANDIDATE_DOCKER_STATUS_UNKNOWN');return r.bytes.length?parseStrictJobJson(r.bytes,1024*1024):null;};
++ async function daemon(s,slot){const info=await json(s,slot,'GET','/info');must(info.ID===s.intent.parent.daemonId,'CANDIDATE_DAEMON_CHANGED');}
++ function source(s){const selected=readInstalledCandidateSource();must(selected.selectionSha256===s.selectionSha256&&selected.definition.imageId===s.intent.imageId&&selected.definition.catalogSha256===s.intent.canary.catalogSha256,'CANDIDATE_SELECTION_CHANGED');return selected;}
++ async function current(s,stage){live(s);source(s);const v=await core(s.runId,'current',{attemptId:s.intent.run.attemptId,intentHash:s.intentHash,specHash:s.specHash,selectionSha256:s.selectionSha256,deadlineAt:s.intent.expiresAt,stage},s.deadline);keys(v,['intentHash','specHash','selectionSha256','deadlineAt','revision']);must(Number.isSafeInteger(v.revision)&&v.revision>=s.revision);s.revision=v.revision;must(v.intentHash===s.intentHash&&v.specHash===s.specHash&&v.selectionSha256===s.selectionSha256&&v.deadlineAt===s.intent.expiresAt);live(s);}
++ async function record(s,stage,facts){const expected=s.revision,envelope=authenticate(s,'original-candidate-'+stage+'-v1',facts);const v=await core(s.runId,stage,{custodyId:s.custodyId,...envelope},s.deadline);keys(v,['intentHash','specHash','deadlineAt','revision']);must(v.intentHash===s.intentHash&&v.specHash===s.specHash&&v.deadlineAt===s.intent.expiresAt&&v.revision===expected+1);s.revision=v.revision;}
++ function originalChild(s,c,running){must(c&&c.Id===s.childId&&c.Id!==s.intent.parent.containerId&&c.Name==='/'+name(s.intent)&&c.Image===s.intent.imageId&&c.Created===s.createdAt&&digest(JSON.stringify([s.intent.parent.daemonId,c.Id,c.Created,s.intent.imageId,s.intentHash]))===s.birthHash);must(c.Config?.Tty===false&&c.Config.Healthcheck?.Test?.length===1&&c.Config.Healthcheck.Test[0]==='NONE'&&c.Config.OpenStdin===true&&c.Config.StdinOnce===true&&c.Config.AttachStdout===true&&c.Config.AttachStderr===true&&c.Config.AttachStdin===true&&JSON.stringify(c.Config.Entrypoint)===JSON.stringify(['/app/scripts/runtime-entrypoint.sh'])&&(!c.Config.Cmd||c.Config.Cmd.length===0));must(c.HostConfig?.NetworkMode==='none'&&c.HostConfig.AutoRemove===false&&c.HostConfig.Privileged===false&&!c.HostConfig.PidMode&&c.HostConfig.RestartPolicy?.Name==='no'&&c.HostConfig.RestartPolicy.MaximumRetryCount===0&&c.HostConfig.IpcMode!=='host'&&!c.HostConfig.IpcMode?.startsWith('container:')&&c.HostConfig.UsernsMode!=='host'&&c.HostConfig.ReadonlyRootfs===true&&c.HostConfig.Init===true);must(Object.entries(s.spec.Labels).every(([k,v])=>c.Config.Labels?.[k]===v));must(c.Config.User===s.spec.User&&c.Config.WorkingDir===s.spec.WorkingDir&&canonicalHash(environment(c.Config.Env))===canonicalHash(s.effectiveEnvironment)&&JSON.stringify(c.HostConfig.Binds)===JSON.stringify(s.spec.HostConfig.Binds)&&c.HostConfig.Memory===s.spec.HostConfig.Memory&&c.HostConfig.NanoCpus===s.spec.HostConfig.NanoCpus&&c.HostConfig.PidsLimit===s.spec.HostConfig.PidsLimit&&c.HostConfig.CapDrop?.includes('ALL')&&c.HostConfig.SecurityOpt?.includes('no-new-privileges:true')&&!c.HostConfig.CapAdd?.length&&!c.HostConfig.Devices?.length&&!c.HostConfig.DeviceRequests?.length&&(!c.HostConfig.PortBindings||Object.keys(c.HostConfig.PortBindings).length===0));if(running!==undefined)must(c.State?.Running===running);must(c.RestartCount===0);if(s.startedAt)must(c.State?.StartedAt===s.startedAt);return c;}
++ function environment(rows){must(Array.isArray(rows));const out={};for(const row of rows){must(typeof row==='string'&&row.includes('='));const at=row.indexOf('='),key=row.slice(0,at);must(/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)&&!Object.hasOwn(out,key));out[key]=row.slice(at+1);}return out;}
++ async function originalImage(s){const image=await json(s,'image-before','GET','/images/'+encodeURIComponent(s.intent.imageId)+'/json');must(image.Id===s.intent.imageId&&(!image.Config?.Volumes||Object.keys(image.Config.Volumes).length===0));const inherited=environment(image.Config?.Env??[]);for(const key of Object.keys(inherited))must(!/(?:TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL)/i.test(key),'CANDIDATE_IMAGE_SECRET_ENV_UNAVAILABLE');s.effectiveEnvironment={...inherited,...environment(s.spec.Env)};}
++ function spec(s){
++  const i=s.intent,mappings=readWorkspaceMappings(env('INGENIUM_RUNTIME_WORKSPACE_MAP_FILE')),mapping=mappings.get(i.scope.workspaceId),l=i.resource.limits;
++  must(mapping&&runtimeStorageMappingHash(mapping.id,mapping.hostPath)===i.scope.bindingHash,'CANDIDATE_ORIGINAL_WORKSPACE_UNAVAILABLE');
++  must(l.cpuMillis>=100&&l.cpuMillis<=64000&&l.memoryBytes>=134217728&&l.memoryBytes<=274877906944&&l.pidsLimit>=16&&l.pidsLimit<=65536&&l.processLimit>=16&&l.processLimit<=l.pidsLimit&&l.diskBytes>=67108864&&l.diskBytes<=1099511627776);
++  const selected={runId:s.runId,attemptId:i.run.attemptId,intentHash:s.intentHash,catalogSha256:i.canary.catalogSha256,expiresAt:s.deadline};
++  // Credential-free waiting build. NEVER call capability-requiring production
++  // builder with a dummy token or read a production/parent runtime credential.
++  return{Image:i.imageId,User:'1000:1000',WorkingDir:'/workspace',Entrypoint:['/app/scripts/runtime-entrypoint.sh'],Cmd:[],Healthcheck:{Test:['NONE']},Tty:false,AttachStdin:true,AttachStdout:true,AttachStderr:true,OpenStdin:true,StdinOnce:true,StopTimeout:30,
++   Env:['HOME=/home/appuser','XDG_CONFIG_HOME=/home/appuser/.config','XDG_DATA_HOME=/home/appuser/.local/share','XDG_STATE_HOME=/home/appuser/.local/state','TMPDIR=/home/appuser/.tmp','INGENIUM_RUNTIME_ROLE=candidate','INGENIUM_DEPLOYMENT_MODE=user-runtime','INGENIUM_API_URL=http://127.0.0.1:39262/api/v1','INGENIUM_PROJECT='+i.canary.projectName,'INGENIUM_PROJECT_ID='+i.scope.projectId,'INGENIUM_ORGANIZATION_ID='+i.scope.organizationId,'INGENIUM_RUNTIME_ID='+i.parent.runtimeId,'INGENIUM_RUNTIME_OWNER_ID='+i.scope.ownerUserId,'INGENIUM_WORKSPACE_ID='+i.scope.workspaceId,'INGENIUM_STORAGE_MAPPING_HASH='+i.scope.bindingHash,'INGENIUM_JOB_RUN_ID='+s.runId,'INGENIUM_JOB_ATTEMPT_ID='+i.run.attemptId,'INGENIUM_CANDIDATE_WAITING_SELECTION='+JSON.stringify(selected)],Labels:childLabels(i,s.intentHash,s.specHash),
++   HostConfig:{AutoRemove:false,Privileged:false,PidMode:'',RestartPolicy:{Name:'no',MaximumRetryCount:0},NetworkMode:'none',Binds:[mapping.hostPath+':/workspace:ro,rprivate'],CapDrop:['ALL'],Init:true,Memory:l.memoryBytes,NanoCpus:l.cpuMillis*1000000,PidsLimit:Math.min(l.pidsLimit,l.processLimit),PortBindings:{},PublishAllPorts:false,ReadonlyRootfs:true,SecurityOpt:['no-new-privileges:true'],Tmpfs:{'/home/appuser':`rw,nosuid,nodev,size=${l.diskBytes},uid=1000,gid=1000,mode=0700`,'/home/appuser/.tmp':'rw,exec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700','/run/ingenium-runtime':'rw,noexec,nosuid,nodev,size=1048576,uid=1000,gid=1000,mode=0700','/tmp':'rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700'},Ulimits:[]},NetworkingConfig:{EndpointsConfig:{}}};
++ }
++ async function parent(s,slot){await daemon(s,slot+'-daemon');const c=await json(s,slot,'GET','/containers/'+s.intent.parent.containerId+'/json');const p=publicContainer(c),i=s.intent;must(p.id===i.parent.containerId&&p.imageId===i.imageId&&p.startIdentity===i.parent.startIdentity&&p.publicProfileSha256===i.parent.publicProfileSha256&&p.runtimeId===i.parent.runtimeId&&p.provisioningRevision===i.parent.provisioningRevision&&p.organizationId===i.scope.organizationId&&p.projectId===i.scope.projectId&&p.ownerUserId===i.scope.ownerUserId&&p.workspaceId===i.scope.workspaceId&&p.bindingHash===i.scope.bindingHash&&p.bindingEpoch===i.scope.bindingEpoch,'CANDIDATE_PARENT_IDENTITY_CHANGED');}
++ async function attach(s){
++  must(!s.io.attach,'CANDIDATE_ORIGINAL_ATTACH_REPLAY');const retained={request:null,response:null,socket:null,head:null,ended:false,closed:false,writableFinished:false,bytes:0,rawHash:createHash('sha256')};s.io.attach=retained;
++  const incoming=new PassThrough(),decoder=createCandidateDockerOutput({onUnknown:()=>markUnknown(s,'CANDIDATE_ATTACH_UNKNOWN')});s.decoder=decoder;
++  incoming.pipe(decoder.output);decoder.output.on('error',()=>{s.attachFault=true;markUnknown(s,'CANDIDATE_ATTACH_DECODE_UNKNOWN');});incoming.on('error',()=>markUnknown(s,'CANDIDATE_ATTACH_UNKNOWN'));
++  let resolveEof;s.eof=new Promise(resolve=>{resolveEof=resolve;});
++  await new Promise((resolve,reject)=>{let done=false;const fail=code=>{markUnknown(s,code);if(!done){done=true;clearTimeout(timer);reject(failure(code));}};const timer=setTimeout(()=>{fail('CANDIDATE_ATTACH_UPGRADE_UNKNOWN');retained.request?.destroy();},Math.max(1,Math.min(10000,s.deadline-Date.now())));timer.unref?.();
++   retained.request=httpRequest({socketPath:'/var/run/docker.sock',path:'/v1.45/containers/'+s.childId+'/attach?stream=1&stdin=1&stdout=1&stderr=1&logs=0',method:'POST',headers:{Connection:'Upgrade',Upgrade:'tcp','Content-Length':'0'}});
++   retained.request.once('error',()=>fail('CANDIDATE_ATTACH_REQUEST_UNKNOWN'));retained.request.once('response',response=>{retained.response=response;response.resume();fail('CANDIDATE_ATTACH_UPGRADE_REQUIRED');});
++   retained.request.once('upgrade',(response,socket,head)=>{retained.response=response;retained.socket=socket;retained.head=Buffer.from(head);if(done||response.statusCode!==101){socket.destroy();return fail('CANDIDATE_ATTACH_UPGRADE_REQUIRED');}done=true;clearTimeout(timer);
++    const add=chunk=>{const b=Buffer.from(chunk);retained.bytes+=b.length;if(retained.bytes>8*1024*1024){s.attachFault=true;markUnknown(s,'CANDIDATE_ATTACH_LIMIT');return;}retained.rawHash.update(b);if(!incoming.write(b))socket.pause();};incoming.on('drain',()=>socket.resume());
++    socket.on('data',add);socket.once('error',()=>{s.attachFault=true;markUnknown(s,'CANDIDATE_ATTACH_SOCKET_UNKNOWN');incoming.destroy();});socket.once('finish',()=>{retained.writableFinished=true;});socket.once('end',()=>{retained.ended=true;retained.eofAt=Date.now();retained.eofSha256=digest(JSON.stringify([s.attachHash,retained.rawHash.digest('hex'),retained.bytes,'original-socket-readable-end']));incoming.end();resolveEof();});socket.once('close',()=>{retained.closed=true;if(!retained.ended){s.attachFault=true;markUnknown(s,'CANDIDATE_ATTACH_TRUNCATED');incoming.destroy();}});
++    s.attachHash=digest(JSON.stringify([s.custodyId,s.childId,s.birthHash,'POST',retained.request.path,response.statusCode,nonce()]));
++    let resolveReady,rejectReady;s.firstObservation=new Promise((a,b)=>{resolveReady=a;rejectReady=b;});void s.firstObservation.catch(()=>{});
++    s.carrier=createCandidateManagerCarrier({input:decoder.output,output:socket,binding:{runId:s.runId,attemptId:s.intent.run.attemptId,intentHash:s.intentHash,childId:s.childId,childBirthHash:s.birthHash,catalogSha256:s.intent.canary.catalogSha256,expiresAt:s.deadline},forwardOriginalRpc:async()=>{throw failure('CANDIDATE_FRAME_ISSUER_UNAVAILABLE');},onObservation:observation=>{s.observation=observation;resolveReady();},onUnknown:()=>{markUnknown(s,'CANDIDATE_CARRIER_UNKNOWN');rejectReady(failure('CANDIDATE_CARRIER_UNKNOWN'));}});if(head.length)add(head);resolve();
++   });retained.request.end();
++  });await s.carrier.started;
++ }
++ async function launch(runId){
++  must(uuid(runId)&&!byRun.has(runId)&&!launching.has(runId),'CANDIDATE_ORIGINAL_ATTEMPT_ALREADY_OWNED');launching.add(runId);
++  let s;try{
++   const admission=await core(runId,'admission',undefined,Date.now()+10000);keys(admission,['intent','intentHash','specHash','selectionSha256','phase','revision']);assertCandidateInertIntentLive(admission.intent);must(Number.isSafeInteger(admission.revision)&&admission.revision===0&&admission.phase==='prepared'&&hex(admission.specHash)&&hex(admission.selectionSha256)&&admission.intent.run.runId===runId&&candidateInertIntentHash(admission.intent)===admission.intentHash);
++   s={runId,revision:admission.revision,intent:structuredClone(admission.intent),intentHash:admission.intentHash,specHash:admission.specHash,selectionSha256:admission.selectionSha256,deadline:Date.parse(admission.intent.expiresAt),custodyId:nonce(),io:Object.create(null),unknown:null,ready:null};byRun.set(runId,s);active.set(s.custodyId,s);source(s);s.spec=spec(s);await originalImage(s);await parent(s,'parent-before');await current(s,'create');s.createHash=digest(JSON.stringify([s.custodyId,s.intentHash,s.specHash,digest(JSON.stringify(s.spec))]));await record(s,'create-intent',{createEffectHash:s.createHash});live(s);
++   const created=await json(s,'create','POST','/containers/create?name='+name(s.intent),s.spec,201);must(hex(created.Id),'CANDIDATE_CREATE_ID_UNKNOWN');s.childId=created.Id;
++   const c=await json(s,'birth','GET','/containers/'+s.childId+'/json');must(c.Id===s.childId&&c.Id!==s.intent.parent.containerId&&c.Image===s.intent.imageId&&typeof c.Created==='string'&&Number.isFinite(Date.parse(c.Created))&&c.State?.Running===false);s.createdAt=c.Created;s.birthHash=digest(JSON.stringify([s.intent.parent.daemonId,c.Id,c.Created,s.intent.imageId,s.intentHash]));originalChild(s,c,false);await daemon(s,'birth-daemon');await record(s,'created',{containerId:s.childId,childBirthHash:s.birthHash,createdAtMs:Date.parse(c.Created)});
++   await current(s,'attach');await attach(s);await current(s,'start');s.startEffectHash=digest(JSON.stringify([s.createHash,s.attachHash,nonce()]));await record(s,'start-intent',{startEffectHash:s.startEffectHash,attachIdentityHash:s.attachHash});live(s);
++   await json(s,'start','POST','/containers/'+s.childId+'/start',undefined,204);const started=originalChild(s,await json(s,'started','GET','/containers/'+s.childId+'/json'),true);must(Number.isFinite(Date.parse(started.State.StartedAt))&&started.State.Pid>0);s.startedAt=started.State.StartedAt;s.startHash=digest(JSON.stringify([s.birthHash,s.startedAt,started.State.Pid]));await daemon(s,'start-daemon');await record(s,'waiting',{childStartHash:s.startHash,startedAtMs:Date.parse(s.startedAt)});
++   await Promise.race([s.firstObservation,new Promise((_,reject)=>{const t=setTimeout(()=>reject(failure('CANDIDATE_READY_DEADLINE')),Math.max(1,s.deadline-Date.now()));t.unref?.();s.readyTimer=t;})]);clearTimeout(s.readyTimer);await observeReady(s);await record(s,'ready',s.ready);return freeze({custodyId:s.custodyId,runId,attemptId:s.intent.run.attemptId,intentHash:s.intentHash,specHash:s.specHash,childId:s.childId,childBirthHash:s.birthHash,childStartHash:s.startHash,deadlineAt:s.intent.expiresAt});
++  }catch(error){if(s){markUnknown(s,error.code??'CANDIDATE_ORIGINAL_OUTCOME_UNKNOWN');clearTimeout(s.readyTimer);}throw error;}finally{launching.delete(runId);}
++ }
++ async function observeReady(s){
++  await current(s,'readiness');const n=(s.readCount??0)+1;s.readCount=n;await daemon(s,'ready-daemon-'+n);originalChild(s,await json(s,'ready-child-'+n,'GET','/containers/'+s.childId+'/json'),true);s.observation=await s.carrier.refreshOriginalReadiness(nonce());await daemon(s,'ready-daemon-after-'+n);originalChild(s,await json(s,'ready-child-after-'+n,'GET','/containers/'+s.childId+'/json'),true);must(s.observation&&s.io.attach.socket&&!s.io.attach.ended&&!s.io.attach.closed&&!s.io.attach.socket.destroyed&&!s.carrier.closed()&&!s.decoder.diagnostic().unknown);live(s);const observedAt=Date.now(),expiresAt=Math.min(s.deadline,observedAt+5000);must(observedAt<expiresAt);
++  must(!s.attachFault);s.ready=freeze({schemaVersion:1,kind:'original-candidate-ready-v1',runId:s.runId,attemptId:s.intent.run.attemptId,candidateIntentHash:s.intentHash,specHash:s.specHash,containerId:s.childId,childBirthHash:s.birthHash,childStartHash:s.startHash,daemonId:s.intent.parent.daemonId,imageId:s.intent.imageId,catalogSha256:s.intent.canary.catalogSha256,artifactClosureSha256:s.intent.artifactClosureSha256,selectionSha256:s.selectionSha256,attachIdentityHash:s.attachHash,trapAddress:s.observation.trapAddress,proxyAddress:s.observation.proxyAddress,pid:s.observation.pid,networkMode:'none',tty:false,observedAt,expiresAt});return s.ready;
++ }
++ function retained(custodyId){const s=active.get(custodyId);must(s,'CANDIDATE_ORIGINAL_CUSTODY_MISSING');return s;}
++ return freeze({launch,
++  // Returned JSON is evidence DATA. Root must challenge this PRIVATE manager
++  // owner through existing authenticated channel; copied status/JSON is no grant.
++  async readiness(custodyId){const s=retained(custodyId);const facts=await observeReady(s);return authenticate(s,'original-candidate-readiness-v1',facts);},
++  async stoppedObservation(custodyId){const s=retained(custodyId);const control=await core(s.runId,'control',{custodyId:s.custodyId,attemptId:s.intent.run.attemptId,intentHash:s.intentHash,specHash:s.specHash,selectionSha256:s.selectionSha256,deadlineAt:s.intent.expiresAt},Date.now()+10000);keys(control,['intentHash','specHash','selectionSha256','deadlineAt','revision']);must(control.intentHash===s.intentHash&&control.specHash===s.specHash&&control.selectionSha256===s.selectionSha256&&control.deadlineAt===s.intent.expiresAt&&Number.isSafeInteger(control.revision)&&control.revision>=s.revision);s.revision=control.revision;must(s.io.attach?.ended&&s.childId&&s.startHash,'CANDIDATE_ORIGINAL_EOF_REQUIRED');await s.eof;must(!s.attachFault);must(s.decoder.output.readableEnded&&s.io.attach.eofSha256,'CANDIDATE_ORIGINAL_DECODE_EOF_REQUIRED');await daemon(s,'retire-daemon');const waited=await json(s,'wait','POST','/containers/'+s.childId+'/wait?condition=not-running');must(Number.isInteger(waited.StatusCode)&&waited.StatusCode>=0&&waited.StatusCode<=255&&!waited.Error?.Message);const final=originalChild(s,await json(s,'final','GET','/containers/'+s.childId+'/json'),false);must(final.State.Pid===0&&final.State.Status==='exited'&&final.State.Dead!==true&&final.State.Restarting!==true&&(!final.State.Error||final.State.Error==='')&&final.State.ExitCode===waited.StatusCode);await daemon(s,'retire-daemon-after');const proof=freeze({schemaVersion:1,kind:'original-candidate-daemon-stopped-v1',runId:s.runId,attemptId:s.intent.run.attemptId,candidateIntentHash:s.intentHash,specHash:s.specHash,containerId:s.childId,childBirthHash:s.birthHash,childStartHash:s.startHash,daemonId:s.intent.parent.daemonId,exitCode:waited.StatusCode,waitJoinSha256:digest(s.io.wait.bytes),eofSha256:s.io.attach.eofSha256,stoppedAtMs:Date.now()});s.stopped=proof;return authenticate(s,'original-candidate-stopped-v1',proof,{retirement:true});},
++  retainedUnknown(){return freeze([...active.values()].map(s=>freeze({runId:s.runId,custodyId:s.custodyId,childId:s.childId??null,unknown:s.unknown,retainedSlots:Object.keys(s.io),deadlineAt:s.intent.expiresAt})));},
++  // Stopped observation is NOT SQL131 retirement: an independently genuine
++  // whole-scope empty witness is still missing. No material delivery method,
++  // stop/remove/retry/list/adopt or public DTO grant.
++ });
++}
+diff --git a/services/ingenium-api/scripts/runtime-manager.ts b/services/ingenium-api/scripts/runtime-manager.ts
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -1,3 +1,4 @@
++import {createOriginalCandidateWaitingOwner} from '../lib/dot-v2/candidate-original-manager.mjs';
+ import {createOriginalCandidateClosureProducer} from '../../../packages/veyra-operations/core126-candidate-observation.mjs';
+ import {createCore126ManagerProofProducer} from "../../../packages/veyra-operations/core126-manager-proof.mjs";
+ import {publicContainer as publicJobParent,hash as jobParentHash} from "../../../packages/veyra-operations/core126-image-contract.mjs";
+@@ -395,6 +396,7 @@
+ 
+ export function startRuntimeManager(): import("node:http").Server {
+   const token = loadManagerToken();
++  const originalCandidateWaiting=createOriginalCandidateWaitingOwner();
+   const originalJobRoleProof=createCore126ManagerProofProducer({docker:dockerRequest});
+   const originalCandidateClosure=createOriginalCandidateClosureProducer({docker:dockerRequest,makeOriginalRequest:(options,callback)=>httpRequest({...options,socketPath:DOCKER_SOCKET,path:'/v1.45'+options.path},callback)});
+   const mappings = readWorkspaceMappings(environment("INGENIUM_RUNTIME_WORKSPACE_MAP_FILE"));
+@@ -431,6 +433,23 @@
+           provisionDisposition:original?.disposition??"legacy_unqualified",originalProvision:original?.original??null}}));
+         return;
+       }
++      // Existing protected manager-token authentication above is mandatory.
++      const candidateRoute=/^\/v1\/candidate-job-runs\/([0-9a-f-]+)\/(launch|readiness|stopped)$/.exec(url.pathname);
++      if(request.method==='POST'&&candidateRoute&&UUID.test(candidateRoute[1]!)){
++        const runId=candidateRoute[1]!,operation=candidateRoute[2]!,body=await readJsonBody(request);
++        if(!body||typeof body!=='object'||Array.isArray(body))throw Error('Candidate manager input unavailable');
++        const fields=Object.keys(body).sort().join('|');let result;
++        if(operation==='launch'){
++          if(fields!=='')throw Error('Candidate launch accepts only the original Run selector');
++          result=await originalCandidateWaiting.launch(runId);
++        }else{
++          if(fields!=='custodyId'||typeof (body as {custodyId?:unknown}).custodyId!=='string')throw Error('Original candidate custody unavailable');
++          const custodyId=(body as {custodyId:string}).custodyId;
++          result=operation==='readiness'?await originalCandidateWaiting.readiness(custodyId):await originalCandidateWaiting.stoppedObservation(custodyId);
++          if(result.observation.runId!==runId)throw Error('Original candidate Run changed');
++        }
++        response.writeHead(200).end(JSON.stringify({data:result}));return;
++      }
+       const jobRoute=/^\/v1\/job-runs\/([0-9a-f-]+)(\/launch|\/cancel|\/cleanup)?$/.exec(url.pathname);
+       if(jobRoute&&UUID.test(jobRoute[1]!)){
+         const runId=jobRoute[1]!;let result;
