@@ -1,0 +1,7 @@
+{
+  "path": "packages/ingenium-core/lib/db.ts",
+  "sha256": "935061fb2e140e0f72da6854d4ae813c957e2aabe61e3c5377ab13f01ade9e31",
+  "postSha256": "45c69beab1af986b856a9050b47b0123b2e1e7dd39da8bca5d9e2c20113f7b64",
+  "restorationGateUnchanged": true,
+  "sourceCommitObserved": "95161a99d216af6461b4ed240931d3a0fa47ad8f"
+}
