@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "canonicalDestination": "tools/reviewed-cargo-check.mjs",
+  "preimageSha256": "c2404104d92c3e1f803bb5d7f3272674ec2dc6f8a9d1cd0c59f52822227aacbd",
+  "afterSha256": "90f23a35b0a5d5eccc9b9140f32fb6b05ac15c4d0e7f2a6caca5ec1d594fd72f",
+  "fragmentSha256": "9cc468980d8450d95f848e8804481d516b0b7b36a889abeffbe765530e4f2608",
+  "patchSha256": "85b16251f6c8ac717789ca1bb3979d8f5b354d0685a635e6aa33679891225547",
+  "patchBytes": 16757,
+  "v1FixedPinsPreserved": true,
+  "descriptorCacheGuardAndCompilerPreserved": true,
+  "actualResolutionReceipt": "coordination/integration/native-memory-lock-resolution-r2.json",
+  "actualResolutionReceiptSha256": "6665747af0de1fce18bffe6ba72b2e4e982553536a5f7c8c49196dece2aa90cb",
+  "actualResolvedLockSha256": "a5b1f51eb57f93d553abe9d5d428db773fc4e4d43d55dd1269443a3af058fd07",
+  "receiptBytes": 1043,
+  "syntax": "Node --check stdin PASS; no capture/execution",
+  "nativeWrites": false,
+  "workerResolutionOrCompiler": false
+}

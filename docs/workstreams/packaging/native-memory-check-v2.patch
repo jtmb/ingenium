@@ -1,0 +1,195 @@
+diff --git a/tools/reviewed-cargo-check.mjs b/tools/reviewed-cargo-check.mjs
+--- a/tools/reviewed-cargo-check.mjs
++++ b/tools/reviewed-cargo-check.mjs
+@@ -12,6 +12,86 @@
+   reviewer: '01a188fc-d3ed-7dc2-ab95-e0eed8a793ec',
+   argv: Object.freeze(['check', '--locked', '--offline', '-j1', '-p', 'veyra-service', '-p', 'veyra-desktop']),
+ });
++// Inline-only canonical v2 fragment. The exact patch generator supplies the
++// existing canonical CHECK/FD/path/hash/guard bindings; no standalone execution.
++export const MEMORY_CHECK_V2 = Object.freeze({
++  profile: 'native-cargo-check-memory-existing-inputs-v2',
++  baselineLock: 'a7bb23ff65c5359cddd1f9e5f98a762070124424417808e3117fef746a368aee',
++  resolvedLock: 'a5b1f51eb57f93d553abe9d5d428db773fc4e4d43d55dd1269443a3af058fd07',
++  resolutionSha256: '6665747af0de1fce18bffe6ba72b2e4e982553536a5f7c8c49196dece2aa90cb',
++});
++export function reviewedCheckProfile(profile = CHECK.profile) {
++  if (profile !== CHECK.profile && profile !== MEMORY_CHECK_V2.profile) fail('unknown explicit check profile');
++  return profile;
++}
++export function pinsForCheckProfile(profile, v1) {
++  reviewedCheckProfile(profile);
++  if (profile === CHECK.profile) return v1;
++  return { ...v1,
++    'Cargo.lock': MEMORY_CHECK_V2.resolvedLock,
++    'Cargo.toml': 'eaea8832bacb74027fee855571261af75a8ac22b30a54c4e6fbdcc160d156ef8',
++    'apps/service/Cargo.toml': 'c6190b4dcb1c06c0233c737a8312a14423841324fb0f43241900ae9de06a8823',
++    'crates/adapters/Cargo.toml': '5c373ba8208a61f90dc685109f901f14fec2ce5c0acbc11dd32c067bdbd41e31',
++    'crates/veyra-memory/Cargo.toml': 'b5e7a3824ed4a17b81d49b07c1bc916e4920116da6c52094ed200f0c2d955b01' };
++}
++export function workspaceBytesForCheckProfile(profile, files) {
++  reviewedCheckProfile(profile);
++  const ordinary = files.filter(([name]) => /^(apps\/service\/src|apps\/desktop\/src-tauri\/src|crates\/(adapters|contracts|core|harness)\/src)\//.test(name)).reduce((sum, [, info]) => sum + info.bytes, 0);
++  if (profile === CHECK.profile) return ordinary;
++  const memory = files.filter(([name]) => name.startsWith('crates/veyra-memory/src/'));
++  const bytes = memory.reduce((sum, [, info]) => sum + info.bytes, 0);
++  if (!memory.some(([name]) => name === 'crates/veyra-memory/src/lib.rs') || bytes > 128 * 1024) fail('Memory library source is absent or exceeds v2 envelope');
++  return ordinary + bytes;
++}
++export function memoryResolutionLocation(root, env) {
++  const paired = envGet(env, 'VEYRA_EXISTING_WSL_TASK_ROOT');
++  if (!paired || !path.isAbsolute(paired) || !inside(paired, root)) fail('registered paired Source root required for actual r2 witness');
++  const file = path.join(path.dirname(root), 'coordination', 'integration', 'native-memory-lock-resolution-r2.json');
++  if (!inside(paired, file)) fail('actual r2 witness escaped registered paired task');
++  return { root: paired, file };
++}
++export function validateMemoryResolution(record, rawSha256, actualLockSha256) {
++  const command = ['metadata', '--offline', '--format-version', '1', '--filter-platform', 'x86_64-pc-windows-msvc'];
++  if (rawSha256 !== MEMORY_CHECK_V2.resolutionSha256 || actualLockSha256 !== MEMORY_CHECK_V2.resolvedLock
++    || record?.owner !== CHECK.reviewer || record.beforeSha256 !== MEMORY_CHECK_V2.baselineLock || record.code !== 0 || record.compiled !== false
++    || JSON.stringify(record.command) !== JSON.stringify(command) || record.actualLockResolvedByCoordinator !== true
++    || record.verification?.expectedSha256 !== MEMORY_CHECK_V2.resolvedLock || record.verification?.actualSha256 !== MEMORY_CHECK_V2.resolvedLock
++    || record.verification?.registryRecordsUnchanged !== true) fail('actual pinned Root r2 offline resolution/current lock witness required');
++}
++export async function readMemoryResolution(api, root, env, actualLockSha256) {
++  const location = memoryResolutionLocation(root, env);
++  const result = await readReviewReceipt(api, location.root, location.file);
++  validateMemoryResolution(result.value, result.sha256, actualLockSha256);
++  return result.sha256;
++}
++export const MEMORY_V2_WITNESSES = Object.freeze([
++  Object.freeze({ unit: 'serde-2e7442c4eb067551/lib-serde.json', fingerprint: 'fb548b1dddda13980733867c8f60169e930e7c410639122ac4d270db17621e36', features: '["alloc","default","derive","rc","serde_derive","std"]', artifact: 'libserde-2e7442c4eb067551.rmeta', bytes: 525960 }),
++  Object.freeze({ unit: 'serde_json-5d4f944bbcd2ad4d/lib-serde_json.json', fingerprint: 'ef0091f01dedebac2db6841c5545360dbac009d01eec436f8eaecee23530bb9e', features: '["default","raw_value","std"]', artifact: 'libserde_json-5d4f944bbcd2ad4d.rmeta', bytes: 1067744 }),
++  Object.freeze({ unit: 'sha2-a3752a26a8a920cd/lib-sha2.json', fingerprint: 'cc5d0af20e9e8bf6c9561806559952e07c72a1fbd06af3625c90f815faf8686a', features: '["default","std"]', artifact: 'libsha2-a3752a26a8a920cd.rmeta', bytes: 640108 }),
++  Object.freeze({ unit: 'serde_derive-e0400d55e3df06a8/lib-serde_derive.json', fingerprint: 'db61c6c24f01fc2e702c12ecf96914041e877c7f5de147a07d1512d598bf5b23', features: '["default"]', artifact: 'serde_derive-e0400d55e3df06a8.dll', bytes: 2782208 }),
++]);
++export function validateMemoryFeatureWitness(expected, fingerprint, artifact) {
++  // Exact raw fingerprint identity binds compiler/profile/flags without parsing
++  // its u64 numeric identifiers through JavaScript's floating-point numbers.
++  if (fingerprint.sha256 !== expected.fingerprint || JSON.stringify(JSON.parse(fingerprint.value.features)) !== expected.features
++    || artifact.bytes !== expected.bytes || !sha(artifact.sha256)) fail('v2 compiled dependency/derive feature witness changed or missing');
++}
++async function captureMemoryFeatureWitnesses(target) {
++  const facts = [];
++  for (const expected of MEMORY_V2_WITNESSES) {
++    const fingerprint = await readReviewReceipt(fs, target, path.join(target, 'debug', '.fingerprint', expected.unit));
++    const artifact = await hashFile(target, path.join(target, 'debug', 'deps', expected.artifact));
++    validateMemoryFeatureWitness(expected, fingerprint, artifact);
++    facts.push([expected.unit, fingerprint.sha256, expected.artifact, artifact]);
++  }
++  return digest(facts);
++}
++async function verifyMemoryResolutionCapture(capture) {
++  if (capture.profile !== MEMORY_CHECK_V2.profile) return;
++  const sha256 = await readMemoryResolution(fs, capture.root, capture.execution.env, capture.actualLockSha256);
++  if (sha256 !== capture.memoryLockResolutionSha256) fail('actual r2 resolution witness changed before use');
++}
++
+ const guardFiles = ['build-storage-preflight.mjs', 'check-windows-desktop-storage.ps1', 'windows-artifact-storage.ps1',
+   'approved-native-task-storage.ps1', 'existing-wsl-task-storage.ps1', 'task-owned-allocation.mjs'];
+ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+@@ -184,7 +264,8 @@
+ }
+
+ /** Read-only candidate capture. It never writes or approves an independent review receipt. */
+-export async function captureCargoCheckInputs(root, originalEnv) {
++export async function captureCargoCheckInputs(root, originalEnv, profile = CHECK.profile) {
++  reviewedCheckProfile(profile);
+   if (process.platform !== 'win32') fail('native Windows stage only');
+   const env = prepareCheckEnvironment(originalEnv), output = envGet(env, 'VEYRA_GENERATED_OUTPUT_ROOT'); receiptPath(env);
+   const target = envGet(env, 'CARGO_TARGET_DIR'), home = envGet(env, 'CARGO_HOME'), rustc = envGet(env, 'RUSTC');
+@@ -195,7 +276,7 @@
+   for (const name of ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER']) if (envGet(env, name)) fail('preexisting Rust flags/wrapper override');
+   for (const [name, value] of [['CARGO_INCREMENTAL', '0'], ['CARGO_BUILD_JOBS', '1'], ['CARGO_NET_OFFLINE', 'true']]) envSet(env, name, value);
+   const state = await sourceState(root, env);
+-  const workspaceBytes = state.files.filter(([name]) => /^(apps\/service\/src|apps\/desktop\/src-tauri\/src|crates\/(adapters|contracts|core|harness)\/src)\//.test(name)).reduce((sum, [, info]) => sum + info.bytes, 0);
++  const workspaceBytes = workspaceBytesForCheckProfile(profile, state.files);
+   if (workspaceBytes > 32 * 1024 ** 2) fail('workspace source exceeds reviewed estimate envelope');
+   if (state.files.some(([name]) => /(^|\/)build\.rs$/.test(name) && !['apps/desktop/src-tauri/build.rs', 'apps/legacy-dock/build.rs'].includes(name))) fail('new build script generator requires review');
+   const critical = state.files.filter(([name]) => /(^|\/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain|(^|\/)build\.rs$|^apps\/desktop\/src-tauri\/(tauri\.conf\.json|capabilities\/|icons\/)|^tools\/(feature-gate|reviewed-cargo-check|compiler-path-remap)\.mjs$/.test(name)
+@@ -223,8 +304,12 @@
+     'apps/desktop/src-tauri/build.rs': '02ae8cec00e0cecee6622f96e6fc485274b0b9619c3e168ea14027c4b0174671',
+     'apps/desktop/src-tauri/tauri.conf.json': 'be24f1f633c2475f0098429efd957a6ac71504baae95b65afab4d80a0bcc72f9',
+   };
+-  for (const [name, expected] of Object.entries(fixed)) if (state.files.find(([file]) => file === name)?.[1].sha256 !== expected) fail('pinned declarations/build inputs changed');
+-  if (state.files.some(([name]) => /(^|\/)Cargo\.toml$/.test(name) && !Object.hasOwn(fixed, name))) fail('new workspace manifest requires review');
++  const admitted = pinsForCheckProfile(profile, fixed);
++  for (const [name, expected] of Object.entries(admitted)) if (state.files.find(([file]) => file === name)?.[1].sha256 !== expected) fail('pinned declarations/build inputs changed');
++  if (state.files.some(([name]) => /(^|\/)Cargo\.toml$/.test(name) && !Object.hasOwn(admitted, name))) fail('new workspace manifest requires review');
++  const actualLockSha256 = state.files.find(([name]) => name === 'Cargo.lock')[1].sha256;
++  const memoryLockResolutionSha256 = profile === MEMORY_CHECK_V2.profile
++    ? await readMemoryResolution(fs, root, env, actualLockSha256) : undefined;
+   const remap = await import(pathToFileURL(path.join(root, 'tools/compiler-path-remap.mjs')).href);
+   // Source bytes were already frozen; the original remapper verifies Cargo config
+   // absence, registered output aliases and refuses wrapper/flag overrides.
+@@ -248,14 +333,22 @@
+   for (const file of [cargo, rustc, driver]) toolchain.push([path.basename(file), await hashFile(bin, file)]);
+   validateToolchain(toolchain);
+   const cache = await cacheState(target), nativeEnvironment = nativeEnvironmentIdentity(env);
++  const memoryFeatureSha256 = profile === MEMORY_CHECK_V2.profile ? await captureMemoryFeatureWitnesses(target) : undefined;
++  const cacheSha256 = memoryFeatureSha256 ? digest({ originalCache: cache.sha256, memoryFeatures: memoryFeatureSha256 }) : cache.sha256;
+   const gatePolicySha256 = state.files.find(([name]) => name === 'tools/feature-gate.mjs')[1].sha256;
+-  return { sourceTree: state.tree, sourceStateSha256: state.sha256, gatePolicySha256,
+-    inputs: { sourceFilesSha256: digest(critical), cacheSha256: cache.sha256, toolchainSha256: digest(toolchain), rootsSha256: digest(roots), flagsSha256: flagSha, nativeEnvironmentSha256: nativeEnvironment },
++  return { profile, actualLockSha256, memoryLockResolutionSha256, sourceTree: state.tree, sourceStateSha256: state.sha256, gatePolicySha256,
++    inputs: { sourceFilesSha256: digest(critical), cacheSha256, toolchainSha256: digest(toolchain), rootsSha256: digest(roots), flagsSha256: flagSha, nativeEnvironmentSha256: nativeEnvironment },
+     cacheSummary: cache, execution: { env, cargo, target, compiler }, root, output };
+ }
+ export function validateReview(receipt, capture, expectedTree, expectedPolicy) {
+-  if (!keys(receipt, ['schemaVersion', 'profile', 'reviewedBy', 'reviewed', 'hostInputsReviewed', 'sourceTree', 'gatePolicySha256', 'sourceStateSha256', 'inputs'])
+-    || receipt.schemaVersion !== 1 || receipt.profile !== CHECK.profile || receipt.reviewedBy !== CHECK.reviewer || receipt.reviewed !== true || receipt.hostInputsReviewed !== true) fail('independent fixed-profile review receipt required');
++  const profile = reviewedCheckProfile(receipt?.profile), memory = profile === MEMORY_CHECK_V2.profile;
++  const fields = ['schemaVersion', 'profile', 'reviewedBy', 'reviewed', 'hostInputsReviewed', 'sourceTree', 'gatePolicySha256', 'sourceStateSha256', 'inputs'];
++  if (memory) fields.push('memoryLockResolutionSha256');
++  if (!keys(receipt, fields) || receipt.schemaVersion !== 1 || receipt.profile !== profile || receipt.reviewedBy !== CHECK.reviewer || receipt.reviewed !== true || receipt.hostInputsReviewed !== true) fail('independent fixed-profile review receipt required');
++  if ((capture.profile ?? CHECK.profile) !== profile) fail('captured check profile differs from approved receipt');
++  if (memory && (capture.actualLockSha256 !== MEMORY_CHECK_V2.resolvedLock
++    || receipt.memoryLockResolutionSha256 !== MEMORY_CHECK_V2.resolutionSha256
++    || capture.memoryLockResolutionSha256 !== receipt.memoryLockResolutionSha256)) fail('approved v2 actual lock/r2 resolution binding required');
+   const names = ['sourceFilesSha256', 'cacheSha256', 'toolchainSha256', 'rootsSha256', 'flagsSha256', 'nativeEnvironmentSha256'];
+   if (!keys(receipt.inputs, names) || names.some(name => !sha(receipt.inputs[name]) || receipt.inputs[name] !== capture.inputs[name])) fail('reviewed dependency/toolchain/flags/roots/environment/cache inputs changed');
+   if (!/^[a-f0-9]{40}$/.test(expectedTree) || !sha(expectedPolicy) || receipt.sourceTree !== expectedTree || capture.sourceTree !== expectedTree
+@@ -279,7 +372,7 @@
+   return JSON.parse(stdout.replace(/^\uFEFF/u, ''));
+ }
+ const production = { platform: () => process.platform, read: (env) => readReviewReceipt(fs, envGet(env, 'VEYRA_GENERATED_OUTPUT_ROOT'), receiptPath(env)),
+-  capture: captureCargoCheckInputs, guard: originalGuard,
++  capture: captureCargoCheckInputs, guard: originalGuard, verifyResolution: verifyMemoryResolutionCapture,
+   verifySource: async capture => { const state = await sourceState(capture.root, capture.execution.env); if (state.tree !== capture.sourceTree || state.sha256 !== capture.sourceStateSha256) fail('Source changed before/after compiler'); },
+   launch: async capture => {
+     const env = { ...capture.execution.env };
+@@ -294,24 +387,31 @@
+ export function createCheckRunner(adapters) {
+   return async (root, env, expectedTree, expectedPolicy) => {
+     if (adapters.platform() !== 'win32') fail('native Windows stage only');
+-    const first = await adapters.read(env), capture = await adapters.capture(root, env);
++    const first = await adapters.read(env), profile = reviewedCheckProfile(first.value?.profile);
++    const capture = await adapters.capture(root, env, profile);
+     validateReview(first.value, capture, expectedTree, expectedPolicy);
+     await adapters.verifySource(capture);
+     const storage = await adapters.guard(capture); validateStorage(storage);
+     const currentReceipt = await adapters.read(env);
+     if (currentReceipt.sha256 !== first.sha256) fail('independent receipt changed before use');
+     await adapters.verifySource(capture);
++    if (profile === MEMORY_CHECK_V2.profile) {
++      if (typeof adapters.verifyResolution !== 'function') fail('v2 actual resolution verifier unavailable');
++      await adapters.verifyResolution(capture);
++    }
+     let failure;
+     try { await adapters.launch(capture); } catch (error) { failure = error; }
+     try { await adapters.verifySource(capture); } catch (error) { if (!failure) failure = error; else failure.sourceStabilityFailure = error.message; }
+     if (failure) throw failure;
+-    return { profile: CHECK.profile, independentReviewSha256: first.sha256, sourceTree: expectedTree, estimatedGrowthBytes: CHECK.growth };
++    return { profile, independentReviewSha256: first.sha256, sourceTree: expectedTree, estimatedGrowthBytes: CHECK.growth };
+   };
+ }
+ export const runReviewedCargoCheck = createCheckRunner(production);
+ export function cargoCheckReviewFacts(capture) {
+-  return { schemaVersion: 1, profile: CHECK.profile, reviewedBy: CHECK.reviewer, reviewed: false, hostInputsReviewed: false,
++  const profile = reviewedCheckProfile(capture.profile), facts = { schemaVersion: 1, profile, reviewedBy: CHECK.reviewer, reviewed: false, hostInputsReviewed: false,
+     sourceTree: capture.sourceTree, gatePolicySha256: capture.gatePolicySha256, sourceStateSha256: capture.sourceStateSha256, inputs: { ...capture.inputs } };
++  if (profile === MEMORY_CHECK_V2.profile) facts.memoryLockResolutionSha256 = capture.memoryLockResolutionSha256;
++  return facts;
+ }
+ export async function hasReviewAt(api, env) {
+   // The fixed task receipt is the only selection. An absent native registration
