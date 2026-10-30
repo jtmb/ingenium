@@ -101,6 +101,51 @@
       "sha256": "f1ef1f4a8cebe66ed7289926e5705d053a0dc7b58e326b91f941ee36215283c0"
     },
     {
+      "path": "native-web-host/original-proxy/README.md",
+      "bytes": 13145,
+      "sha256": "20df06243e97384dffc3df2ffb7da2dc103ebf7bb42b99926265be4544781c4a"
+    },
+    {
+      "path": "native-web-host/original-proxy/assemble.py",
+      "bytes": 5398,
+      "sha256": "a850b461f7a17ebd76403d82a1e16757dfa9bc6aae0afca56cb5f6a2825ce34c"
+    },
+    {
+      "path": "native-web-host/original-proxy/assembly-manifest.json",
+      "bytes": 2188,
+      "sha256": "f287bacc0afaff7c1a77ffd4adef8791f6ca5f2ad4f8a5db79ab23a4a0215091"
+    },
+    {
+      "path": "native-web-host/original-proxy/original-proxy.patch",
+      "bytes": 26346,
+      "sha256": "0180d2935dadb7011cd6825387cf4452441afc5b3d4870efdf7a9c7349b59089"
+    },
+    {
+      "path": "native-web-host/original-proxy/pinned-protocol-routes.json",
+      "bytes": 26047,
+      "sha256": "e032dab23f7313746959682e6d780ec4140df2e75e94db6027e27fa3345c0b13"
+    },
+    {
+      "path": "native-web-host/original-proxy/preimages.json",
+      "bytes": 3379,
+      "sha256": "8d0e8e16676bce014117aa3486a97d3a2e4f25bd87a1735db2a2ca73cee19ab1"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/apps/service/src/routes/local_workspaces/web_original.rs",
+      "bytes": 3287,
+      "sha256": "d1e51f7157e9f7ae0ad0499050dd5d3c80108ee4f99836406486449a58885114"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "bytes": 19202,
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2"
+    },
+    {
+      "path": "native-web-host/original-proxy/verification.json",
+      "bytes": 1476,
+      "sha256": "015893fd9f03302a8c5d880b6b33f8b14e022a09d14b745493ffd725859486e3"
+    },
+    {
       "path": "native-web-host/sources/apps/desktop/src-tauri/src/local_web_child.rs",
       "bytes": 12716,
       "sha256": "934fdc5b2be3303500d713b2ae9e6933e2979324a4a56b790ccc2a0677ceeb8f"

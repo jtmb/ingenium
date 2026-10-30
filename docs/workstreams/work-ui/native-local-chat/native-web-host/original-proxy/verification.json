@@ -1,0 +1,28 @@
+{
+  "scope": "source proposal only",
+  "recipe": "assemble.py",
+  "assembly_repeat": "same six-file patch reproduced from exact immutable staged blob pins",
+  "patch_sha256": "0180d2935dadb7011cd6825387cf4452441afc5b3d4870efdf7a9c7349b59089",
+  "patch_bytes": 26346,
+  "native_read_only_patch_check": {
+    "command": "git apply --check --cached original-proxy.patch",
+    "exit_code": 0,
+    "meaning": "delta matched the actual Native index at this check only; no index or source mutation"
+  },
+  "rust_source_tests_supplied": 4,
+  "rust_source_tests_run": false,
+  "compiler_run": false,
+  "runtime_run": false,
+  "new_downloads": false,
+  "native_or_shared_edits": false,
+  "full_web_accepted": false,
+  "remaining": [
+    "Root original journal/raw Web contract and reservation/fence/settlement extension",
+    "original full-payload broker/file/attachment/model/queue/creation/cancellation guarded dispatch",
+    "stable upstream ID reconciliation and no-ID unknown recovery without replay",
+    "genuine private proxy HTTP/SSE/WS/assets/redirect/origin/native auth closure",
+    "six native commands and original platform policy/profile constructors",
+    "central compiler/source tests and actual workflow/screenshots"
+  ],
+  "cleanup": {"removed_paths": [], "removed_bytes": 0, "bulk_created": [], "retained": "minimal source/recipe/route pins/preimages/manifest/verification; small patch remains consumed by Root integration review, retire after verified import"}
+}

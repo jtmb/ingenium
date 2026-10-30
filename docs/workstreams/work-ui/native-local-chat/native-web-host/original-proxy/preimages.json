@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "native": "//wsl.localhost/Ubuntu/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source",
+  "records": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "blob": "2d4b2829a5333e1390b916406ca8056f52c6f511",
+      "sha256": "623c4f23b167ecb90f1ff5359dfcdb4e458471f7af976dc20f7e3b5bc30879ae",
+      "bytes": 143782,
+      "role": "edit"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "blob": "81498a2898c80ce87cd98095645cfb5368fab45e",
+      "sha256": "6444d34e6bfaf96fb0543f1b059976a9586a04a0e7099394d46c3f31d184b6de",
+      "bytes": 3251,
+      "role": "edit"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "blob": "9dd98c490ce5d50cdb5b2aeac35322c2209d8cc7",
+      "sha256": "483297bf8f7fb10cfa492bfe28f03aea84d7286028467d135d75233af9b7fded",
+      "bytes": 15780,
+      "role": "edit"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "blob": "c1ec45df09705f887a6820986c4a101e26847b1f",
+      "sha256": "aae986c2e48cef4909e715a3b0e964307a1ae69a53479a58f474ee50f35e78bc",
+      "bytes": 53778,
+      "role": "edit"
+    },
+    {
+      "path": "crates/adapters/src/opencode/mod.rs",
+      "blob": "36591fea667e082b58b2ef782d6ae8089b32464d",
+      "sha256": "ea74d8ce2f22459a816c3c34f4e48c873cc6914013509bdfad1492598786aa40",
+      "bytes": 31285,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/task_permissions.rs",
+      "blob": "162068cfbd39ecfd891936caf11e6929cfeab8cb",
+      "sha256": "8ddfebc961df9fae0f719f0678e2e78161157c6559c74503cf3d23da04ad603b",
+      "bytes": 45772,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "blob": "451a2afeaaedb23a284ed8dd9dfb19deaf20ecc1",
+      "sha256": "80d98be55f40580cc9c156b2f39a1aed567911c5d746e771e93058298d6ee64d",
+      "bytes": 6391,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "blob": "cffcf5c3244c742b1291d55e316a7354a8a21d46",
+      "sha256": "792818c0e8a6ca51f4d84a387c67fc179a3a7d9ded55053e0c715510ec03bb1c",
+      "bytes": 45316,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "apps/service/Cargo.toml",
+      "blob": "7d6689c78c5aa15ff437b5200cf080b59abd05c2",
+      "sha256": "c6190b4dcb1c06c0233c737a8312a14423841324fb0f43241900ae9de06a8823",
+      "bytes": 1572,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/local_web_child.rs",
+      "blob": "c2d4dd83b611ad81f956ca41584b668ba19dce15",
+      "sha256": "2c1ad288483dd3a626a4a23a5382f6186a4f8327b81640fd02fa2a2fc4943ea5",
+      "bytes": 12893,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/local_web_auth.rs",
+      "blob": "343b5113997a42a750ddf369ff9f52ae02fde28a",
+      "sha256": "9e7d967c40aaaba72a6cc5c842afcd2f0932f83d24a232c941b28df2eeb4809c",
+      "bytes": 16766,
+      "role": "observed_boundary"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/main.rs",
+      "blob": "685ae8766348113be89654f0b669a46838eae00c",
+      "sha256": "c504e2096f8d884f055874f1afc64f2a39567bd6c1bd771af3a9a29202f09a5d",
+      "bytes": 24222,
+      "role": "observed_boundary"
+    }
+  ]
+}

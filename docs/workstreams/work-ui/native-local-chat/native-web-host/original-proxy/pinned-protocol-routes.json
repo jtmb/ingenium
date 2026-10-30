@@ -1,0 +1,727 @@
+{
+  "upstream_commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "purpose": "audit declarations only; neither full served closure nor allowlist",
+  "routes": [
+    {
+      "operation": "location.get",
+      "method": "GET",
+      "path": "/api/location",
+      "schema_source": "packages/protocol/src/groups/location.ts",
+      "schema_blob": "ffcce9a4cd2f6c5b631e28e3a3fac925a6631bba"
+    },
+    {
+      "operation": "location.reload",
+      "method": "POST",
+      "path": "/api/location/reload",
+      "schema_source": "packages/protocol/src/groups/location.ts",
+      "schema_blob": "ffcce9a4cd2f6c5b631e28e3a3fac925a6631bba"
+    },
+    {
+      "operation": "vcs.get",
+      "method": "GET",
+      "path": "/api/vcs",
+      "schema_source": "packages/protocol/src/groups/vcs.ts",
+      "schema_blob": "f2f4062baf7b7c467f4699d7aca67a7e4681b38e"
+    },
+    {
+      "operation": "vcs.base",
+      "method": "GET",
+      "path": "/api/vcs/base",
+      "schema_source": "packages/protocol/src/groups/vcs.ts",
+      "schema_blob": "f2f4062baf7b7c467f4699d7aca67a7e4681b38e"
+    },
+    {
+      "operation": "vcs.status",
+      "method": "GET",
+      "path": "/api/vcs/status",
+      "schema_source": "packages/protocol/src/groups/vcs.ts",
+      "schema_blob": "f2f4062baf7b7c467f4699d7aca67a7e4681b38e"
+    },
+    {
+      "operation": "vcs.branch.list",
+      "method": "GET",
+      "path": "/api/vcs/branch",
+      "schema_source": "packages/protocol/src/groups/vcs.ts",
+      "schema_blob": "f2f4062baf7b7c467f4699d7aca67a7e4681b38e"
+    },
+    {
+      "operation": "vcs.diff",
+      "method": "GET",
+      "path": "/api/vcs/diff",
+      "schema_source": "packages/protocol/src/groups/vcs.ts",
+      "schema_blob": "f2f4062baf7b7c467f4699d7aca67a7e4681b38e"
+    },
+    {
+      "operation": "shell.list",
+      "method": "GET",
+      "path": "/api/shell",
+      "schema_source": "packages/protocol/src/groups/shell.ts",
+      "schema_blob": "ab908f4c8264f15d0999b7d2cdd5ecf2f3f2c850"
+    },
+    {
+      "operation": "shell.create",
+      "method": "POST",
+      "path": "/api/shell",
+      "schema_source": "packages/protocol/src/groups/shell.ts",
+      "schema_blob": "ab908f4c8264f15d0999b7d2cdd5ecf2f3f2c850"
+    },
+    {
+      "operation": "shell.get",
+      "method": "GET",
+      "path": "/api/shell/:id",
+      "schema_source": "packages/protocol/src/groups/shell.ts",
+      "schema_blob": "ab908f4c8264f15d0999b7d2cdd5ecf2f3f2c850"
+    },
+    {
+      "operation": "shell.output",
+      "method": "GET",
+      "path": "/api/shell/:id/output",
+      "schema_source": "packages/protocol/src/groups/shell.ts",
+      "schema_blob": "ab908f4c8264f15d0999b7d2cdd5ecf2f3f2c850"
+    },
+    {
+      "operation": "shell.remove",
+      "method": "DELETE",
+      "path": "/api/shell/:id",
+      "schema_source": "packages/protocol/src/groups/shell.ts",
+      "schema_blob": "ab908f4c8264f15d0999b7d2cdd5ecf2f3f2c850"
+    },
+    {
+      "operation": "form.list",
+      "method": "GET",
+      "path": "/api/form",
+      "schema_source": "packages/protocol/src/groups/form.ts",
+      "schema_blob": "16abef80ff98772ab87678415ecb3d2686b85326"
+    },
+    {
+      "operation": "agent.list",
+      "method": "GET",
+      "path": "/api/agent",
+      "schema_source": "packages/protocol/src/groups/agent.ts",
+      "schema_blob": "4fd6e58159bc9729149d81e3177eb794b1d2d404"
+    },
+    {
+      "operation": "agent.get",
+      "method": "GET",
+      "path": "/api/agent/:agentID",
+      "schema_source": "packages/protocol/src/groups/agent.ts",
+      "schema_blob": "4fd6e58159bc9729149d81e3177eb794b1d2d404"
+    },
+    {
+      "operation": "command.list",
+      "method": "GET",
+      "path": "/api/command",
+      "schema_source": "packages/protocol/src/groups/command.ts",
+      "schema_blob": "dc9b850114e4fafd375cd774616c7c9577108d2e"
+    },
+    {
+      "operation": "config.get",
+      "method": "GET",
+      "path": "/api/config",
+      "schema_source": "packages/protocol/src/groups/config.ts",
+      "schema_blob": "cb4692838aaf21c3de02fd48a2ff27ba7554689e"
+    },
+    {
+      "operation": "config.shells",
+      "method": "GET",
+      "path": "/api/config/shell",
+      "schema_source": "packages/protocol/src/groups/config.ts",
+      "schema_blob": "cb4692838aaf21c3de02fd48a2ff27ba7554689e"
+    },
+    {
+      "operation": "config.update",
+      "method": "PATCH",
+      "path": "/api/experimental/config",
+      "schema_source": "packages/protocol/src/groups/config.ts",
+      "schema_blob": "cb4692838aaf21c3de02fd48a2ff27ba7554689e"
+    },
+    {
+      "operation": "integration.list",
+      "method": "GET",
+      "path": "/api/integration",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.get",
+      "method": "GET",
+      "path": "/api/integration/:integrationID",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.wellknown.add",
+      "method": "POST",
+      "path": "/api/experimental/integration/wellknown",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.connect.key",
+      "method": "POST",
+      "path": "/api/integration/:integrationID/connect/key",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.oauth.connect",
+      "method": "POST",
+      "path": "/api/integration/:integrationID/connect/oauth",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.oauth.status",
+      "method": "GET",
+      "path": "/api/integration/:integrationID/connect/oauth/:attemptID",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.oauth.complete",
+      "method": "POST",
+      "path": "/api/integration/:integrationID/connect/oauth/:attemptID/complete",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.oauth.cancel",
+      "method": "DELETE",
+      "path": "/api/integration/:integrationID/connect/oauth/:attemptID",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.command.connect",
+      "method": "POST",
+      "path": "/api/integration/:integrationID/connect/command",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.command.status",
+      "method": "GET",
+      "path": "/api/integration/:integrationID/connect/command/:attemptID",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "integration.command.cancel",
+      "method": "DELETE",
+      "path": "/api/integration/:integrationID/connect/command/:attemptID",
+      "schema_source": "packages/protocol/src/groups/integration.ts",
+      "schema_blob": "1688ee6701756f5ce555f92fbc07bfedf9c13af8"
+    },
+    {
+      "operation": "mcp.list",
+      "method": "GET",
+      "path": "/api/mcp",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "mcp.add",
+      "method": "PUT",
+      "path": "/api/experimental/mcp/:server",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "mcp.remove",
+      "method": "DELETE",
+      "path": "/api/experimental/mcp/:server",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "mcp.connect",
+      "method": "POST",
+      "path": "/api/experimental/mcp/:server/connect",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "mcp.disconnect",
+      "method": "POST",
+      "path": "/api/experimental/mcp/:server/disconnect",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "mcp.resource.catalog",
+      "method": "GET",
+      "path": "/api/mcp/resource",
+      "schema_source": "packages/protocol/src/groups/mcp.ts",
+      "schema_blob": "eb17f3632f2a2acce224a72dceaed63498e1d39c"
+    },
+    {
+      "operation": "model.list",
+      "method": "GET",
+      "path": "/api/model",
+      "schema_source": "packages/protocol/src/groups/model.ts",
+      "schema_blob": "4b8ebee3491c8bbb054a6b089da0831eae5c59fc"
+    },
+    {
+      "operation": "model.default",
+      "method": "GET",
+      "path": "/api/model/default",
+      "schema_source": "packages/protocol/src/groups/model.ts",
+      "schema_blob": "4b8ebee3491c8bbb054a6b089da0831eae5c59fc"
+    },
+    {
+      "operation": "provider.list",
+      "method": "GET",
+      "path": "/api/provider",
+      "schema_source": "packages/protocol/src/groups/provider.ts",
+      "schema_blob": "77e8fdb3fe70c215bad0ab4d9f2dbd25fc90fa6a"
+    },
+    {
+      "operation": "provider.get",
+      "method": "GET",
+      "path": "/api/provider/:providerID",
+      "schema_source": "packages/protocol/src/groups/provider.ts",
+      "schema_blob": "77e8fdb3fe70c215bad0ab4d9f2dbd25fc90fa6a"
+    },
+    {
+      "operation": "reference.list",
+      "method": "GET",
+      "path": "/api/reference",
+      "schema_source": "packages/protocol/src/groups/reference.ts",
+      "schema_blob": "c1f727ff6555730d3fd4a539557ef23b976df4c6"
+    },
+    {
+      "operation": "websearch.providers",
+      "method": "GET",
+      "path": "/api/websearch/provider",
+      "schema_source": "packages/protocol/src/groups/websearch.ts",
+      "schema_blob": "8a333898de08f7cf21ffc6f5ec64e4a5c5d72d79"
+    },
+    {
+      "operation": "websearch.query",
+      "method": "POST",
+      "path": "/api/websearch",
+      "schema_source": "packages/protocol/src/groups/websearch.ts",
+      "schema_blob": "8a333898de08f7cf21ffc6f5ec64e4a5c5d72d79"
+    },
+    {
+      "operation": "skill.list",
+      "method": "GET",
+      "path": "/api/skill",
+      "schema_source": "packages/protocol/src/groups/skill.ts",
+      "schema_blob": "103e52515f44facc3e7b028bde0bb0e48136518b"
+    },
+    {
+      "operation": "event.subscribe",
+      "method": "GET",
+      "path": "/api/event",
+      "schema_source": "packages/protocol/src/groups/event.ts",
+      "schema_blob": "f067ecfe39671513c954bfe46ed4e3f6a658515d"
+    },
+    {
+      "operation": "session.list",
+      "method": "GET",
+      "path": "/api/session",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.stats",
+      "method": "GET",
+      "path": "/api/experimental/session/stats",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.create",
+      "method": "POST",
+      "path": "/api/session",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.import",
+      "method": "POST",
+      "path": "/api/experimental/session/import",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.export",
+      "method": "GET",
+      "path": "/api/experimental/session/:sessionID/export",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.active",
+      "method": "GET",
+      "path": "/api/session/active",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.get",
+      "method": "GET",
+      "path": "/api/session/:sessionID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.remove",
+      "method": "DELETE",
+      "path": "/api/session/:sessionID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.fork",
+      "method": "POST",
+      "path": "/api/session/:sessionID/fork",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.switchAgent",
+      "method": "POST",
+      "path": "/api/session/:sessionID/agent",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.switchModel",
+      "method": "POST",
+      "path": "/api/session/:sessionID/model",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.update",
+      "method": "PATCH",
+      "path": "/api/session/:sessionID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.move",
+      "method": "POST",
+      "path": "/api/session/:sessionID/move",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.prompt",
+      "method": "POST",
+      "path": "/api/session/:sessionID/prompt",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.command",
+      "method": "POST",
+      "path": "/api/session/:sessionID/command",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.skill",
+      "method": "POST",
+      "path": "/api/experimental/session/:sessionID/skill",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.synthetic",
+      "method": "POST",
+      "path": "/api/session/:sessionID/synthetic",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.shell",
+      "method": "POST",
+      "path": "/api/session/:sessionID/shell",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.compact",
+      "method": "POST",
+      "path": "/api/session/:sessionID/compact",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.wait",
+      "method": "POST",
+      "path": "/api/experimental/session/:sessionID/wait",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.revert.stage",
+      "method": "POST",
+      "path": "/api/session/:sessionID/revert/stage",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.revert.clear",
+      "method": "DELETE",
+      "path": "/api/session/:sessionID/revert",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.revert.commit",
+      "method": "POST",
+      "path": "/api/session/:sessionID/revert/commit",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.context",
+      "method": "GET",
+      "path": "/api/session/:sessionID/context",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.diff",
+      "method": "GET",
+      "path": "/api/session/:sessionID/diff",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.inbox.list",
+      "method": "GET",
+      "path": "/api/session/:sessionID/inbox",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.inbox.cancel",
+      "method": "DELETE",
+      "path": "/api/session/:sessionID/inbox/:inboxID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.inbox.update",
+      "method": "PATCH",
+      "path": "/api/session/:sessionID/inbox/:inboxID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.instructions.entry.list",
+      "method": "GET",
+      "path": "/api/experimental/session/:sessionID/instructions/entries",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.instructions.entry.put",
+      "method": "PUT",
+      "path": "/api/experimental/session/:sessionID/instructions/entries/:key",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.instructions.entry.remove",
+      "method": "DELETE",
+      "path": "/api/experimental/session/:sessionID/instructions/entries/:key",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.generate",
+      "method": "POST",
+      "path": "/api/session/:sessionID/generate",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.log",
+      "method": "GET",
+      "path": "/api/experimental/session/:sessionID/log",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.interrupt",
+      "method": "POST",
+      "path": "/api/session/:sessionID/interrupt",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.background",
+      "method": "POST",
+      "path": "/api/session/:sessionID/background",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.message",
+      "method": "GET",
+      "path": "/api/session/:sessionID/message/:messageID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.form.list",
+      "method": "GET",
+      "path": "/api/session/:sessionID/form",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.form.create",
+      "method": "POST",
+      "path": "/api/session/:sessionID/form",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.form.get",
+      "method": "GET",
+      "path": "/api/session/:sessionID/form/:formID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.form.reply",
+      "method": "POST",
+      "path": "/api/session/:sessionID/form/:formID/reply",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.form.cancel",
+      "method": "DELETE",
+      "path": "/api/session/:sessionID/form/:formID",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.environment",
+      "method": "PUT",
+      "path": "/api/session/:sessionID/environment",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.view",
+      "method": "POST",
+      "path": "/api/session/:sessionID/view",
+      "schema_source": "packages/protocol/src/groups/session.ts",
+      "schema_blob": "dae63ffe64b07de1e6c30b9a05539ece18e81924"
+    },
+    {
+      "operation": "session.messages",
+      "method": "GET",
+      "path": "/api/session/:sessionID/message",
+      "schema_source": "packages/protocol/src/groups/message.ts",
+      "schema_blob": "c744abd880f1d55e3a0b68907b7466d48f1cdfd6"
+    },
+    {
+      "operation": "permission.request.list",
+      "method": "GET",
+      "path": "/api/permission/request",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "permission.saved.list",
+      "method": "GET",
+      "path": "/api/permission/saved",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "permission.saved.remove",
+      "method": "DELETE",
+      "path": "/api/permission/saved/:id",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "session.permission.create",
+      "method": "POST",
+      "path": "/api/session/:sessionID/permission",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "session.permission.list",
+      "method": "GET",
+      "path": "/api/session/:sessionID/permission",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "session.permission.get",
+      "method": "GET",
+      "path": "/api/session/:sessionID/permission/:requestID",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "session.permission.reply",
+      "method": "POST",
+      "path": "/api/session/:sessionID/permission/:requestID/reply",
+      "schema_source": "packages/protocol/src/groups/permission.ts",
+      "schema_blob": "b35a71c8f9cbacbe4029415359c10517c6045aa9"
+    },
+    {
+      "operation": "pty.list",
+      "method": "GET",
+      "path": "/api/pty",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.create",
+      "method": "POST",
+      "path": "/api/pty",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.get",
+      "method": "GET",
+      "path": "/api/pty/:ptyID",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.update",
+      "method": "PUT",
+      "path": "/api/pty/:ptyID",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.remove",
+      "method": "DELETE",
+      "path": "/api/pty/:ptyID",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.connectToken",
+      "method": "POST",
+      "path": "/api/pty/:ptyID/connect-token",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    },
+    {
+      "operation": "pty.connect",
+      "method": "GET",
+      "path": "/api/pty/:ptyID/connect",
+      "schema_source": "packages/protocol/src/groups/pty.ts",
+      "schema_blob": "00efe91a9392c6aaae67955a721bfea9556cd02d"
+    }
+  ]
+}

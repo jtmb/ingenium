@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "scope": "source_proposal_only",
+  "compiled": false,
+  "runtime_qualified": false,
+  "patch_sha256": "0180d2935dadb7011cd6825387cf4452441afc5b3d4870efdf7a9c7349b59089",
+  "patch_bytes": 26346,
+  "files": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_blob": "2d4b2829a5333e1390b916406ca8056f52c6f511",
+      "preimage_sha256": "623c4f23b167ecb90f1ff5359dfcdb4e458471f7af976dc20f7e3b5bc30879ae",
+      "postimage_sha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817",
+      "postimage_bytes": 143884
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "preimage_blob": "81498a2898c80ce87cd98095645cfb5368fab45e",
+      "preimage_sha256": "6444d34e6bfaf96fb0543f1b059976a9586a04a0e7099394d46c3f31d184b6de",
+      "postimage_sha256": "876e1f2bdc5ca675a3ec293c0cd7ec1e33fe5e3edfa737bfda6a58c180201d42",
+      "postimage_bytes": 3280
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "preimage_blob": "9dd98c490ce5d50cdb5b2aeac35322c2209d8cc7",
+      "preimage_sha256": "483297bf8f7fb10cfa492bfe28f03aea84d7286028467d135d75233af9b7fded",
+      "postimage_sha256": "218a0a42be6ac82adde892fe622513226c423305c78b02125366de3474732ffe",
+      "postimage_bytes": 15798
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "preimage_blob": "c1ec45df09705f887a6820986c4a101e26847b1f",
+      "preimage_sha256": "aae986c2e48cef4909e715a3b0e964307a1ae69a53479a58f474ee50f35e78bc",
+      "postimage_sha256": "d56fda3eb6973bcfbd91c66c87b49e4af797fd731956a3f71dedf997334488c6",
+      "postimage_bytes": 55354
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "d1e51f7157e9f7ae0ad0499050dd5d3c80108ee4f99836406486449a58885114",
+      "postimage_bytes": 3287
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2",
+      "postimage_bytes": 19202
+    }
+  ]
+}
