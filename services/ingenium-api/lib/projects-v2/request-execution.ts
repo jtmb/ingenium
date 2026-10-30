@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import { findRequestChatSourceIds, isRequestChatConversationActive } from "./request-chat-source.mjs";
 import { authorization, contextConversations, explicitMemory, getDb, runtimes } from "ingenium-core";
 import { revalidateRequestIdentity } from "../request-identity.js";
 import { toAuthorizationPrincipal } from "../authorization-policy.js";
@@ -47,21 +48,26 @@ const resolver = createRequestExecutionResolvers({
     return decision.allowed && decision.organizationId === workspace.organizationId;
   },
   resolvePlacement: facts => placementOwner?.(facts) ?? null,
-  getConversation: contextConversations.getContextConversation,
+  findConversations(execution, engineSessionId) {
+    if (execution.projectId === null) return [];
+    const projectId = execution.projectId;
+    const candidates = findRequestChatSourceIds(
+      (sql, parameters) => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare<string[]>(sql).all(...parameters) as { id: string }[],
+      { ...execution, projectId }, engineSessionId,
+    );
+    return candidates.map(candidate => contextConversations.getContextConversation(projectId, candidate.id));
+  },
   authorizeConversation(identity, chat) {
     return authorization.requireContentPermission(toAuthorizationPrincipal(identity.principal), {
       resourceType: "context_conversation", resourceId: chat.id, organizationId: chat.organization_id,
       projectId: chat.project_id, visibility: chat.visibility, ownerUserId: chat.owner_user_id,
     }, "read").allowed;
   },
-  conversationIsActive(projectId, chatId) {
-    // Reuse the existing Context append-only archive owner, without another state store.
-    const state = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-      `SELECT event_type FROM context_checkpoint_audit_events
-       WHERE project_id = ? AND conversation_id = ? AND archive_sequence IS NOT NULL
-       ORDER BY archive_sequence DESC LIMIT 1`,
-    ).get(projectId, chatId) as { event_type: string } | undefined;
-    return !state || state.event_type === "conversation_unarchived";
+  conversationIsActive(projectId, contextConversationId) {
+    return isRequestChatConversationActive(
+      (sql, parameters) => getDb(process.env.INGENIUM_CORE_DB_PATH).prepare<string[]>(sql).get(...parameters) as { event_type: string } | undefined,
+      projectId, contextConversationId,
+    );
   },
   now: Date.now,
 });

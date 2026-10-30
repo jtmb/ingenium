@@ -7,7 +7,7 @@ export interface RequestExecutionFacts extends RequestExecutionSelection {
   status: "authorized"; mode: "runtime"|"native"|"compatibility"; hostId: string; environmentId: string; available: true;
 }
 export interface RequestChatBinding extends RequestExecutionFacts {
-  chatId: string; visibility: "private"; engineSessionId: string;
+  chatId: string; contextConversationId: string; visibility: "private"; engineSessionId: string;
 }
 export interface PlacementRequest {
   organizationId: string; ownerUserId: string; projectId: string; workspaceId: string;
@@ -29,9 +29,9 @@ export interface RequestExecutionPorts {
   }|null;
   authorizeProject(identity: RequestIdentity, workspace: runtimes.AuthorizedWorkspace): boolean;
   resolvePlacement: PlacementResolver;
-  getConversation(projectId: string, chatId: string): contextConversations.ContextConversationSummary|undefined;
+  findConversations(execution: RequestExecutionFacts, engineSessionId: string): (contextConversations.ContextConversationSummary|undefined)[];
   authorizeConversation(identity: RequestIdentity, chat: contextConversations.ContextConversationSummary): boolean;
-  conversationIsActive(projectId: string, chatId: string): boolean;
+  conversationIsActive(projectId: string, contextConversationId: string): boolean;
   now(): number;
 }
 export class RequestExecutionError extends Error { readonly code: string; readonly status: number; constructor(code: string,status?: number) }

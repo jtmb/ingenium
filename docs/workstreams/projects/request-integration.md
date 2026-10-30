@@ -39,18 +39,27 @@ mcp/runtime audience and current existing explicitMemory scope resolution,
 including the credential/principal epoch and expiry checks owned there.
 Request identity and persisted bindings are rechecked after callbacks.
 
-resolveRequestChatBinding(request, execution, chatId) re-resolves execution from
-existing owners, compares every retained binding axis, requires the exact private
-existing Context conversation under the same organization/project/user, and
-reuses existing content authorization and append-only Context archive state.
-Only a source='opencode-chat' registration with matching sourceRuntimeId and
-bounded sourceSessionId can supply engineSessionId. It never invents a session,
-copies messages, changes a conversation or makes a remote engine lookup. The
-persisted registration identifies the original session; live generation
-admission remains the existing engine/request-journal owner's responsibility.
-A second execution recheck prevents Context callbacks from admitting an old
-runtime/binding. Lookup facts do not grant terminal input, generation or other
-effect permission; original-journal/final authorization remains mandatory.
+resolveRequestChatBinding(request, execution, chatId) treats chatId as the
+existing ENGINE sourceSessionId, not a Context row ID. It re-resolves execution
+from existing owners and compares every retained binding axis. A bounded
+LIMIT 2 query reads existing Context registrations under the exact selected
+organization/project/user/runtime, private visibility, source='opencode-chat'
+and exact text sourceSessionId. Zero or multiple matching rows deny; it never
+chooses a latest row or filters an archived duplicate to make one winner.
+Malformed metadata cannot satisfy the guarded lookup.
+
+The one canonical Context row is read through contextConversations and existing
+content authorization. Its organization/project/user/runtime/session metadata
+must still match. Existing append-only archive state is read by that canonical
+Context row ID. The returned binding contains chatId=engineSessionId and
+contextConversationId=the distinct persisted Context ID. No IDs, metadata,
+messages or archive events are rewritten. It never invents an engine session or
+makes a remote engine lookup. The persisted registration identifies the original
+session; live generation admission remains the existing engine/request-journal
+owner's responsibility. Execution and unique canonical source are rechecked
+after callbacks, including detection of a newly inserted duplicate.
+Lookup facts do not grant terminal input, generation or other effect permission;
+original-journal/final authorization remains mandatory.
 
 Inspectable RequestExecutionError values carry code and HTTP status. Invalid
 input is 422, unavailable identity 401, hidden scope/runtime/chat 404, changed
@@ -81,7 +90,7 @@ The full Projects CPU invocation still requires explicit
 VEYRA_PROJECTS_NATIVE_SOURCE_ROOT="$PHASE/windows-source". Central requested
 checks are the existing actual-core API type/emitted-closure checks plus request
 identity, project/content authorization, service credential revocation and
-Context archive tests with this facade. No local dependency install/build,
+Context archive tests with this facade. The fixture deliberately uses different engine and Context IDs, proves bounded ambiguity denial, cross-owner/runtime/project/private isolation, persistent archive/unarchive by canonical ID, and a duplicate inserted during authorization. No local dependency install/build,
 native compile, service, model or UI runtime was started here.
 
 ## Native/projectless proposal against the current tree

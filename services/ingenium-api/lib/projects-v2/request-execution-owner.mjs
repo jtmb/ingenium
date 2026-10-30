@@ -112,15 +112,17 @@ export function createRequestExecutionResolvers(ports) {
     });
     if(axes.some(axis=>current[axis]!==original[axis]))deny("EXECUTION_BINDING_CHANGED",409);
     const identity=identityFor(ports,request),key=signature(identity);
-    const chat=ports.getConversation(current.projectId,chatId);
-    if(!chat || chat.id!==chatId || chat.project_id!==current.projectId ||
+    const candidates=snapshot(ports.findConversations(current,chatId)??null);
+    if(!Array.isArray(candidates) || candidates.length!==1)deny("CHAT_BINDING_UNAVAILABLE",404);
+    const chat=candidates[0];
+    if(!chat || !text(chat.id) || chat.project_id!==current.projectId ||
       chat.organization_id!==current.organizationId || chat.owner_user_id!==current.ownerUserId ||
       chat.visibility!=="private" || ports.authorizeConversation(identity,chat)!==true)
       deny("CHAT_BINDING_UNAVAILABLE",404);
     let metadata;
     try{metadata=JSON.parse(chat.metadata);}catch{deny("CHAT_BINDING_UNAVAILABLE",404);}
     if(!metadata || metadata.source!=="opencode-chat" || metadata.sourceRuntimeId!==current.runtimeId ||
-      !text(metadata.sourceSessionId) || ports.conversationIsActive(current.projectId,chatId)!==true)
+      metadata.sourceSessionId!==chatId || ports.conversationIsActive(current.projectId,chat.id)!==true)
       deny("CHAT_BINDING_UNAVAILABLE",404);
     // Revalidate again after Context/authorization callbacks; no serialized execution is authority.
     const final=resolveRequestExecution(request,{
@@ -128,7 +130,11 @@ export function createRequestExecutionResolvers(ports) {
     });
     if(axes.some(axis=>final[axis]!==current[axis]) || signature(identityFor(ports,request))!==key)
       deny("EXECUTION_BINDING_CHANGED",409);
-    return Object.freeze({...final,chatId,visibility:"private",engineSessionId:metadata.sourceSessionId});
+    const retained=snapshot(ports.findConversations(final,chatId)??null);
+    if(!Array.isArray(retained) || retained.length!==1 || JSON.stringify(retained[0])!==JSON.stringify(chat) ||
+      ports.conversationIsActive(final.projectId,chat.id)!==true)
+      deny("CHAT_BINDING_UNAVAILABLE",404);
+    return Object.freeze({...final,chatId,contextConversationId:chat.id,visibility:"private",engineSessionId:chatId});
   }
   return Object.freeze({resolveRequestExecution,resolveRequestChatBinding});
 }
