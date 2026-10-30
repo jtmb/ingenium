@@ -1,0 +1,704 @@
+{
+  "schemaVersion": 1,
+  "kind": "per-file-readonly-source-audit",
+  "capturedAt": "2026-10-30T11:33:04.846Z",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "head": "d86e80d0ba28ed484bcecfd4760dc458b529958f",
+  "integratedBuildSnapshot": false,
+  "runtimeEvidence": false,
+  "sourceCopiesMade": false,
+  "rows": [
+    {
+      "path": "packages/ingenium-core/lib/tools/runtimes.ts",
+      "sha256": "2da1e36264a0d8106131dd83d701c1e1389a8adac9ea541b03f5090a7f3ba78d",
+      "bytes": 58188,
+      "anchors": [
+        {
+          "symbol": "export function authorizeWorkspace",
+          "lines": [
+            220
+          ]
+        },
+        {
+          "symbol": "export function createRuntimeInstance",
+          "lines": [
+            282
+          ]
+        },
+        {
+          "symbol": "export function transitionRuntime",
+          "lines": [
+            502
+          ]
+        },
+        {
+          "symbol": "export function recordRuntimeHealth",
+          "lines": [
+            733
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+      "sha256": "2d231a2015739bee169f92c4bc2a3037f9eb3524772efe2903790fe184e870c7",
+      "bytes": 17982,
+      "anchors": [
+        {
+          "symbol": "export function originalProvisionFromNewFlow",
+          "lines": [
+            54
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "sha256": "48394a7d3f701ed28b8c383f17d7b133550bbbab9fb3d3ee95ed39da87f5d118",
+      "bytes": 14065,
+      "anchors": [
+        {
+          "symbol": "async function provision",
+          "lines": [
+            172
+          ]
+        },
+        {
+          "symbol": "export function ensureRuntime",
+          "lines": [
+            259
+          ]
+        },
+        {
+          "symbol": "provisionManagedRuntime({",
+          "lines": [
+            223
+          ]
+        },
+        {
+          "symbol": "originalProvision: authenticatedOriginalProvision",
+          "lines": [
+            238
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-reconciler.ts",
+      "sha256": "133fe5871330bf0587cceeecc3b7a30e6c66ef174fd09d8b7e49b52c8a21700a",
+      "bytes": 4564,
+      "anchors": [
+        {
+          "symbol": "recordRuntimeHealth",
+          "lines": [
+            40
+          ]
+        },
+        {
+          "symbol": "backend.health === \"healthy\"",
+          "lines": [
+            42
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "sha256": "e41c80f956bba3ec53dfccd6fc617d5873b3d9767f35510bb4e79558ed7aa9e5",
+      "bytes": 9766,
+      "anchors": [
+        {
+          "symbol": "authenticatedOriginalProvision",
+          "lines": [
+            84
+          ]
+        },
+        {
+          "symbol": "export async function provisionManagedRuntime",
+          "lines": [
+            85
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "sha256": "0d981f8cc4709713877bbb18b7552b2e3088a1bc1207f9d691cf895a310d6e43",
+      "bytes": 26528,
+      "anchors": [
+        {
+          "symbol": "async function provisionRuntime",
+          "lines": [
+            278
+          ]
+        },
+        {
+          "symbol": "originalProvisionFromNewFlow",
+          "lines": [
+            329
+          ]
+        },
+        {
+          "symbol": "material.profileQualified!==true",
+          "lines": [
+            403
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "sha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a",
+      "bytes": 11277,
+      "anchors": [
+        {
+          "symbol": "export function buildRuntimeContainerSpec",
+          "lines": [
+            201
+          ]
+        },
+        {
+          "symbol": "INGENIUM_MCP_AUDIENCE=runtime",
+          "lines": [
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/agents.ts",
+      "sha256": "bf2230970004420be9c88752f08b6e0a23888c9e3581cb95760420ccee035ec3",
+      "bytes": 57776,
+      "anchors": [
+        {
+          "symbol": "export function createAgent",
+          "lines": [
+            1000
+          ]
+        },
+        {
+          "symbol": "export function getJobAgentConfig",
+          "lines": [
+            820
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/jobs.ts",
+      "sha256": "85a3dbd4295e8afdbfc053cc7e1be681d95d8e277770b8ac1156f4be88518500",
+      "bytes": 56494,
+      "anchors": [
+        {
+          "symbol": "function ensureAutomationPrincipal",
+          "lines": [
+            181
+          ]
+        },
+        {
+          "symbol": "export function createJob",
+          "lines": [
+            343
+          ]
+        },
+        {
+          "symbol": "export function startJobRun",
+          "lines": [
+            682
+          ]
+        },
+        {
+          "symbol": "trigger === \"cron\" ? job.schedule_revision : null",
+          "lines": [
+            743
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/jobs.ts",
+      "sha256": "0916965e09a2658691c52f0474ed1182f66799ec7cfefb28d02a0b2d0f5f6f42",
+      "bytes": 26842,
+      "anchors": [
+        {
+          "symbol": "jobsRouter.post(\"/:id/run\"",
+          "lines": [
+            614
+          ]
+        },
+        {
+          "symbol": "executeJobRun(result.id",
+          "lines": [
+            634
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/job-runner.ts",
+      "sha256": "cb7c6e8ccfee17d22661523b6a21d8febb569d47671c9172a2621884321e241c",
+      "bytes": 82061,
+      "anchors": [
+        {
+          "symbol": "export async function executeJobRun",
+          "lines": [
+            1589
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/service.ts",
+      "sha256": "3a4d6ef0602b984fcceb0f3564b4af727d481e9dda7e622fb10d15068c90101b",
+      "bytes": 20053,
+      "anchors": [
+        {
+          "symbol": "  propose(",
+          "lines": [
+            47
+          ]
+        },
+        {
+          "symbol": "  approve(",
+          "lines": [
+            85
+          ]
+        },
+        {
+          "symbol": "  reconcile(",
+          "lines": [
+            161
+          ]
+        },
+        {
+          "symbol": "const claim = this.jobs.claim",
+          "lines": [
+            180
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+      "sha256": "988c71be57ea57c5462739ac8e72f60b555937c3d1fa4d17ffe44ca6fbbf2d9b",
+      "bytes": 15822,
+      "anchors": [
+        {
+          "symbol": "export function createCoreDotRuntime",
+          "lines": [
+            58
+          ]
+        },
+        {
+          "symbol": "const claim=core.jobs.startJobRun",
+          "lines": [
+            103
+          ]
+        },
+        {
+          "symbol": "    service,",
+          "lines": [
+            144
+          ]
+        },
+        {
+          "symbol": "async dispatchJob",
+          "lines": [
+            146
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/request-session.ts",
+      "sha256": "bb5902f2716383eb08e126c2ea632e93266211dba54c0d2ee51fc57e905e02d8",
+      "bytes": 5180,
+      "anchors": [
+        {
+          "symbol": "export function createCoreRequestDotSession",
+          "lines": [
+            42
+          ]
+        },
+        {
+          "symbol": "revalidateRequestIdentity(request)",
+          "lines": [
+            52
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "sha256": "93f88eafce8a9c83586b6f2d6d474b8fbd797c47906079f0cee25557c4a6de11",
+      "bytes": 23367,
+      "anchors": [
+        {
+          "symbol": "    requireSource(",
+          "lines": [
+            121
+          ]
+        },
+        {
+          "symbol": "metadata.source!==\"opencode-chat\"",
+          "lines": [
+            95,
+            128
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "sha256": "e10260de3b5845807b27b122e15a9b183ad1daae565a92dbd95ecc1c5376b611",
+      "bytes": 24328,
+      "anchors": [
+        {
+          "symbol": "function base(",
+          "lines": [
+            16
+          ]
+        },
+        {
+          "symbol": "run.schedule_revision!==job.schedule_revision",
+          "lines": [
+            18
+          ]
+        },
+        {
+          "symbol": "const op=db.prepare",
+          "lines": [
+            25
+          ]
+        },
+        {
+          "symbol": "  async prepare(",
+          "lines": [
+            67
+          ]
+        },
+        {
+          "symbol": "const profile=await profiles.qualify",
+          "lines": [
+            70,
+            91
+          ]
+        },
+        {
+          "symbol": "  async launchMaterial(",
+          "lines": [
+            87
+          ]
+        },
+        {
+          "symbol": "profileQualified:true",
+          "lines": [
+            99,
+            126
+          ]
+        },
+        {
+          "symbol": "  bootstrapAssignment(",
+          "lines": [
+            127
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "sha256": "32136a8e4b418b4506729ace16f85977f60ce0c8c2d600955be9edabc7174e55",
+      "bytes": 8833,
+      "anchors": [
+        {
+          "symbol": "imageOwner?.qualifyOriginalJobRole",
+          "lines": [
+            45
+          ]
+        },
+        {
+          "symbol": "const withImage=",
+          "lines": [
+            67
+          ]
+        },
+        {
+          "symbol": "const needsImage=",
+          "lines": [
+            78
+          ]
+        },
+        {
+          "symbol": "return withImage(owner.factsForOriginalImageCheck",
+          "lines": [
+            87
+          ]
+        },
+        {
+          "symbol": "prepareManagedExecution(",
+          "lines": [
+            92
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+      "sha256": "3d59e328985cac1bce532d2de8e8dd65bb4a90a7f5e1013c3df06e767235e2a2",
+      "bytes": 38409,
+      "anchors": [
+        {
+          "symbol": "function managedJobCredentialBinding",
+          "lines": [
+            543
+          ]
+        },
+        {
+          "symbol": "export function issueManagedJobCredential",
+          "lines": [
+            582
+          ]
+        },
+        {
+          "symbol": "export function inspectManagedJobCredential",
+          "lines": [
+            599
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/126_managed_job_execution.sql",
+      "sha256": "44532aace969cf4b76465d72fb14cb68341c269ac08433d77febc89a44adbc4a",
+      "bytes": 8644,
+      "anchors": [
+        {
+          "symbol": "CREATE TABLE job_run_managed_execution",
+          "lines": [
+            4
+          ]
+        },
+        {
+          "symbol": "profile_id TEXT NOT NULL",
+          "lines": [
+            21
+          ]
+        },
+        {
+          "symbol": "profile_hash TEXT NOT NULL",
+          "lines": [
+            22
+          ]
+        },
+        {
+          "symbol": "CREATE TRIGGER managed_job_execution_immutable",
+          "lines": [
+            49
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-manager-proof.mjs",
+      "sha256": "36faf7dc7064fd4183759c2799d31ade57d9eccbb02eb727bb1998b91cd332a2",
+      "bytes": 1585,
+      "anchors": [
+        {
+          "symbol": "export function createCore126ManagerProofProducer",
+          "lines": [
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "sha256": "c4948687cd6903bcd37836d524c282fd29c778806131a06ebda5e8d72972838c",
+      "bytes": 12173,
+      "anchors": [
+        {
+          "symbol": "export function createCore126ImageRegistry",
+          "lines": [
+            25
+          ]
+        },
+        {
+          "symbol": "function bindOriginal",
+          "lines": [
+            38
+          ]
+        },
+        {
+          "symbol": "export function createCore126ImageOwner",
+          "lines": [
+            51
+          ]
+        },
+        {
+          "symbol": "async withFreshOriginalJobRole",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "symbol": "def=await registry.load",
+          "lines": [
+            59
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-agent-material.mjs",
+      "sha256": "a3eb13ec7caf7a4e384b32a5c3eb605e31855a3b035779d12f84e41fe3115ade",
+      "bytes": 7337,
+      "anchors": [
+        {
+          "symbol": "function binding",
+          "lines": [
+            11
+          ]
+        },
+        {
+          "symbol": "export function verifyCore126AgentMaterial",
+          "lines": [
+            29
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "sha256": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923",
+      "bytes": 12169,
+      "anchors": [
+        {
+          "symbol": "function identity",
+          "lines": [
+            10
+          ]
+        },
+        {
+          "symbol": "function validate(",
+          "lines": [
+            11
+          ]
+        },
+        {
+          "symbol": "export function createManagedJobContainerOwner",
+          "lines": [
+            25
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "sha256": "c451bb63f00fdaa36b4fb12afd3db5ea5adebb34cf241b407b463b5f19169000",
+      "bytes": 2136,
+      "anchors": [
+        {
+          "symbol": "export function createManagedJobCoreClient",
+          "lines": [
+            3
+          ]
+        },
+        {
+          "symbol": "launchMaterial:",
+          "lines": [
+            19
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+      "sha256": "4c856c0a4d4df540b1f90a42ec5771870fae272e4851f12e43567d7225149e12",
+      "bytes": 3577,
+      "anchors": [
+        {
+          "symbol": "a.profileQualified",
+          "lines": [
+            10
+          ]
+        },
+        {
+          "symbol": "export function createManagedJobChild",
+          "lines": [
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+      "sha256": "d18d5d892477eb5d5a9c501ee3194edf8314cf896997bdd0559aeabcc271400e",
+      "bytes": 2471,
+      "anchors": [
+        {
+          "symbol": "export function createOriginalJobAuthority",
+          "lines": [
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8",
+      "bytes": 2337,
+      "anchors": [
+        {
+          "symbol": "export function parseStrictJobJson",
+          "lines": [
+            4
+          ]
+        },
+        {
+          "symbol": "export function parseOriginalJobFrame",
+          "lines": [
+            11
+          ]
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+      "sha256": "15fca1e2f55a70ea6e259949a44c2b948abf3870d3a4be2133d58ea5143bbd42",
+      "bytes": 5845,
+      "anchors": [
+        {
+          "symbol": "export function assertOriginalBootstrapAssignment",
+          "lines": [
+            10
+          ]
+        },
+        {
+          "symbol": "export async function runOriginalManagedJobBootstrap",
+          "lines": [
+            18
+          ]
+        },
+        {
+          "symbol": "bootstrap-assignment",
+          "lines": [
+            21
+          ]
+        }
+      ]
+    },
+    {
+      "path": "packages/veyra-operations/core126-job-bootstrap.mjs",
+      "sha256": "d685142d5c2c3ba5ced0c64d9fa2b100ed1979e662462bd493d9bd414cce3343",
+      "bytes": 2286,
+      "anchors": [
+        {
+          "symbol": "export async function bootstrapCore126Job",
+          "lines": [
+            6
+          ]
+        }
+      ]
+    }
+  ]
+}
