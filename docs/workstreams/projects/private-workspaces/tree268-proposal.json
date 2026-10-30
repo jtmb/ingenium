@@ -1,0 +1,55 @@
+{
+  "nativeTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+  "files": [
+    {
+      "path": "crates/contracts/src/private_workspaces.rs",
+      "baseBlob": null,
+      "proposedSha256": "6208ceb6b3ead00a9fa59acb160158b897d25db77bb1bde4628e44b0696dba06"
+    },
+    {
+      "path": "crates/adapters/src/projects/private_workspaces.rs",
+      "baseBlob": null,
+      "proposedSha256": "baf71b7eace08bdd38377e6e388afeeefc37938603ec8d1c7b9566433353df60"
+    },
+    {
+      "path": "crates/adapters/src/projects/0006.sql",
+      "baseBlob": null,
+      "proposedSha256": "e5a3a2a4187e3a07ea4018fb82bc8d750787b020fd385ba85e9f38df88bfb130"
+    },
+    {
+      "path": "apps/service/src/routes/private_workspaces.rs",
+      "baseBlob": null,
+      "proposedSha256": "5c1b22b894cabf8ca4ecf2771cb54e9713faf3537082f1604d5fb11a58f826e4"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "baseBlob": "cdd13f467919794b5282682b3ebf51614437f9f3",
+      "proposedSha256": "6967ebf9b654f26fa15d6a0f4930adbb2e02c006012f1591f24f7876745048a0"
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "baseBlob": "ea07d39b8371fcb4cd61ed69b45303bcd09b4208",
+      "proposedSha256": "30490c93f19d638d6eb50a95c2e83c55795dc4717daa46a4f683faf59b695819"
+    },
+    {
+      "path": "crates/contracts/src/lib.rs",
+      "baseBlob": "2bf07f372dda8b6f5d11c20001b7139ca5f11ce3",
+      "proposedSha256": "d09779b838656906a2d42990c920e01a4d908b0c35903352581f3b80c2c64d17"
+    }
+  ],
+  "patchSha256": "4392b999c793fb24ef41b6d4407396e279767a66c8bb76e7ca5b9aa3394a5eb1",
+  "bytes": 38891,
+  "nativeWrites": false,
+  "applied": false,
+  "compiled": false,
+  "method": "context-exact in-memory rebase; existing native bytes verified against tree Git blobs; no source copy or native write",
+  "patch": "native-private-workspaces.patch",
+  "windowsGitApplyCheck": "passed against recorded current tree files; not applied",
+  "cleanup": {
+    "removedPath": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/private-workspaces/native-private-workspaces-tree268.patch",
+    "removedBytes": 38893,
+    "reason": "duplicate complete patch; all proposed file hashes equal retained original patch, regeneration uses context-exact in-memory application of retained original patch to verified tree inputs",
+    "sourceAndUniqueEvidencePreserved": true,
+    "activeDescriptors": 0
+  }
+}
