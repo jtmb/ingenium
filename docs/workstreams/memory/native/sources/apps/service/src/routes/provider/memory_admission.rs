@@ -10,7 +10,7 @@ pub(crate) struct MemorySynthesisAdmission{
  owner:NativeMemoryOwner,payload:ClosedSynthesisPayload,binding:ModelBinding,
 }
 impl MemorySynthesisAdmission{
- pub(in crate::routes) fn capture(state:&ServiceState,subject:MemorySubject,chat:&str,original_uuid:String,budget:SynthesisBudget)->Result<Arc<Self>,GatewayError>{
+ pub(in crate::routes) fn capture(state:&ServiceState,subject:MemorySubject,chat:&str,source_message:&str,original_uuid:String,budget:SynthesisBudget)->Result<Arc<Self>,GatewayError>{
   if state.draining.load(Ordering::SeqCst)||state.model_work.has_retained().unwrap_or(true){return Err(GatewayError::RuntimeUnavailable)}
   let projects=state.projects.try_lock().map_err(|_|GatewayError::RequestBusy)?;
   let store=projects.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
@@ -23,6 +23,9 @@ impl MemorySynthesisAdmission{
   let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|GatewayError::RuntimeUnavailable)?.as_millis();
   let now=u64::try_from(now).map_err(|_|GatewayError::RuntimeUnavailable)?;
   let snapshot=state.goals.capture_learning(store,&owner,&state.live_agent.runtime,chat,now).map_err(|_|GatewayError::InvalidGrant)?;
+  // A retained original is only a bounded discovery hint. Its actual user
+  // message must be in the newly owner-verified completed source snapshot.
+  if !snapshot.messages.iter().any(|m|m.source.role==veyra_memory::Role::User&&m.source.message_id==source_message){return Err(GatewayError::InvalidGrant)}
   let (stamp,binding,model)=state.live_agent.runtime.memory_synthesis_model(store,&owner,chat).map_err(|_|GatewayError::BindingMismatch)?;
   if stamp!=snapshot.stamp{return Err(GatewayError::StaleEpoch)}
   state.residency.try_lock().map_err(|_|GatewayError::RequestBusy)?.validate_observed_ready(&binding).map_err(|_|GatewayError::LeaseDenied)?;
@@ -36,7 +39,11 @@ impl MemorySynthesisAdmission{
  /// Synchronous fresh check; caller holds original Serial, never across await.
  /// Called at enrollment, before native acquisition/final journal+slot claim,
  /// and before publication/acceptance. Snapshot membership alone grants nothing.
- pub(in crate::routes) fn check_current(&self,state:&ServiceState)->Result<(),GatewayError>{
+ pub(crate) fn check_current(&self,state:&ServiceState)->Result<(),GatewayError>{
+  self.check_source_current(state)?;
+  state.residency.try_lock().map_err(|_|GatewayError::RequestBusy)?.validate_observed_ready(&self.binding).map_err(|_|GatewayError::LeaseDenied)
+ }
+ pub(crate) fn check_source_current(&self,state:&ServiceState)->Result<(),GatewayError>{
   if state.draining.load(Ordering::SeqCst){return Err(GatewayError::LeaseDenied)}
   let projects=state.projects.try_lock().map_err(|_|GatewayError::RequestBusy)?;
   let store=projects.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
@@ -45,7 +52,6 @@ impl MemorySynthesisAdmission{
   let (stamp,binding,model)=state.live_agent.runtime.memory_synthesis_model(store,&self.owner,&original.snapshot.chat_id).map_err(|_|GatewayError::BindingMismatch)?;
   if stamp!=original.snapshot.stamp||binding!=self.binding||model!=original.model{return Err(GatewayError::StaleEpoch)}
   state.goals.verify_learning(store,&self.owner,&state.live_agent.runtime,&original.snapshot).map_err(|_|GatewayError::InvalidGrant)?;
-  state.residency.try_lock().map_err(|_|GatewayError::RequestBusy)?.validate_observed_ready(&self.binding).map_err(|_|GatewayError::LeaseDenied)?;
   Ok(())
  }
  /// Provider-private: only its opaque known-result consumer calls this after

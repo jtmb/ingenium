@@ -4,7 +4,8 @@ Root authorized this purpose in the original provider/model owners. This
 proposal supplies genuine source admission, closed immutable payload and strict
 result formats, original queue Book custody/interlocks, distinct transport
 correlation, and additive content-free rows in the SAME ProviderAttemptStore.
-It supplies NO positive native producer or fabricated Task grant.
+It supplies a genuine producer in those existing owners without fabricated
+Task grants. All changes remain unapplied and uncompiled in this worker.
 
 ## Actual implementation in owned source
 
@@ -67,37 +68,43 @@ RuntimeRequestAuthentication, fixed transport, native barrier/resume owner,
 retained supervisor, cancellation and actual lease owners. EOF, parsed stop,
 idle transcript, a cancelled waiter or metadata alone is never retirement.
 
-## Exact unsupported producers: do not install a working-claiming ingress
+## Genuine producer in existing owners; actual Native gates remain open
 
-The source contract deliberately returns
-MemorySynthesisUnavailable::OriginalRegistrySlotProducer before ANY native
-effect. This is not a completed connected generation implementation.
+The original registry active slot stores a tagged Task/Memory identity. Task
+CandidateRequest, SessionGrant, DurableTaskAdmission and RequestIdentity retain
+their original semantics. MemoryCandidate/MemoryClaim require the genuine
+current source/model admission and Core utility lease, with no Task fallback.
+TransportPurpose is sealed to Task/Memory; both use the same generic private
+handshake, framing, native authentication, start, supervisor and retirement.
 
-Pinned service constructors still require the Task path:
+Originals::Memory in the original ProviderAcquisition chain retains actual
+socket/tree/observer/authenticated transport, journal attempt and cleanup
+capabilities. Its worker is retained in the same ProviderQueue Book before
+the first native effect. Native return capabilities stay in the acquisition
+and TransportSupervisor; the waiting caller receives response control only.
+KnownMemorySynthesisResult can be minted only after matching actual native
+retirement, resumed observation, retired controls, same-journal yielded receipt,
+shared slot release and terminal release of the exact operation-UUID lease.
+EOF, cancellation and output parsing cannot mint that result or release leases.
+Invalid output can leave a known retired request without a learned entry;
+uncertain native cleanup retains the original and fences the shared queue.
 
-- RequestIdentity::new(&SessionGrant, &RuntimeTarget);
-- registry/request_admission.rs::CandidateRequest { grant: SessionGrant };
-- provider/acquisition.rs::NativeOriginals requires SessionGrant,
-  DurableTaskAdmission and TaskActivity::RequestProgress;
-- acquisition/retirement.rs::enroll and slot_yield.rs require that Task
-  RequestProgress/grant and original epoch chain.
-
-Root must reconcile these SAME owners with distinct MemorySynthesis variants,
-including one shared active registry slot, genuine internal source/model grant,
-Core operation-UUID lease, original native acquisition and sealed known-result
-producer. Do not feed a memory purpose into the old Task constructors. The
-tagged transport identity is the proposed compatibility surface, not proof
-that the existing Task-specialized supervisor already accepts it.
+Full-chain history includes both purposes; Task-only history skips Memory
+without fabricating a Task row. Complete transport census uses tagged identities.
+Root must independently review Memory NativePhaseBook/RetirementBudget inclusion
+in its actual global shutdown capture and closure workflow. That gate is open.
 The original model owner must also enforce its actual context/token budget
 without truncating source, and qualify the existing backend's closed JSON
 request/response options. Byte/elapsed/output caps alone do not prove model fit.
 
-After that source API is frozen and reviewed, the ORIGINAL productivity worker
-must capture under Serial/current owners, RELEASE all Serial/hook/ProjectStore/
-GoalStore guards, await that retained provider request, then reacquire actual
-owners and consume KnownMemorySynthesisResult::accept -> Goals.accept_learning.
-The existing helper is never wired to a fake/always-successful model callback.
-No second scheduler or public synthesis/utility HTTP route is proposed.
+The ORIGINAL productivity worker now captures under Serial/current owners,
+releases all Serial/hook/ProjectStore/GoalStore guards, awaits the retained
+provider request, then reacquires Serial and consumes the known result through
+Goals.accept_learning. Bounded discovery reads completed hook records or
+admitted original local prompt records, never a new transcript database.
+Each hinted user message must be selected by the actual fresh completed source
+snapshot. Cursors are ephemeral discovery metadata, not execution authority.
+No second scheduler or public synthesis/utility HTTP route is added.
 
 Future Plugins/Skills utility synthesis must use the same original private
 model-purpose owner through separate Root-approved CLOSED variants. This
@@ -112,8 +119,8 @@ rollback. Existing five JS adapter/source-manifest tests remain included.
 Rust budget/UUID/payload/result tests are authored, not executed.
 
 No Native apply, Cargo/rustc/npm/build, engine/model process, GPU/inference,
-service, external write or desktop control occurred. Native purpose
-registration/slot/acquisition/result production, completed-worker invocation,
-actual restore/cleanup workflow, original Task regression and full private/
-Project runtime qualification remain OPEN. This contract is not a substitute
+service, external write or desktop control occurred. Actual Native compile and
+purpose/slot/acquisition/result qualification, completed-worker execution,
+shutdown phase capture, restore/cleanup workflow, original Task regression and
+full private/Project runtime qualification remain OPEN. This contract is not a substitute
 for those gates.

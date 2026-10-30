@@ -23,6 +23,54 @@ impl MemoryTransportIdentity{
    input_hash:original.input_hash.clone(),engine_instance_id:original.snapshot.stamp.engine_instance_id.clone(),
    binding:runtime.binding().clone(),runtime_generation:runtime.generation().into(),address:runtime.address()})
  }
+ pub(crate) fn operation_id(&self)->&str{&self.request_id}
+ pub(crate) fn request_id(&self)->&str{&self.request_id}
+ pub(crate) fn binding(&self)->&ModelBinding{&self.binding}
+ pub(crate) fn runtime_generation(&self)->&str{&self.runtime_generation}
+ pub(crate) fn address(&self)->SocketAddrV4{self.address}
+ pub(crate) fn matches_original(&self,value:&veyra_memory::MemorySynthesisOriginal)->bool{
+  self.request_id==value.operation_id&&self.input_hash==value.input_hash&&
+   self.scope_hash==value.snapshot.stamp.scope.key().unwrap_or_default()&&
+   self.engine_instance_id==value.snapshot.stamp.engine_instance_id
+ }
+}
+mod sealed{pub trait Sealed{}}
+impl sealed::Sealed for RequestIdentity{}
+impl sealed::Sealed for MemoryTransportIdentity{}
+impl sealed::Sealed for TransportRequestIdentity{}
+pub(crate) trait RuntimeCorrelation:sealed::Sealed+Clone+PartialEq+Eq{
+ fn common(&self)->TransportRequestIdentity;
+ fn request_id(&self)->&str;
+ fn binding(&self)->&ModelBinding;
+ fn runtime_generation(&self)->&str;
+ fn address(&self)->SocketAddrV4;
+}
+impl RuntimeCorrelation for RequestIdentity{
+ fn common(&self)->TransportRequestIdentity{TransportRequestIdentity::Task(self.clone())}
+ fn request_id(&self)->&str{self.request_id()}
+ fn binding(&self)->&ModelBinding{self.binding()}
+ fn runtime_generation(&self)->&str{self.runtime_generation()}
+ fn address(&self)->SocketAddrV4{self.address()}
+}
+impl RuntimeCorrelation for MemoryTransportIdentity{
+ fn common(&self)->TransportRequestIdentity{TransportRequestIdentity::MemorySynthesis(self.clone())}
+ fn request_id(&self)->&str{self.request_id()}
+ fn binding(&self)->&ModelBinding{self.binding()}
+ fn runtime_generation(&self)->&str{self.runtime_generation()}
+ fn address(&self)->SocketAddrV4{self.address()}
+}
+impl RuntimeCorrelation for TransportRequestIdentity{
+ fn common(&self)->TransportRequestIdentity{self.clone()}
+ fn request_id(&self)->&str{self.request_id()}
+ fn binding(&self)->&ModelBinding{self.binding()}
+ fn runtime_generation(&self)->&str{self.runtime_generation()}
+ fn address(&self)->SocketAddrV4{self.address()}
+}
+impl PartialEq<RequestIdentity> for TransportRequestIdentity{
+ fn eq(&self,other:&RequestIdentity)->bool{matches!(self,Self::Task(value) if value==other)}
+}
+impl PartialEq<TransportRequestIdentity> for RequestIdentity{
+ fn eq(&self,other:&TransportRequestIdentity)->bool{other==self}
 }
 impl TransportRequestIdentity{
  pub(crate) fn request_id(&self)->&str{match self{Self::Task(v)=>v.request_id(),Self::MemorySynthesis(v)=>&v.request_id}}

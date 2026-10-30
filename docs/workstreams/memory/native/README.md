@@ -5,7 +5,7 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
-proposal.json contains 48 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 114 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
@@ -93,10 +93,11 @@ Remaining integration gates, not claimed:
    bounded immutable payload/result, distinct purpose in the SAME queue Book,
    tagged transport correlation and content-free SAME-journal schema3. No fake
    Task/Project and no Windows inference engine source/binary changes. The
-   original registry/native-acquisition/known-result producers remain
-   unsupported, and the original productivity worker invocation is not
-   installed. Synthesis returns the explicit unsupported producer before any
-   effect. This foundation does not claim connected generation.
+   original registry/native-acquisition/known-result producers and two-phase
+   productivity invocation now have genuine source implementations. They are
+   unapplied/uncompiled here. Actual shared-slot interlocks, native retirement,
+   shutdown phase capture, backend options/context fit and Project/private
+   generation must pass Native qualification before connected acceptance.
 3. Review/apply additive LocalPromptOriginal and PromptRecord.local_original
    capture at the actual original writer. Frozen LocalOperation remains intact.
    Old Project/ownerless originals are not converted or backfilled. Reconcile

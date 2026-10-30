@@ -24,7 +24,27 @@ pub(in crate::opencode::desktop_runtime) fn capture(
  };
  local_workspaces::require_local_engine(engine,binding,current)?;Ok(original)
 }
+/// Metadata from the original prompt journal; never execution authority.
+pub struct LocalMemoryCandidate{
+ pub request_id:String,pub owner:veyra_contracts::local_workspaces::LocalWorkspaceOwner,
+ pub session_id:String,pub message_id:String,
+}
 impl LiveRuntime{
+ pub fn local_memory_candidates(&self,after:&str,limit:usize)->Result<Vec<LocalMemoryCandidate>,RuntimeError>{
+  if !(1..=16).contains(&limit){return Err(RuntimeError::Binding)}
+  let mut records=self.prompts.lock().map_err(|_|RuntimeError::Storage)?;
+  if records.is_none(){*records=Some(load_prompt_records(&self.storage.join("prompt-admissions.json"))?)}
+  let all=records.as_ref().ok_or(RuntimeError::Storage)?;
+  let mut selected=all.iter().filter(|(key,record)|key.as_str()>after&&record.state==PromptState::Admitted&&
+   record.original.is_none()&&record.local_original.is_some()).collect::<Vec<_>>();
+  selected.sort_by(|(a,_),(b,_)|a.cmp(b));
+  Ok(selected.into_iter().take(limit).filter_map(|(id,record)|{
+   let original=record.local_original.as_ref()?;
+   if original.request.request_id!=*id||!matches!(&original.request.operation,LocalOperation::AgentTurn{session_id,..} if session_id==&record.session_id){return None}
+   Some(LocalMemoryCandidate{request_id:id.clone(),owner:original.request.owner.clone(),
+    session_id:record.session_id.clone(),message_id:record.message_id.clone()})
+  }).collect())
+ }
  /// Original-journal read only. Never consult a later engine, dispatch, replay,
  /// mutate a PromptRecord or infer admission from transcript/status/idle.
  pub fn local_prompt_original_receipt(&self,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str,request:&str)->Result<Option<Value>,RuntimeError>{

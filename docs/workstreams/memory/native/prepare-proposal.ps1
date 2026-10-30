@@ -58,6 +58,138 @@ ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' $recordCapture $re
 ReplaceOnce 'apps/service/src/routes.rs' 'mod provider;' ('mod provider;'+[char]10+'pub(crate) use provider::memory_admission::MemorySynthesisAdmission;')
 ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod queue;' ('mod queue;'+[char]10+'pub(super) mod memory_admission;'+[char]10+'pub(super) mod memory_synthesis;')
 ReplaceOnce 'apps/service/src/inference/mod.rs' 'mod request;' ('mod request;'+[char]10+'pub(crate) mod request_purpose;')
+ReplaceOnce 'apps/service/src/inference/registry.rs' 'mod request_admission;' ('mod request_admission;'+[char]10+'pub(crate) mod memory;'+[char]10+'use super::request_purpose::TransportRequestIdentity;')
+ReplaceOnce 'apps/service/src/inference/registry.rs' '    request: Mutex<Option<RequestIdentity>>,' '    request: Mutex<Option<TransportRequestIdentity>>,'
+$active=@'
+    pub fn active_request(&self) -> Result<Option<RequestIdentity>, GatewayError> {
+        self.request
+            .lock()
+            .map(|slot| slot.clone())
+            .map_err(|_| GatewayError::RuntimeUnavailable)
+    }
+'@
+$activeNew=@'
+    pub fn active_request(&self) -> Result<Option<RequestIdentity>, GatewayError> {
+        let slot=self.request.lock().map_err(|_|GatewayError::RuntimeUnavailable)?;
+        match slot.as_ref(){
+            None=>Ok(None),
+            Some(TransportRequestIdentity::Task(value))=>Ok(Some(value.clone())),
+            Some(TransportRequestIdentity::MemorySynthesis(_))=>Err(GatewayError::RequestBusy),
+        }
+    }
+'@
+ReplaceOnce 'apps/service/src/inference/registry.rs' $active $activeNew
+ReplaceOnce 'apps/service/src/inference/registry/request_admission.rs' '        *slot = Some(candidate.identity.clone());' '        *slot = Some(TransportRequestIdentity::Task(candidate.identity.clone()));'
+ReplaceOnce 'apps/service/src/inference/registry/request_yield.rs' '        if slot.as_ref() != Some(identity) {' '        if slot.as_ref().and_then(|value|value.task()) != Some(identity) {'
+ReplaceOnce 'apps/service/src/inference/registry/saved_tasks.rs' 'active.as_ref().is_some_and(|request| request.task_id() == task_id)' 'active.as_ref().is_some_and(|request| request.task().map_or(true,|task|task.task_id() == task_id))'
+ReplaceOnce 'apps/service/src/inference/registry/saved_tasks.rs' '.is_some_and(|request| request.task_id() == predecessor.original.task_id)' '.is_some_and(|request| request.task().map_or(true,|task|task.task_id() == predecessor.original.task_id))'
+ReplaceOnce 'apps/service/src/inference/registry/pristine_unbound/tests.rs' '    *registry.request.lock().unwrap() = Some(identity.clone());' '    *registry.request.lock().unwrap() = Some(super::super::TransportRequestIdentity::Task(identity.clone()));'
+# One closed generic transport implementation; exact Task aliases stay typed.
+$transport='apps/service/src/inference/owned_transport.rs'
+ReplaceOnce $transport 'use super::{GatewayError, RequestIdentity};' ('use super::{GatewayError, RequestIdentity};'+[char]10+'use super::request_purpose::{RuntimeCorrelation,TransportRequestIdentity};')
+ReplaceOnce $transport 'mod retirement;' ('mod retirement;'+[char]10+'mod purpose;'+[char]10+'pub(crate) use purpose::{TransportPurpose,TaskPurpose,MemoryPurpose,MemoryPreparedTransport};')
+$prepared=@'
+pub(crate) struct PreparedTransport {
+    candidate: Option<CandidateRequest>,
+    identity: RequestIdentity,
+'@
+$preparedNew=@'
+pub(crate) type PreparedTransport=PreparedTransportFor<TaskPurpose>;
+pub(crate) struct PreparedTransportFor<P:TransportPurpose> {
+    candidate: Option<P::Candidate>,
+    identity: P::Identity,
+'@
+ReplaceOnce $transport $prepared $preparedNew
+ReplaceOnce $transport 'impl PreparedTransport {' 'impl<P:TransportPurpose> PreparedTransportFor<P> {'
+ReplaceOnce $transport 'fn bind_retirement_budget(&mut self, identity: &RequestIdentity,' 'fn bind_retirement_budget(&mut self, identity: &P::Identity,'
+$identityGetter=@'
+    pub(crate) fn identity(&self) -> &RequestIdentity {
+        &self.identity
+    }
+'@
+ReplaceOnce $transport $identityGetter ($identityGetter.Replace('&RequestIdentity','&P::Identity'))
+ReplaceOnce $transport 'fn take_candidate(&mut self) -> Result<CandidateRequest, GatewayError>' 'fn take_candidate(&mut self) -> Result<P::Candidate, GatewayError>'
+ReplaceOnce $transport ('        claimed: ClaimedRequest,'+[char]10+'    ) -> Result<ClaimTransport, GatewayError>') ('        claimed: P::Claim,'+[char]10+'    ) -> Result<ClaimTransportFor<P>, GatewayError>')
+ReplaceOnce $transport '            || claimed.identity() != &self.identity' '            || P::claimed(&claimed) != &self.identity'
+ReplaceOnce $transport '        Ok(ClaimTransport {' '        Ok(ClaimTransportFor {'
+ReplaceOnce $transport 'impl std::fmt::Debug for PreparedTransport {' 'impl<P:TransportPurpose> std::fmt::Debug for PreparedTransportFor<P> {'
+$claim=@'
+pub(crate) struct ClaimTransport {
+    prepared: PreparedTransport,
+    _claimed: ClaimedRequest,
+}
+'@
+$claimNew=@'
+pub(crate) type ClaimTransport=ClaimTransportFor<TaskPurpose>;
+pub(crate) struct ClaimTransportFor<P:TransportPurpose> {
+    prepared: PreparedTransportFor<P>,
+    _claimed: P::Claim,
+}
+'@
+ReplaceOnce $transport $claim $claimNew
+ReplaceOnce $transport 'impl std::fmt::Debug for ClaimTransport {' 'impl<P:TransportPurpose> std::fmt::Debug for ClaimTransportFor<P> {'
+ReplaceOnce $transport ('struct Entry {'+[char]10+'    identity: RequestIdentity,') ('struct Entry {'+[char]10+'    identity: TransportRequestIdentity,')
+ReplaceOnce $transport ('struct TransportDisposalOriginal {'+[char]10+'    identity: RequestIdentity,') ('struct TransportDisposalOriginal {'+[char]10+'    identity: TransportRequestIdentity,')
+ReplaceOnce $transport ('    pub(crate) fn identity(&self) -> &RequestIdentity {'+[char]10+'        &self.original.identity') ('    pub(crate) fn identity(&self) -> &TransportRequestIdentity {'+[char]10+'        &self.original.identity')
+$authenticate=@'
+    fn authenticate(
+        mut prepared: PreparedTransport,
+        authentication: Option<RuntimeRequestAuthentication>,
+    ) -> Result<PreparedTransport, GatewayError> {
+'@
+$authenticateNew=@'
+    fn authenticate(prepared:PreparedTransport,authentication:Option<RuntimeRequestAuthentication>)->Result<PreparedTransport,GatewayError>{
+        Self::authenticate_for::<TaskPurpose>(prepared,authentication)
+    }
+    fn authenticate_for<P:TransportPurpose>(
+        mut prepared: PreparedTransportFor<P>,
+        authentication: Option<RuntimeRequestAuthentication>,
+    ) -> Result<PreparedTransportFor<P>, GatewayError> {
+'@
+ReplaceOnce $transport $authenticate $authenticateNew
+$handshake=@'
+    async fn handshake<I: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+        io: I,
+        candidate: CandidateRequest,
+        observer: Option<SocketAdmissionObserver>,
+    ) -> Result<PreparedTransport, GatewayError> {
+'@
+$handshakeNew=@'
+    async fn handshake<I:AsyncRead+AsyncWrite+Unpin+Send+'static>(io:I,candidate:CandidateRequest,observer:Option<SocketAdmissionObserver>)->Result<PreparedTransport,GatewayError>{
+        Self::handshake_for::<TaskPurpose,I>(io,candidate,observer).await
+    }
+    async fn handshake_for<P:TransportPurpose,I: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+        io: I,
+        candidate: P::Candidate,
+        observer: Option<SocketAdmissionObserver>,
+    ) -> Result<PreparedTransportFor<P>, GatewayError> {
+'@
+ReplaceOnce $transport $handshake $handshakeNew
+ReplaceOnce $transport '        let identity = candidate.identity().clone();' '        let identity = P::identity(&candidate).clone();'
+ReplaceOnce $transport '        if identity.binding() != &candidate.grant().binding {' '        if identity.binding() != P::binding(&candidate) {'
+ReplaceOnce $transport '        let (headers, body) = candidate.framing_parts();' '        let (headers, body) = P::framing(&candidate);'
+ReplaceOnce $transport '        Ok(PreparedTransport {' '        Ok(PreparedTransportFor {'
+ReplaceOnce $transport '    pub(crate) fn start(' '    pub(crate) fn start<P:TransportPurpose>('
+ReplaceOnce $transport '        transport: ClaimTransport,' '        transport: ClaimTransportFor<P>,'
+ReplaceOnce $transport '        let ClaimTransport { prepared, _claimed } = transport;' '        let ClaimTransportFor { prepared, _claimed } = transport;'
+ReplaceOnce $transport '            identity: prepared.identity,' '            identity: prepared.identity.common(),'
+foreach($name in @('dispose','request_retirement','wait_relay_completion')){
+ $returns=@{dispose='TransportDisposed';request_retirement='RetiredRequest';wait_relay_completion='()'}
+ $signature="    pub(crate) async fn "+$name+"("+[char]10+'        &self,'+[char]10+'        identity: &RequestIdentity,'+[char]10+'    ) -> Result<'+$returns[$name]+', GatewayError> {'
+ ReplaceOnce $transport $signature ($signature.Replace('&RequestIdentity','&I').Replace($name+'(',$name+'<I:RuntimeCorrelation>(')+[char]10+'        let key=identity.common();let identity=&key;')
+}
+ReplaceOnce $transport ('fn build_request('+[char]10+'    identity: &RequestIdentity,') ('fn build_request<I:RuntimeCorrelation>('+[char]10+'    identity: &I,')
+foreach($type in @('RetiredRequest','ResumedTransport')){
+ $getter='impl '+$type+' {'+[char]10+'    pub(crate) fn identity(&self) -> &super::RequestIdentity {'
+ ReplaceOnce 'apps/service/src/inference/owned_transport/retirement.rs' $getter ($getter.Replace('&super::RequestIdentity','&super::TransportRequestIdentity'))
+}
+$history='apps/service/src/inference/owned_transport/retirement/history.rs'
+ReplaceOnce $history '    pub(crate) fn check_retired_request(' '    pub(crate) fn check_retired_request<I:super::super::RuntimeCorrelation>('
+ReplaceOnce $history '        identity: &super::super::RequestIdentity,' '        identity: &I,'
+ReplaceOnce $history '        if entry.identity != *identity || !entry.cancellation.same_original(cancellation) {' '        if entry.identity != identity.common() || !entry.cancellation.same_original(cancellation) {'
+ReplaceOnce $history '    pub(crate) fn check_retained_census(' '    pub(crate) fn check_retained_census<I:super::super::RuntimeCorrelation>('
+ReplaceOnce $history '        identities: &[super::super::RequestIdentity],' '        identities: &[I],'
+ReplaceOnce $history '            if entry.identity != *identity' '            if entry.identity != identity.common()'
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' 'use super::{' ('mod memory;'+[char]10+'pub(crate) use memory::QueuedMemory;'+[char]10+'use super::{')
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,') ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,'+[char]10+'    memory: memory::MemoryBook,')
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        if book.entries.len() >= 128 {' '        if book.entries.len() + book.memory.entries.len() >= 128 {'
@@ -201,6 +333,154 @@ $custody=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'prompt-custody.appen
 ReplaceOnce 'apps/web/src/features/workbench/promptOriginal.ts' 'export function exportPromptOriginals(' ($custody+[char]10+'export function exportPromptOriginals(')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' 'import { MemoryPanel } from "./MemoryPanel";' ('import { MemoryPanel } from "./MemoryPanel";'+[char]10+'import { LearnedMemoryControls } from "./native-memory/LearnedMemoryControls";')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' '            <MemoryPanel ' ('            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>' +[char]10+'            <MemoryPanel ')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'mod slot_yield;' ('mod slot_yield;'+[char]10+'pub(in crate::routes::provider) mod memory;')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '    Native(NativeOriginals),' ('    Native(NativeOriginals),'+[char]10+'    Memory(Box<memory::MemoryOriginals>),')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '            Self::Native(original) => Ok(original),' ('            Self::Native(original) => Ok(original),'+[char]10+'            Self::Memory(_) => Err(GatewayError::InvalidCorrelation),')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'pub(super) struct ProviderAcquisition {' 'pub(crate) struct ProviderAcquisition {'
+ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod acquisition;' ('mod acquisition;'+[char]10+'pub(crate) use acquisition::ProviderAcquisition;')
+ReplaceOnce 'apps/service/src/routes.rs' 'mod provider;' ('mod provider;'+[char]10+'pub(crate) use provider::ProviderAcquisition;')
+$join='pub(super) async fn joined(record: &Arc<ProviderAcquisition>) -> Result<(), GatewayError> {'
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/slot_yield.rs' $join ($join+[char]10+'    if record.is_memory()? { return super::memory::joined(record).await; }')
+$reusable='pub(super) fn check_reusable(record: &ProviderAcquisition) -> Result<u64, GatewayError> {'
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/slot_yield.rs' $reusable ($reusable+[char]10+'    if record.is_memory()? { return super::memory::check_reusable(record); }')
+$taskRetirement=@'
+    let deadline = original.request_progress.phase_deadline(deadline)?;
+    budget(deadline)?;
+    if record.unknown.load(Ordering::SeqCst)
+        || original.request.as_ref() != Some(receipt.retired.identity())
+        || original.engine.epoch != *receipt.retired.identity().epoch()
+        || original.grant.task_id != receipt.retired.identity().task_id()
+        || original.grant.turn_id != receipt.retired.identity().turn_id()
+        || original.grant.binding != *receipt.retired.identity().binding()
+'@
+$taskRetirementNew=@'
+    let deadline = original.request_progress.phase_deadline(deadline)?;
+    budget(deadline)?;
+    let retired_identity = receipt.retired.identity().task().ok_or(GatewayError::InvalidCorrelation)?;
+    if record.unknown.load(Ordering::SeqCst)
+        || original.request.as_ref() != Some(retired_identity)
+        || original.engine.epoch != *retired_identity.epoch()
+        || original.grant.task_id != retired_identity.task_id()
+        || original.grant.turn_id != retired_identity.turn_id()
+        || original.grant.binding != *retired_identity.binding()
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/slot_yield.rs' $taskRetirement $taskRetirementNew
+$taskCursor=@'
+        let original = original.native_mut()?;
+        cursor = original.previous.clone();
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' $taskCursor @'
+        if let Originals::Memory(memory) = &*original {
+            cursor = memory.previous.clone();
+            continue;
+        }
+        let original = original.native_mut()?;
+        cursor = original.previous.clone();
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/history.rs' '        cursor = held.native_mut()?.previous.clone();' @'
+        cursor = match &*held {
+            Originals::Memory(memory) => memory.previous.clone(),
+            _ => held.native_mut()?.previous.clone(),
+        };
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/history.rs' ') -> Result<RequestIdentity, GatewayError> {' ') -> Result<crate::inference::request_purpose::TransportRequestIdentity, GatewayError> {'
+$historyCheck=@'
+    budget(deadline)?;
+    slot_yield::check_reusable(record)?;
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/history.rs' $historyCheck @'
+    budget(deadline)?;
+    if record.is_memory()? {
+        return memory::check_history(record,provider,transports,deadline)
+            .map(crate::inference::request_purpose::TransportRequestIdentity::MemorySynthesis);
+    }
+    slot_yield::check_reusable(record)?;
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/history.rs' '    Ok(identity.clone())' '    Ok(crate::inference::request_purpose::TransportRequestIdentity::Task(identity.clone()))'
+$shutdownHeld=@'
+        slot_yield::check_reusable(&record)?;
+        let mut held = record.originals.try_lock().map_err(unavailable)?;
+'@
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' $shutdownHeld @'
+        slot_yield::check_reusable(&record)?;
+        if record.is_memory()? {
+            // Memory originals have no Task cancellation-map row. They remain
+            // in the complete acquisition/transport census checked separately.
+            cursor = memory::previous(&record)?;
+            continue;
+        }
+        let mut held = record.originals.try_lock().map_err(unavailable)?;
+'@
+$cleanupIdentities=@'
+        let identities = self
+            .cancellations
+            .values()
+            .map(|(identity, _)| identity.clone())
+            .collect::<Vec<_>>();
+'@
+ReplaceOnce 'apps/service/src/routes/provider/history.rs' $cleanupIdentities @'
+        let mut identities = self.cancellations.values().map(|(identity,_)|
+            crate::inference::request_purpose::TransportRequestIdentity::Task(identity.clone())).collect::<Vec<_>>();
+        for request in acquisition::history::records(self)? {
+            if request.is_memory()? {
+                identities.push(crate::inference::request_purpose::TransportRequestIdentity::MemorySynthesis(
+                    acquisition::memory::check_history(&request,self,&state.provider_transports,deadline)?));
+            }
+        }
+'@
+ReplaceOnce 'apps/service/src/routes/live_agent/lifecycle.rs' 'type Result<T> = std::result::Result<T, RuntimeError>;' ('type Result<T> = std::result::Result<T, RuntimeError>;'+[char]10+'mod memory_learning;')
+ReplaceOnce 'crates/adapters/src/project_actions/lifecycle.rs' '    pub fn all_pending(&self) -> Result<Vec<HookIntent>, ProjectActionError> {' @'
+    /// Read only hints from the original bounded hook journal. Completion is
+    /// re-established from the owner-verified source before learning admission.
+    pub fn completed_memory_candidates(&self,after:&str,limit:usize)->Result<Vec<HookIntent>,ProjectActionError>{
+        if !(1..=16).contains(&limit){return Err(ProjectActionError::Invalid)}
+        let _guard=self.mutation.lock().map_err(|_|ProjectActionError::Unavailable)?;
+        let mut values=self.read_intents()?.into_iter().filter(|i|i.stage=="completed"&&
+            i.request_id.as_str()>after&&i.message_id.is_some()).collect::<Vec<_>>();
+        values.sort_by(|a,b|a.request_id.cmp(&b.request_id));
+        values.truncate(limit);Ok(values)
+    }
+    pub fn all_pending(&self) -> Result<Vec<HookIntent>, ProjectActionError> {
+'@
+$workerLoop=@'
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+'@
+ReplaceOnce 'apps/service/src/routes/live_agent/lifecycle.rs' $workerLoop @'
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut memory_cursor=memory_learning::Cursor::default();
+        loop {
+'@
+$oldWorker=@'
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _serial = serial;
+                        let Ok(_guard) = state.live_agent.hook_serial.lock() else { return; };
+                        if let Ok(intents) = state.live_agent.hooks.all_pending() {
+                            for mut intent in intents { let _ = progress(&state, &mut intent); }
+                        }
+                    }).await;
+'@
+$newWorker=@'
+                    let owner=state.clone();
+                    let cursor=std::mem::take(&mut memory_cursor);
+                    let captured=tokio::task::spawn_blocking(move || {
+                        let _serial = serial;
+                        let mut cursor=cursor;
+                        let Ok(_guard) = owner.live_agent.hook_serial.lock() else { return (cursor,None); };
+                        if let Ok(intents) = owner.live_agent.hooks.all_pending() {
+                            for mut intent in intents { let _ = progress(&owner, &mut intent); }
+                        }
+                        let original=memory_learning::capture(&owner,&mut cursor);
+                        (cursor,original)
+                    }).await;
+                    if let Ok((cursor,original))=captured {
+                        memory_cursor=cursor;
+                        // All synchronous guards have dropped. This is the
+                        // original productivity worker, not a second scheduler.
+                        if let Some(original)=original { memory_learning::generate(state,original).await; }
+                    }
+'@
+ReplaceOnce 'apps/service/src/routes/live_agent/lifecycle.rs' $oldWorker $newWorker
 $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e1cba953c1e68b47529aac1a276';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
  owner='Root/Projects';status='bound-in-source-awaiting-Native-integration-review';actual_export='OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage';
  provider_source='docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs';
@@ -214,11 +494,11 @@ $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e
  local_original_contract='Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill';
  local_original_gate='Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance';
  memory_purpose=@{
-  status='closed contract/factory/queue/journal source only; original native producers unsupported; NOT connected generation';
+  status='genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN';
   owner='SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases';
   native_engine_changes='none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs';
   ingress='internal MemorySynthesis only; no public/general prompt or utility HTTP route';
-  unsupported=@('registry Memory candidate/final slot claim','acquisition Memory originals without Task grants','matching retained result/native retirement and lease yield','original productivity two-phase invocation after real producer is installed');
+  open_validation=@('combined actual Native compile and Task regressions','actual same-slot/authentication/retirement/lease negative controls','Memory phase-owner inclusion in actual global shutdown capture','actual productivity and Project/private generation acceptance');
   audit='closed-synthesis-purpose.md';
  };
  apply_gate='Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance';

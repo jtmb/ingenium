@@ -59,16 +59,40 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/request_purpose.rs",
     "target": "apps/service/src/inference/request_purpose.rs",
     "required_preimage": "absent",
-    "sha256": "0506b037387fa97c8bc045e60ccb583c055905af98498c6ffaf13b2d25ab89c8",
-    "bytes": 2460,
+    "sha256": "52fd29860af28e06f9e582943f5f522eef4435044b6fccb1cdb7b97bad04857f",
+    "bytes": 4826,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/memory.rs",
     "target": "apps/service/src/inference/provider_queue/memory.rs",
     "required_preimage": "absent",
-    "sha256": "053f089bfb7b8e5ab6e77319c91ecfb3c8e47aef69670f1d5ee86b7af78ec7f7",
-    "bytes": 4397,
+    "sha256": "0952e7fd3fcf8a327a49ec54ed7baba8d3a05d133ee8536e7fe7cbd56cc5fd9e",
+    "bytes": 6858,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/registry/memory.rs",
+    "target": "apps/service/src/inference/registry/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "9407b2451f08c38d658f76499a30f1069df68d423ae414048e95afaa28d56eac",
+    "bytes": 5120,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/owned_transport/purpose.rs",
+    "target": "apps/service/src/inference/owned_transport/purpose.rs",
+    "required_preimage": "absent",
+    "sha256": "10c9d10e7dbe00a56f24df3977682294bc6daa614b78eeda6c937edcead06b13",
+    "bytes": 2882,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/live_agent/lifecycle/memory_learning.rs",
+    "target": "apps/service/src/routes/live_agent/lifecycle/memory_learning.rs",
+    "required_preimage": "absent",
+    "sha256": "bbfd4889de338538a47fec024747bdda09a0e1b295eab86e77fabb677653f738",
+    "bytes": 2207,
     "transform": null
   },
   {
@@ -83,16 +107,24 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_admission.rs",
     "target": "apps/service/src/routes/provider/memory_admission.rs",
     "required_preimage": "absent",
-    "sha256": "489a3863daa76566c0a785e6f8f6f1bd143b6ffe35a7e9218b55758f72cf1fd4",
-    "bytes": 5776,
+    "sha256": "71887b8fffcff70b8a922c35dacd0b14983127b4df4784274b7d4dd11ebf93b9",
+    "bytes": 6219,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_synthesis.rs",
     "target": "apps/service/src/routes/provider/memory_synthesis.rs",
     "required_preimage": "absent",
-    "sha256": "f8ba8e88de674c6d06fe2f2e90d0bc64301745716836f16def0ccce290b27be5",
-    "bytes": 1656,
+    "sha256": "25a4320bf38f7c07fbf9aa3b4a91e00645a148ff8045be72130d6ec9ce25658f",
+    "bytes": 3731,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/acquisition/memory.rs",
+    "target": "apps/service/src/routes/provider/acquisition/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "3c7d68a9f5fa0cb85a34d5bd8a83d2906d72e02d7f29d34978f73d4bac89e789",
+    "bytes": 24338,
     "transform": null
   },
   {
@@ -131,8 +163,8 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
     "required_preimage": "absent",
-    "sha256": "f6880ebbb6b9a731a9beec8fcd654386afe899d5a58506546f46371f339fa073",
-    "bytes": 4051,
+    "sha256": "5817f6bc44b492286d60c0dfded13ec08aaab96839bcacee7995979f8c0cbc9f",
+    "bytes": 5415,
     "transform": null
   },
   {

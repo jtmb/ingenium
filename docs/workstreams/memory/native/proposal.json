@@ -3,33 +3,33 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
-    "owner": "Root/Projects",
-    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
-    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
-    "status": "bound-in-source-awaiting-Native-integration-review",
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
     "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
     "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
-    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
-    "memory_purpose": {
-      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
-      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
-      "unsupported": [
-        "registry Memory candidate/final slot claim",
-        "acquisition Memory originals without Task grants",
-        "matching retained result/native retirement and lease yield",
-        "original productivity two-phase invocation after real producer is installed"
-      ],
-      "audit": "closed-synthesis-purpose.md",
-      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
-      "status": "closed contract/factory/queue/journal source only; original native producers unsupported; NOT connected generation"
-    },
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
     "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance"
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
+    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
+    "memory_purpose": {
+      "audit": "closed-synthesis-purpose.md",
+      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
+      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN",
+      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
+      "open_validation": [
+        "combined actual Native compile and Task regressions",
+        "actual same-slot/authentication/retirement/lease negative controls",
+        "Memory phase-owner inclusion in actual global shutdown capture",
+        "actual productivity and Project/private generation acceptance"
+      ]
+    },
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
+    "status": "bound-in-source-awaiting-Native-integration-review",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
+    "owner": "Root/Projects"
   },
   "operations": [
     {
@@ -127,6 +127,282 @@
       "preimage_sha256": "6b8119cee9737897c9ac97288ae892853934a46a574d78b2be301039b7ee37d8",
       "find": "mod request;",
       "replacement": "mod request;\npub(crate) mod request_purpose;"
+    },
+    {
+      "path": "apps/service/src/inference/registry.rs",
+      "preimage_sha256": "b94eeb808af1ef4c0e2ddda635ada415fc0ffc3fe03e3e718d8cdf81e65163c6",
+      "find": "mod request_admission;",
+      "replacement": "mod request_admission;\npub(crate) mod memory;\nuse super::request_purpose::TransportRequestIdentity;"
+    },
+    {
+      "path": "apps/service/src/inference/registry.rs",
+      "preimage_sha256": "b94eeb808af1ef4c0e2ddda635ada415fc0ffc3fe03e3e718d8cdf81e65163c6",
+      "find": "    request: Mutex<Option<RequestIdentity>>,",
+      "replacement": "    request: Mutex<Option<TransportRequestIdentity>>,"
+    },
+    {
+      "path": "apps/service/src/inference/registry.rs",
+      "preimage_sha256": "b94eeb808af1ef4c0e2ddda635ada415fc0ffc3fe03e3e718d8cdf81e65163c6",
+      "find": "    pub fn active_request(&self) -> Result<Option<RequestIdentity>, GatewayError> {\n        self.request\n            .lock()\n            .map(|slot| slot.clone())\n            .map_err(|_| GatewayError::RuntimeUnavailable)\n    }",
+      "replacement": "    pub fn active_request(&self) -> Result<Option<RequestIdentity>, GatewayError> {\n        let slot=self.request.lock().map_err(|_|GatewayError::RuntimeUnavailable)?;\n        match slot.as_ref(){\n            None=>Ok(None),\n            Some(TransportRequestIdentity::Task(value))=>Ok(Some(value.clone())),\n            Some(TransportRequestIdentity::MemorySynthesis(_))=>Err(GatewayError::RequestBusy),\n        }\n    }"
+    },
+    {
+      "path": "apps/service/src/inference/registry/request_admission.rs",
+      "preimage_sha256": "d47811f96c1b144621ec754d2cfea1d43107c894a19848a4d1061340d8baf849",
+      "find": "        *slot = Some(candidate.identity.clone());",
+      "replacement": "        *slot = Some(TransportRequestIdentity::Task(candidate.identity.clone()));"
+    },
+    {
+      "path": "apps/service/src/inference/registry/request_yield.rs",
+      "preimage_sha256": "6b2b1ecd2708d33051ca8ac6146f040dcce0440b35033fd3719ff64545d5fb66",
+      "find": "        if slot.as_ref() != Some(identity) {",
+      "replacement": "        if slot.as_ref().and_then(|value|value.task()) != Some(identity) {"
+    },
+    {
+      "path": "apps/service/src/inference/registry/saved_tasks.rs",
+      "preimage_sha256": "d25b873b3d651dafba593d288d9f3051e1367cd81b2fc12f49e6ac585129adc6",
+      "find": "active.as_ref().is_some_and(|request| request.task_id() == task_id)",
+      "replacement": "active.as_ref().is_some_and(|request| request.task().map_or(true,|task|task.task_id() == task_id))"
+    },
+    {
+      "path": "apps/service/src/inference/registry/saved_tasks.rs",
+      "preimage_sha256": "d25b873b3d651dafba593d288d9f3051e1367cd81b2fc12f49e6ac585129adc6",
+      "find": ".is_some_and(|request| request.task_id() == predecessor.original.task_id)",
+      "replacement": ".is_some_and(|request| request.task().map_or(true,|task|task.task_id() == predecessor.original.task_id))"
+    },
+    {
+      "path": "apps/service/src/inference/registry/pristine_unbound/tests.rs",
+      "preimage_sha256": "f1aa0af0774acfb240cdfd7328f1cfca86726adb3e8ef18b0589d5e1a95f7d45",
+      "find": "    *registry.request.lock().unwrap() = Some(identity.clone());",
+      "replacement": "    *registry.request.lock().unwrap() = Some(super::super::TransportRequestIdentity::Task(identity.clone()));"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "use super::{GatewayError, RequestIdentity};",
+      "replacement": "use super::{GatewayError, RequestIdentity};\nuse super::request_purpose::{RuntimeCorrelation,TransportRequestIdentity};"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "mod retirement;",
+      "replacement": "mod retirement;\nmod purpose;\npub(crate) use purpose::{TransportPurpose,TaskPurpose,MemoryPurpose,MemoryPreparedTransport};"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "pub(crate) struct PreparedTransport {\n    candidate: Option<CandidateRequest>,\n    identity: RequestIdentity,",
+      "replacement": "pub(crate) type PreparedTransport=PreparedTransportFor<TaskPurpose>;\npub(crate) struct PreparedTransportFor<P:TransportPurpose> {\n    candidate: Option<P::Candidate>,\n    identity: P::Identity,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "impl PreparedTransport {",
+      "replacement": "impl<P:TransportPurpose> PreparedTransportFor<P> {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "fn bind_retirement_budget(&mut self, identity: &RequestIdentity,",
+      "replacement": "fn bind_retirement_budget(&mut self, identity: &P::Identity,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) fn identity(&self) -> &RequestIdentity {\n        &self.identity\n    }",
+      "replacement": "    pub(crate) fn identity(&self) -> &P::Identity {\n        &self.identity\n    }"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "fn take_candidate(&mut self) -> Result<CandidateRequest, GatewayError>",
+      "replacement": "fn take_candidate(&mut self) -> Result<P::Candidate, GatewayError>"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        claimed: ClaimedRequest,\n    ) -> Result<ClaimTransport, GatewayError>",
+      "replacement": "        claimed: P::Claim,\n    ) -> Result<ClaimTransportFor<P>, GatewayError>"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "            || claimed.identity() != &self.identity",
+      "replacement": "            || P::claimed(&claimed) != &self.identity"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        Ok(ClaimTransport {",
+      "replacement": "        Ok(ClaimTransportFor {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "impl std::fmt::Debug for PreparedTransport {",
+      "replacement": "impl<P:TransportPurpose> std::fmt::Debug for PreparedTransportFor<P> {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "pub(crate) struct ClaimTransport {\n    prepared: PreparedTransport,\n    _claimed: ClaimedRequest,\n}",
+      "replacement": "pub(crate) type ClaimTransport=ClaimTransportFor<TaskPurpose>;\npub(crate) struct ClaimTransportFor<P:TransportPurpose> {\n    prepared: PreparedTransportFor<P>,\n    _claimed: P::Claim,\n}"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "impl std::fmt::Debug for ClaimTransport {",
+      "replacement": "impl<P:TransportPurpose> std::fmt::Debug for ClaimTransportFor<P> {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "struct Entry {\n    identity: RequestIdentity,",
+      "replacement": "struct Entry {\n    identity: TransportRequestIdentity,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "struct TransportDisposalOriginal {\n    identity: RequestIdentity,",
+      "replacement": "struct TransportDisposalOriginal {\n    identity: TransportRequestIdentity,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) fn identity(&self) -> &RequestIdentity {\n        &self.original.identity",
+      "replacement": "    pub(crate) fn identity(&self) -> &TransportRequestIdentity {\n        &self.original.identity"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    fn authenticate(\n        mut prepared: PreparedTransport,\n        authentication: Option<RuntimeRequestAuthentication>,\n    ) -> Result<PreparedTransport, GatewayError> {",
+      "replacement": "    fn authenticate(prepared:PreparedTransport,authentication:Option<RuntimeRequestAuthentication>)->Result<PreparedTransport,GatewayError>{\n        Self::authenticate_for::<TaskPurpose>(prepared,authentication)\n    }\n    fn authenticate_for<P:TransportPurpose>(\n        mut prepared: PreparedTransportFor<P>,\n        authentication: Option<RuntimeRequestAuthentication>,\n    ) -> Result<PreparedTransportFor<P>, GatewayError> {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    async fn handshake<I: AsyncRead + AsyncWrite + Unpin + Send + 'static>(\n        io: I,\n        candidate: CandidateRequest,\n        observer: Option<SocketAdmissionObserver>,\n    ) -> Result<PreparedTransport, GatewayError> {",
+      "replacement": "    async fn handshake<I:AsyncRead+AsyncWrite+Unpin+Send+'static>(io:I,candidate:CandidateRequest,observer:Option<SocketAdmissionObserver>)->Result<PreparedTransport,GatewayError>{\n        Self::handshake_for::<TaskPurpose,I>(io,candidate,observer).await\n    }\n    async fn handshake_for<P:TransportPurpose,I: AsyncRead + AsyncWrite + Unpin + Send + 'static>(\n        io: I,\n        candidate: P::Candidate,\n        observer: Option<SocketAdmissionObserver>,\n    ) -> Result<PreparedTransportFor<P>, GatewayError> {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        let identity = candidate.identity().clone();",
+      "replacement": "        let identity = P::identity(&candidate).clone();"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        if identity.binding() != &candidate.grant().binding {",
+      "replacement": "        if identity.binding() != P::binding(&candidate) {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        let (headers, body) = candidate.framing_parts();",
+      "replacement": "        let (headers, body) = P::framing(&candidate);"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        Ok(PreparedTransport {",
+      "replacement": "        Ok(PreparedTransportFor {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) fn start(",
+      "replacement": "    pub(crate) fn start<P:TransportPurpose>("
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        transport: ClaimTransport,",
+      "replacement": "        transport: ClaimTransportFor<P>,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "        let ClaimTransport { prepared, _claimed } = transport;",
+      "replacement": "        let ClaimTransportFor { prepared, _claimed } = transport;"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "            identity: prepared.identity,",
+      "replacement": "            identity: prepared.identity.common(),"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) async fn dispose(\n        &self,\n        identity: &RequestIdentity,\n    ) -> Result<TransportDisposed, GatewayError> {",
+      "replacement": "    pub(crate) async fn dispose<I:RuntimeCorrelation>(\n        &self,\n        identity: &I,\n    ) -> Result<TransportDisposed, GatewayError> {\n        let key=identity.common();let identity=&key;"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) async fn request_retirement(\n        &self,\n        identity: &RequestIdentity,\n    ) -> Result<RetiredRequest, GatewayError> {",
+      "replacement": "    pub(crate) async fn request_retirement<I:RuntimeCorrelation>(\n        &self,\n        identity: &I,\n    ) -> Result<RetiredRequest, GatewayError> {\n        let key=identity.common();let identity=&key;"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "    pub(crate) async fn wait_relay_completion(\n        &self,\n        identity: &RequestIdentity,\n    ) -> Result<(), GatewayError> {",
+      "replacement": "    pub(crate) async fn wait_relay_completion<I:RuntimeCorrelation>(\n        &self,\n        identity: &I,\n    ) -> Result<(), GatewayError> {\n        let key=identity.common();let identity=&key;"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "preimage_sha256": "219c4e0cd7e1ed4e85d8b292a920d4aa43f50524be21c656203097d00a401341",
+      "find": "fn build_request(\n    identity: &RequestIdentity,",
+      "replacement": "fn build_request<I:RuntimeCorrelation>(\n    identity: &I,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement.rs",
+      "preimage_sha256": "a4690269d756e1debc9b72ac5b611b186f1ef3ba21a2956e06e8de0dd5a26e37",
+      "find": "impl RetiredRequest {\n    pub(crate) fn identity(&self) -> &super::RequestIdentity {",
+      "replacement": "impl RetiredRequest {\n    pub(crate) fn identity(&self) -> &super::TransportRequestIdentity {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement.rs",
+      "preimage_sha256": "a4690269d756e1debc9b72ac5b611b186f1ef3ba21a2956e06e8de0dd5a26e37",
+      "find": "impl ResumedTransport {\n    pub(crate) fn identity(&self) -> &super::RequestIdentity {",
+      "replacement": "impl ResumedTransport {\n    pub(crate) fn identity(&self) -> &super::TransportRequestIdentity {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "    pub(crate) fn check_retired_request(",
+      "replacement": "    pub(crate) fn check_retired_request<I:super::super::RuntimeCorrelation>("
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "        identity: &super::super::RequestIdentity,",
+      "replacement": "        identity: &I,"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "        if entry.identity != *identity || !entry.cancellation.same_original(cancellation) {",
+      "replacement": "        if entry.identity != identity.common() || !entry.cancellation.same_original(cancellation) {"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "    pub(crate) fn check_retained_census(",
+      "replacement": "    pub(crate) fn check_retained_census<I:super::super::RuntimeCorrelation>("
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "        identities: &[super::super::RequestIdentity],",
+      "replacement": "        identities: &[I],"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement/history.rs",
+      "preimage_sha256": "3fd544ec7c45451f25f0f1d31708064a9f602fa90b90913036028bf17737defe",
+      "find": "            if entry.identity != *identity",
+      "replacement": "            if entry.identity != identity.common()"
     },
     {
       "path": "apps/service/src/inference/provider_queue.rs",
@@ -319,6 +595,126 @@
       "preimage_sha256": "cd132c9e81d8b2e6f238eceeed0f3d2ff49741523390a084a9bc2ca9216e4e44",
       "find": "            <MemoryPanel ",
       "replacement": "            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>\n            <MemoryPanel "
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "mod slot_yield;",
+      "replacement": "mod slot_yield;\npub(in crate::routes::provider) mod memory;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "    Native(NativeOriginals),",
+      "replacement": "    Native(NativeOriginals),\n    Memory(Box<memory::MemoryOriginals>),"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "            Self::Native(original) => Ok(original),",
+      "replacement": "            Self::Native(original) => Ok(original),\n            Self::Memory(_) => Err(GatewayError::InvalidCorrelation),"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "pub(super) struct ProviderAcquisition {",
+      "replacement": "pub(crate) struct ProviderAcquisition {"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "mod acquisition;",
+      "replacement": "mod acquisition;\npub(crate) use acquisition::ProviderAcquisition;"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "preimage_sha256": "11033d9c478b38691cc181d4437baabeadebcb34f582cd35bbdeca7f00ea36ea",
+      "find": "mod provider;",
+      "replacement": "mod provider;\npub(crate) use provider::ProviderAcquisition;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/slot_yield.rs",
+      "preimage_sha256": "d626206d657e5fa6531a09d85e155ab9a38952298ceb27004620a6d3aef414bf",
+      "find": "pub(super) async fn joined(record: &Arc<ProviderAcquisition>) -> Result<(), GatewayError> {",
+      "replacement": "pub(super) async fn joined(record: &Arc<ProviderAcquisition>) -> Result<(), GatewayError> {\n    if record.is_memory()? { return super::memory::joined(record).await; }"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/slot_yield.rs",
+      "preimage_sha256": "d626206d657e5fa6531a09d85e155ab9a38952298ceb27004620a6d3aef414bf",
+      "find": "pub(super) fn check_reusable(record: &ProviderAcquisition) -> Result<u64, GatewayError> {",
+      "replacement": "pub(super) fn check_reusable(record: &ProviderAcquisition) -> Result<u64, GatewayError> {\n    if record.is_memory()? { return super::memory::check_reusable(record); }"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/slot_yield.rs",
+      "preimage_sha256": "d626206d657e5fa6531a09d85e155ab9a38952298ceb27004620a6d3aef414bf",
+      "find": "    let deadline = original.request_progress.phase_deadline(deadline)?;\n    budget(deadline)?;\n    if record.unknown.load(Ordering::SeqCst)\n        || original.request.as_ref() != Some(receipt.retired.identity())\n        || original.engine.epoch != *receipt.retired.identity().epoch()\n        || original.grant.task_id != receipt.retired.identity().task_id()\n        || original.grant.turn_id != receipt.retired.identity().turn_id()\n        || original.grant.binding != *receipt.retired.identity().binding()",
+      "replacement": "    let deadline = original.request_progress.phase_deadline(deadline)?;\n    budget(deadline)?;\n    let retired_identity = receipt.retired.identity().task().ok_or(GatewayError::InvalidCorrelation)?;\n    if record.unknown.load(Ordering::SeqCst)\n        || original.request.as_ref() != Some(retired_identity)\n        || original.engine.epoch != *retired_identity.epoch()\n        || original.grant.task_id != retired_identity.task_id()\n        || original.grant.turn_id != retired_identity.turn_id()\n        || original.grant.binding != *retired_identity.binding()"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "        let original = original.native_mut()?;\n        cursor = original.previous.clone();",
+      "replacement": "        if let Originals::Memory(memory) = &*original {\n            cursor = memory.previous.clone();\n            continue;\n        }\n        let original = original.native_mut()?;\n        cursor = original.previous.clone();"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/history.rs",
+      "preimage_sha256": "a929a58d0f5cb085b2444835837b876dd4375dc57bb5f2b1d45cc75536e21844",
+      "find": "        cursor = held.native_mut()?.previous.clone();",
+      "replacement": "        cursor = match &*held {\n            Originals::Memory(memory) => memory.previous.clone(),\n            _ => held.native_mut()?.previous.clone(),\n        };"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/history.rs",
+      "preimage_sha256": "a929a58d0f5cb085b2444835837b876dd4375dc57bb5f2b1d45cc75536e21844",
+      "find": ") -> Result<RequestIdentity, GatewayError> {",
+      "replacement": ") -> Result<crate::inference::request_purpose::TransportRequestIdentity, GatewayError> {"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/history.rs",
+      "preimage_sha256": "a929a58d0f5cb085b2444835837b876dd4375dc57bb5f2b1d45cc75536e21844",
+      "find": "    budget(deadline)?;\n    slot_yield::check_reusable(record)?;",
+      "replacement": "    budget(deadline)?;\n    if record.is_memory()? {\n        return memory::check_history(record,provider,transports,deadline)\n            .map(crate::inference::request_purpose::TransportRequestIdentity::MemorySynthesis);\n    }\n    slot_yield::check_reusable(record)?;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition/history.rs",
+      "preimage_sha256": "a929a58d0f5cb085b2444835837b876dd4375dc57bb5f2b1d45cc75536e21844",
+      "find": "    Ok(identity.clone())",
+      "replacement": "    Ok(crate::inference::request_purpose::TransportRequestIdentity::Task(identity.clone()))"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "        slot_yield::check_reusable(&record)?;\n        let mut held = record.originals.try_lock().map_err(unavailable)?;",
+      "replacement": "        slot_yield::check_reusable(&record)?;\n        if record.is_memory()? {\n            // Memory originals have no Task cancellation-map row. They remain\n            // in the complete acquisition/transport census checked separately.\n            cursor = memory::previous(&record)?;\n            continue;\n        }\n        let mut held = record.originals.try_lock().map_err(unavailable)?;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/history.rs",
+      "preimage_sha256": "c89280a5406b12907a9565f16a891b052f6abf2219f355e9c9cac156dc373f76",
+      "find": "        let identities = self\n            .cancellations\n            .values()\n            .map(|(identity, _)| identity.clone())\n            .collect::<Vec<_>>();",
+      "replacement": "        let mut identities = self.cancellations.values().map(|(identity,_)|\n            crate::inference::request_purpose::TransportRequestIdentity::Task(identity.clone())).collect::<Vec<_>>();\n        for request in acquisition::history::records(self)? {\n            if request.is_memory()? {\n                identities.push(crate::inference::request_purpose::TransportRequestIdentity::MemorySynthesis(\n                    acquisition::memory::check_history(&request,self,&state.provider_transports,deadline)?));\n            }\n        }"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/lifecycle.rs",
+      "preimage_sha256": "9c2e4472c3117e824d1f6d88c5405909e6a1bed4850f8daa11dc38b10b432e99",
+      "find": "type Result<T> = std::result::Result<T, RuntimeError>;",
+      "replacement": "type Result<T> = std::result::Result<T, RuntimeError>;\nmod memory_learning;"
+    },
+    {
+      "path": "crates/adapters/src/project_actions/lifecycle.rs",
+      "preimage_sha256": "db2314cf9c858600b9dff243a65b2bd0df3414b5f6461b954f753f7bffe726bf",
+      "find": "    pub fn all_pending(&self) -> Result<Vec<HookIntent>, ProjectActionError> {",
+      "replacement": "    /// Read only hints from the original bounded hook journal. Completion is\n    /// re-established from the owner-verified source before learning admission.\n    pub fn completed_memory_candidates(&self,after:&str,limit:usize)->Result<Vec<HookIntent>,ProjectActionError>{\n        if !(1..=16).contains(&limit){return Err(ProjectActionError::Invalid)}\n        let _guard=self.mutation.lock().map_err(|_|ProjectActionError::Unavailable)?;\n        let mut values=self.read_intents()?.into_iter().filter(|i|i.stage==\"completed\"&&\n            i.request_id.as_str()>after&&i.message_id.is_some()).collect::<Vec<_>>();\n        values.sort_by(|a,b|a.request_id.cmp(&b.request_id));\n        values.truncate(limit);Ok(values)\n    }\n    pub fn all_pending(&self) -> Result<Vec<HookIntent>, ProjectActionError> {"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/lifecycle.rs",
+      "preimage_sha256": "9c2e4472c3117e824d1f6d88c5405909e6a1bed4850f8daa11dc38b10b432e99",
+      "find": "        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));\n        loop {",
+      "replacement": "        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));\n        let mut memory_cursor=memory_learning::Cursor::default();\n        loop {"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/lifecycle.rs",
+      "preimage_sha256": "9c2e4472c3117e824d1f6d88c5405909e6a1bed4850f8daa11dc38b10b432e99",
+      "find": "                    let _ = tokio::task::spawn_blocking(move || {\n                        let _serial = serial;\n                        let Ok(_guard) = state.live_agent.hook_serial.lock() else { return; };\n                        if let Ok(intents) = state.live_agent.hooks.all_pending() {\n                            for mut intent in intents { let _ = progress(&state, &mut intent); }\n                        }\n                    }).await;",
+      "replacement": "                    let owner=state.clone();\n                    let cursor=std::mem::take(&mut memory_cursor);\n                    let captured=tokio::task::spawn_blocking(move || {\n                        let _serial = serial;\n                        let mut cursor=cursor;\n                        let Ok(_guard) = owner.live_agent.hook_serial.lock() else { return (cursor,None); };\n                        if let Ok(intents) = owner.live_agent.hooks.all_pending() {\n                            for mut intent in intents { let _ = progress(&owner, &mut intent); }\n                        }\n                        let original=memory_learning::capture(&owner,&mut cursor);\n                        (cursor,original)\n                    }).await;\n                    if let Ok((cursor,original))=captured {\n                        memory_cursor=cursor;\n                        // All synchronous guards have dropped. This is the\n                        // original productivity worker, not a second scheduler.\n                        if let Some(original)=original { memory_learning::generate(state,original).await; }\n                    }"
     }
   ]
 }
