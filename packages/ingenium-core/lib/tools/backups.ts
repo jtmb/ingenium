@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { captureLearnedMemorySuppressions, mergeLearnedMemorySuppressions, type LearnedMemorySuppressionLedger } from "./learned-memory-restore.mjs";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   constants as fsConstants,
@@ -2403,6 +2404,8 @@ export function getRestoreExecutionRun(projectId: string, runId: string): Restor
  */
 export type RestoreExecutionCapsule = {
   explicitMemoryForgets: ExplicitMemoryForgetLedger;
+  /** Absent only in maintenance journals written before learned memory shipped. */
+  learnedMemorySuppressions?: LearnedMemorySuppressionLedger;
   plan: StoredRestorePlan;
   legacyRevisions: StoredPlanRevision[];
   legacyAuthorizations: StoredAuthorization[];
@@ -3141,6 +3144,7 @@ export function captureRestoreExecutionCapsule(projectId: string, runId: string)
   const db = getDb(backupDbPath());
   return {
     explicitMemoryForgets: captureExplicitMemoryForgetLedger(db),
+    learnedMemorySuppressions: captureLearnedMemorySuppressions(db),
     plan,
     legacyRevisions: db.prepare(
       "SELECT project_id, plan_id, backup_id, revision, from_state, to_state, stage_hash, created_at FROM backup_restore_plan_revisions WHERE project_id = ? AND plan_id = ? ORDER BY revision ASC",
@@ -3188,6 +3192,7 @@ export function rehydrateRestoreExecutionCapsule(capsule: RestoreExecutionCapsul
   const result = execTransaction(() => {
     const db = getDb(backupDbPath());
     mergeExplicitMemoryForgetLedger(db, capsule.explicitMemoryForgets);
+    if (capsule.learnedMemorySuppressions) mergeLearnedMemorySuppressions(db, capsule.learnedMemorySuppressions);
     const existing = getExecutionRunRecord(capsule.run.project_id, capsule.run.id);
     if (existing) return existing;
     insertBackupRecordIfMissing(capsule.sourceRecord);
