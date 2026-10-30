@@ -69,12 +69,12 @@ export function createRequestExecutionResolvers(ports) {
     if(!owned || owned.organizationId!==workspace.organizationId || owned.ownerUserId!==workspace.ownerUserId ||
       owned.projectId!==workspace.projectId || owned.workspaceId!==workspace.id ||
       ports.authorizeProject(identity,workspace)!==true)deny("EXECUTION_SCOPE_UNAVAILABLE",404);
-    const placement=ports.resolvePlacement(Object.freeze({
+    const placement=snapshot(ports.resolvePlacement(Object.freeze({
       organizationId:workspace.organizationId,ownerUserId:workspace.ownerUserId,projectId:workspace.projectId,
       workspaceId:workspace.id,bindingHash:workspace.storageMappingHash,bindingEpoch:workspace.securityEpoch,
       runtimeId:runtime.id,runtimeRevision:runtime.revision,backendName:runtime.backendName,
       backendContainerId:runtime.backendContainerId,now,
-    }));
+    }))??null);
     const after=ports.now();
     if(!placement || placement.runtimeId!==runtime.id || placement.workspaceId!==workspace.id ||
       placement.organizationId!==workspace.organizationId || placement.projectId!==workspace.projectId ||

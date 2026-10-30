@@ -208,3 +208,17 @@ test("Promise placement, identity epoch changes and expired lifecycle leases do 
   fails(()=>f.owner.resolveRequestExecution({},f.selected),"EXECUTION_RUNTIME_UNAVAILABLE");
  }finally{f.close();}
 });
+
+
+test("placement evidence is detached before later identity callbacks can mutate a retained response",()=>{
+ const f=fixture();try{
+  let retained;let calls=0;
+  const placement=f.ports.resolvePlacement,identity=f.ports.revalidateIdentity;
+  f.ports.resolvePlacement=facts=>(retained=placement(facts));
+  f.ports.revalidateIdentity=()=>{
+   if(++calls===2 && retained)retained.hostId="changed-after-validation";
+   return identity();
+  };
+  assert.equal(f.owner.resolveRequestExecution({},f.selected).hostId,"registered-stable-host");
+ }finally{f.close();}
+});
