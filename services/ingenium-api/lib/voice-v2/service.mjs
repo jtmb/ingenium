@@ -1,4 +1,5 @@
 import { VoiceError, sameScope, validateScope, validateTurn } from '../../../../packages/veyra-voice/session.mjs';
+import { speechChildKey } from '../../../../packages/veyra-voice/segments.mjs';
 
 /** Authenticated API adapter; identity, durable admission and native agent authority are injected. */
 export class VoiceService {
@@ -85,6 +86,41 @@ export class VoiceService {
     session.speaking = true; session.speechRequested = true;
     try { return await this.speech.synthesize(envelope); }
     finally { session.speaking = false; }
+  }
+  async *speechSequence(context, envelope) {
+    const session = await this.#admit(context, envelope, 'voice:speak');
+    const turn = validateTurn(envelope.turn);
+    if (session.active?.requestId !== turn.requestId || !session.agentCompleted || envelope.text !== session.resultText
+      || session.speechRequested || typeof this.speech.synthesizeSequence !== 'function') throw new VoiceError('VOICE_TURN_CONFLICT');
+    session.speaking = true; session.speechRequested = true;
+    const current = () => session.state === 'ready' && session.active?.requestId === turn.requestId
+      && session.active.generation === turn.generation && !envelope.signal?.aborted;
+    try {
+      const children = {
+        reserve: async ({ segment, originalDigest }) => {
+          if (!current()) throw new VoiceError('VOICE_TURN_CANCELLED');
+          const requestId = `voice-speech:${await speechChildKey(turn, segment)}`;
+          const reservation = await this.operations.reserve({ context, scope: session.scope, requestId,
+            parentRequestId: turn.requestId, kind: 'voice-speech-tts', generation: turn.generation,
+            source: { originalDigest, sourceDigest: segment.sourceDigest, digest: segment.digest,
+              sourceStart: segment.sourceStart, sourceEnd: segment.sourceEnd, index: segment.index, total: segment.total } });
+          if (reservation?.accepted !== true) throw new VoiceError('VOICE_DUPLICATE_OR_UNKNOWN');
+          const operation = { accepted: true, requestId, parentRequestId: turn.requestId, generation: turn.generation,
+            sourceDigest: segment.sourceDigest, digest: segment.digest, sourceStart: segment.sourceStart, sourceEnd: segment.sourceEnd };
+          if (!current()) {
+            await this.operations.settle({ context, scope: session.scope, requestId, outcome: 'cancelled-before-dispatch' });
+            throw new VoiceError('VOICE_TURN_CANCELLED');
+          }
+          return operation;
+        },
+        settle: async ({ operation, outcome }) => this.operations.settle({ context, scope: session.scope,
+          requestId: operation.requestId, parentRequestId: turn.requestId, outcome }),
+      };
+      for await (const child of this.speech.synthesizeSequence({ ...envelope, children })) {
+        if (!current()) throw new VoiceError('VOICE_TURN_CANCELLED');
+        yield child;
+      }
+    } finally { session.speaking = false; }
   }
   async approve(context, envelope) {
     const session = await this.#admit(context, envelope, 'agent:approve');

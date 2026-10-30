@@ -26,6 +26,12 @@ export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; m
       <p role="status" aria-live="polite" className="text-sm text-neutral-400">{state.muted && !ended ? 'Microphone off' : state.phase === 'ready' ? 'Listening' : state.phase === 'speaking' ? 'Speaking' : state.phase}</p>
     </div>
     {(error || state.error) && <p role="alert" className="mb-3 rounded-lg bg-red-950/30 p-3 text-sm text-red-200">{error || state.error}</p>}
+    {client.hasRetainedCapture() && <div role="alert" className="mb-3 text-sm"><p>The complete unsubmitted capture is retained in this view. Export or discard it before resuming. Closing this view loses this copy.</p><button type="button" onClick={() => {
+      const pcm = client.getRetainedCapture(); if (!pcm) return;
+      const header = JSON.stringify({ format: 'veyra-pcm16le-v1', sampleRate: 16000, channels: 1, bytes: pcm.length }) + '\n';
+      const url = URL.createObjectURL(new Blob([header, new Uint8Array(pcm)], { type: 'application/octet-stream' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'veyra-unsubmitted-capture.pcm'; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }}>Export complete capture</button><button type="button" onClick={() => client.discardRetainedCapture()}>Discard unsubmitted capture</button></div>}
     {showTranscript && <div className="mb-4 max-h-48 overflow-y-auto rounded-xl bg-white/5 p-3 text-sm" aria-label="Voice transcript"><p>{state.transcript || 'Your words will appear here.'}</p>{state.reply && <p className="mt-3 text-neutral-300">{state.reply}</p>}</div>}
     {state.tools.length > 0 && <ul className="mb-3 max-h-24 overflow-y-auto text-xs text-neutral-400" aria-label="Agent tool activity">{state.tools.map(tool => <li key={tool.callId}>{tool.label} · {tool.status}</li>)}</ul>}
     {state.approval && <div role="group" aria-label="Agent permission request" className="mb-3 rounded-xl border border-amber-700 p-3 text-sm"><p>{state.approval.label}</p><div className="mt-2 flex gap-3"><button type="button" onClick={() => run(() => client.session.decideApproval('allow-once'))} className="rounded-lg bg-blue-600 px-3 py-2 focus-visible:outline-2 focus-visible:outline-blue-300">Allow once</button><button type="button" onClick={() => run(() => client.session.decideApproval('deny'))} className="rounded-lg bg-white/10 px-3 py-2 focus-visible:outline-2 focus-visible:outline-blue-300">Deny</button></div></div>}

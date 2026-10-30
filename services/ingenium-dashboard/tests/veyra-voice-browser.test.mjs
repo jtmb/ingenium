@@ -6,6 +6,25 @@ import { VoiceClient } from '../src/app/components/voice-v2/voice-client.mjs';
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 const scope = { actorId: 'actor-a', accountId: 'a', organizationId: null, projectId: null, conversationId: 'c', runtimeId: 'native', executionBindingId: 'native-projectless', executionRevision: 'revision-1', agentId: 'agent' };
 const tick = () => new Promise(resolve => setImmediate(resolve));
+test('overflow preserves the entire crossing PCM frame until explicit recovery', async () => {
+  const h=clientHarness();await h.client.start();
+  const frame=new Uint8Array(6200);new Int16Array(frame.buffer).fill(1000);
+  for(let i=0;i<78;i++) h.pcm(frame);
+  await tick();
+  assert.equal(h.client.hasRetainedCapture(),true);
+  const retained=h.client.getRetainedCapture();assert.equal(retained.length,483600);
+  assert.deepEqual(retained.subarray(-6200),frame);
+  retained.fill(0);assert.notEqual(h.client.getRetainedCapture()[0],0);
+  assert.equal(h.client.session.getSnapshot().muted,true);
+  await assert.rejects(()=>h.client.mute(false),/VOICE_CAPTURE_RECOVERY_REQUIRED/);
+  await h.client.reconnect();
+  assert.equal(h.client.session.getSnapshot().muted,true);
+  assert.equal(h.calls.filter(call=>call==='capture').length,1);
+  assert.equal(h.client.getRetainedCapture().length,483600);
+  h.client.discardRetainedCapture();assert.equal(h.client.hasRetainedCapture(),false);
+  await h.client.mute(false);assert.equal(h.client.session.getSnapshot().muted,false);
+  await h.client.end();
+});
 test('pending device permission resolved after stop immediately releases tracks', async () => {
   const permission = deferred(); let stopped = 0;
   const media = new BrowserAudio({ navigator: { mediaDevices: { getUserMedia: () => permission.promise } } });

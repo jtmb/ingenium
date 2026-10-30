@@ -8,5 +8,8 @@ export class VoiceClient {
   mute(muted: boolean): Promise<void>;
   selectDevices(input: string, output: string): Promise<void>;
   reconnect(): Promise<void>;
+  getRetainedCapture(): Uint8Array | null;
+  hasRetainedCapture(): boolean;
+  discardRetainedCapture(): void;
   end(): Promise<void>;
 }

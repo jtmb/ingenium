@@ -30,13 +30,19 @@ export class PcmNormalizer {
 
 /** Normalized 16 kHz mono s16le only. Energy segmentation is not neural VAD or echo cancellation. */
 export class UtteranceSegmenter {
-  constructor(onUtterance, { silenceMs = 700, maxMs = 15000, minVoicedMs = 250, threshold = 160 } = {}) {
+  constructor(onUtterance, { silenceMs = 700, maxMs = 15000, minVoicedMs = 250, threshold = 160, onOverflow } = {}) {
     if (![silenceMs, maxMs, minVoicedMs, threshold].every(Number.isFinite) || silenceMs < 200 || silenceMs > 2000 || maxMs < 1000 || maxMs > 15000 || minVoicedMs < 250 || minVoicedMs > maxMs || threshold <= 0) throw new VoiceError('VOICE_SEGMENT_CONFIG_INVALID');
-    Object.assign(this, { onUtterance, silenceMs, maxMs, minVoicedMs, threshold }); this.reset();
+    Object.assign(this, { onUtterance, silenceMs, maxMs, minVoicedMs, threshold, onOverflow }); this.reset();
   }
-  reset() { this.chunks = []; this.bytes = 0; this.voicedMs = 0; this.silentMs = 0; this.preRoll = new Uint8Array(); }
+  reset() { this.chunks = []; this.bytes = 0; this.voicedMs = 0; this.silentMs = 0; this.preRoll = new Uint8Array(); this.overflowed = false; }
+  retainedPcm() {
+    const result = new Uint8Array(this.bytes); let offset = 0;
+    for (const chunk of this.chunks) { result.set(chunk, offset); offset += chunk.length; }
+    return result;
+  }
   push(pcm) {
     if (!(pcm instanceof Uint8Array) || !pcm.length || pcm.length % 2 || pcm.length > 6400) throw new VoiceError('VOICE_FRAME_INVALID');
+    if (this.overflowed) return false; // Caller must release capture; never consume another frame.
     const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength); let energy = 0;
     for (let i = 0; i < pcm.length; i += 2) energy += view.getInt16(i, true) ** 2;
     const voiced = Math.sqrt(energy / (pcm.length / 2)) >= this.threshold;
@@ -46,12 +52,17 @@ export class UtteranceSegmenter {
       next.set(this.preRoll.subarray(this.preRoll.length - keep)); next.set(pcm, keep); this.preRoll = next; return;
     }
     if (!this.bytes) { this.chunks.push(this.preRoll); this.bytes = this.preRoll.length; this.preRoll = new Uint8Array(); }
-    const accepted = pcm.slice(0, Math.max(0, this.maxMs * 32 - this.bytes));
+    const accepted = pcm.slice(); // Retain the entire crossing frame, including its tail.
     this.chunks.push(accepted); this.bytes += accepted.length;
     if (voiced) { this.voicedMs += accepted.length / 32; this.silentMs = 0; } else this.silentMs += accepted.length / 32;
-    if (this.silentMs >= this.silenceMs || this.bytes >= this.maxMs * 32) this.flush();
+    if (this.bytes > this.maxMs * 32 || (this.bytes >= this.maxMs * 32 && this.silentMs < this.silenceMs)) {
+      this.overflowed = true; this.onOverflow?.(this.retainedPcm()); return false;
+    }
+    if (this.silentMs >= this.silenceMs) this.flush();
+    return true;
   }
   flush() {
+    if (this.overflowed) return false; // No partial prompt and no implicit discard.
     const chunks = this.chunks, bytes = this.bytes, accepted = this.voicedMs >= this.minVoicedMs;
     this.reset();
     if (accepted) { const result = new Uint8Array(bytes); let offset = 0; for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; } this.onUtterance(result); }

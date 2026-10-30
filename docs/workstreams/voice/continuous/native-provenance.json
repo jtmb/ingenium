@@ -1,0 +1,36 @@
+{
+  "baseTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+  "files": [
+    {
+      "path": "crates/adapters/src/voice.rs",
+      "beforeSha256": "0f3e2ee1330c7fef447d0c1b8523eb0bcb28596390728c54f3f280f67d0662e9",
+      "afterSha256": "c9250d3b6869860c00f814d46e8a9de77119ae62e560d4eefe26237882afce6c"
+    },
+    {
+      "path": "crates/adapters/src/voice/continuous_tests.rs",
+      "beforeSha256": null,
+      "afterSha256": "0a3f68442b33441cd647d5dafcd6e67f0f6622dd1507940a56a8cca7b3933051"
+    },
+    {
+      "path": "crates/adapters/src/voice/privacy.rs",
+      "beforeSha256": "a8cd1a6f2faad5a23b706f7e06d62d7f8cfd7a02e71c679659149f5785e03e20",
+      "afterSha256": "1a933e5c184cc8ba6b8ecfd0de52e833fb9b9b415e3cf1d9936793cb9b7ea516"
+    },
+    {
+      "path": "crates/adapters/src/voice/segments.rs",
+      "beforeSha256": null,
+      "afterSha256": "88128ab207f064efbe96192b8b5a3e32409a613ce3f7012f1deac07a31e585e6"
+    },
+    {
+      "path": "apps/service/src/routes/voice.rs",
+      "beforeSha256": "1c22539040c5c9f58fd4008b7a3c09db603afe31fdd55f2938e00cdf00512b4e",
+      "afterSha256": "547ed84ba4a10eba011071aee1e9c6ce1188bd871a3b1739109fe3cd026a665f"
+    },
+    {
+      "path": "apps/web/src/features/workbench/VoiceChat.tsx",
+      "beforeSha256": "8b5444ca9962e59ee4c528a9b0d2fcbe17aa42e8a9660c185f2b68e1d56b0a85",
+      "afterSha256": "57eb9dfdabe80302eb097efe54c6b0328a1999e5d0cdd4b5cc340699b7d5c9a6"
+    }
+  ],
+  "patchSha256": "14f73636fe7973fa8fdca8ca3a6e4f024f5a8381a116f23f239ebd5448378747"
+}

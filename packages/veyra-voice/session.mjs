@@ -137,12 +137,24 @@ export class VoiceSession {
       const result = await this.ports.submit({ scope: this.scope, turn, text, delivery, signal: active.controller.signal, onEvent: event => this.acceptEvent(event) });
       if (!this.#current(turn)) return;
       if (!sameScope(this.scope, result.scope) || result.requestId !== turn.requestId) throw new VoiceError('VOICE_RESULT_SCOPE_MISMATCH');
-      const reply = boundedText(result.text, 32000);
+      boundedText(result.text, 32000);
+      const reply = result.text;
       this.#set({ reply, phase: 'synthesizing', approval: null });
-      const wav = await this.ports.synthesize({ scope: this.scope, turn, text: result.text, signal: active.controller.signal });
-      if (!this.#current(turn)) return;
-      this.#set({ phase: 'speaking' });
-      await this.ports.play({ wav, turn, signal: active.controller.signal });
+      if (typeof this.ports.speechSequence === 'function') {
+        for await (const child of this.ports.speechSequence({ scope: this.scope, turn, text: result.text, signal: active.controller.signal })) {
+          if (!this.#current(turn)) return;
+          if (child.operation?.parentRequestId !== turn.requestId || child.operation.generation !== turn.generation) throw new VoiceError('VOICE_RESULT_SCOPE_MISMATCH');
+          this.#set({ phase: 'speaking' });
+          await this.ports.play({ wav: child.wav, turn, speechOperation: child.operation, segment: child.segment, signal: active.controller.signal });
+          if (!this.#current(turn)) return;
+          this.#set({ phase: 'synthesizing' });
+        }
+      } else {
+        const wav = await this.ports.synthesize({ scope: this.scope, turn, text: result.text, signal: active.controller.signal });
+        if (!this.#current(turn)) return;
+        this.#set({ phase: 'speaking' });
+        await this.ports.play({ wav, turn, signal: active.controller.signal });
+      }
       if (this.#current(turn)) await this.ports.complete({ scope: this.scope, turn, signal: active.controller.signal });
     } catch (error) {
       if (this.#current(turn)) this.#set({ error: error instanceof VoiceError ? error.code : 'VOICE_TURN_FAILED' });

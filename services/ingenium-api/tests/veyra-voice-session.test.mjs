@@ -61,7 +61,7 @@ test('speech request preserves the exact confirmed reply including surrounding w
   const rawReply = '  The targeted tests passed.\n';
   const { session } = harness({ submit: async request => ({ scope, requestId: request.turn.requestId, text: rawReply }), synthesize: async request => { synthesized = request.text; return wav(); } });
   await session.connect(); await session.sendText('run tests');
-  assert.equal(synthesized, rawReply); assert.equal(session.getSnapshot().reply, rawReply.trim());
+  assert.equal(synthesized, rawReply); assert.equal(session.getSnapshot().reply, rawReply);
   assert.equal(session.getSnapshot().error, null);
 });
 test('native adapter ignoring abort cannot keep interruption pending indefinitely', async () => {

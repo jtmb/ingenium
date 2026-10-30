@@ -1,5 +1,6 @@
-import { VoiceError } from '../../../../packages/veyra-voice/session.mjs';
+import { VoiceError, validateTurn } from '../../../../packages/veyra-voice/session.mjs';
 import { validateWav } from '../../../../packages/veyra-voice/audio.mjs';
+import { planTextSpeech, sourceDigest } from '../../../../packages/veyra-voice/segments.mjs';
 
 async function readBounded(response, limit) {
   const length = response.headers.get('content-length');
@@ -23,6 +24,7 @@ async function readBounded(response, limit) {
 
 /** Server-only consumer of Veyra's Stratus-compatible speech protocol. No automatic backend fallback. */
 export class SpeechWorker {
+  #plans = new WeakMap();
   constructor({ baseUrl, token, voice, backend = 'directml', instanceId, redactSpeech, fetch: request = globalThis.fetch }) {
     const url = new URL(baseUrl);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !token || !voice || !['directml', 'cpu-onnx'].includes(backend) || (instanceId !== undefined && (typeof instanceId !== 'string' || !instanceId || instanceId.length > 160)) || typeof redactSpeech !== 'function') throw new VoiceError('VOICE_WORKER_CONFIG_INVALID');
@@ -58,10 +60,54 @@ export class SpeechWorker {
   async synthesize({ text, turn, signal }) {
     const safe = this.redactSpeech(text);
     if (typeof safe !== 'string' || !safe.trim()) throw new VoiceError('VOICE_SPEECH_REDACTED');
-    const bounded = [...safe].slice(0, 600).join('');
+    if ([...safe].length > 600 || new TextEncoder().encode(safe).length > 2400) throw new VoiceError('VOICE_SPEECH_TEXT_LIMIT');
     return this.#withCancel(turn.requestId, signal, async () => {
-      const wav = await this.#call('/v1/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: turn.requestId, text: bounded, voice: this.voice }) }, 2880128, signal);
+      const wav = await this.#call('/v1/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: turn.requestId, text: safe, voice: this.voice }) }, 2880128, signal);
       validateWav(wav); return wav;
     });
+  }
+  async planSpeech({ text, turn, signal }) {
+    validateTurn(turn);
+    if (typeof text !== 'string' || [...text].length > 32000) throw new VoiceError('VOICE_TEXT_INVALID');
+    signal?.throwIfAborted();
+    const safe = this.redactSpeech(text);
+    if (typeof safe !== 'string') throw new VoiceError('VOICE_SPEECH_REDACTED');
+    // Redact the whole original BEFORE partitioning; secret/code boundaries must
+    // never be broken up and redacted independently. Preserve both source hashes.
+    const spoken = safe.replaceAll('\r', '\n');
+    const plan = spoken.length ? await planTextSpeech(spoken) : { sourceDigest: await sourceDigest(new Uint8Array()), sourceBytes: 0, segments: [] };
+    const result = Object.freeze({ ...plan, redactedDigest: await sourceDigest(new TextEncoder().encode(safe)), originalDigest: await sourceDigest(new TextEncoder().encode(text)) });
+    this.#plans.set(result, { requestId: turn.requestId, generation: turn.generation });
+    return result;
+  }
+  async *synthesizeSequence({ text, turn, signal, children }) {
+    if (typeof children?.reserve !== 'function' || typeof children?.settle !== 'function') throw new VoiceError('VOICE_SPEECH_CHILD_OWNER_REQUIRED');
+    const plan = await this.planSpeech({ text, turn, signal });
+    for (const segment of plan.segments) {
+      signal?.throwIfAborted();
+      if (segment.kind === 'text-gap') continue;
+      const owned = this.#plans.get(plan);
+      if (!owned || owned.requestId !== turn.requestId || owned.generation !== turn.generation) throw new VoiceError('VOICE_SPEECH_PLAN_INVALID');
+      const operation = await children.reserve({ turn, segment, originalDigest: plan.originalDigest });
+      if (operation?.accepted !== true || operation.parentRequestId !== turn.requestId || operation.generation !== turn.generation
+        || typeof operation.requestId !== 'string' || !operation.requestId || operation.requestId.length > 160
+        || operation.sourceDigest !== segment.sourceDigest || operation.digest !== segment.digest
+        || operation.sourceStart !== segment.sourceStart || operation.sourceEnd !== segment.sourceEnd) throw new VoiceError('VOICE_SPEECH_CHILD_OWNER_REQUIRED');
+      let settled = false;
+      try {
+        const wav = await this.#withCancel(operation.requestId, signal, async () => {
+          const data = await this.#call('/v1/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId: operation.requestId, text: segment.text, voice: this.voice }) }, 2880128, signal);
+          validateWav(data); return data;
+        });
+        await children.settle({ turn, operation, segment, outcome: 'completed' }); settled = true;
+        // The caller advances the iterator only after its existing playback owner
+        // completes/stops this WAV. There is no whole-reply audio cache or replay.
+        yield { wav, operation, segment, originalDigest: plan.originalDigest };
+      } catch (error) {
+        if (!settled) await children.settle({ turn, operation, segment, outcome: 'unknown' });
+        throw error;
+      }
+    }
   }
 }

@@ -5,13 +5,21 @@ import { BrowserAudio } from './browser-audio.mjs';
 export class VoiceClient {
   constructor({ scope, mode, sessionId, ports, media = new BrowserAudio(), speechGate, onError = () => undefined }) {
     this.media = media; this.onError = onError; this.inputDeviceId = ''; this.outputDeviceId = ''; this.disposed = false;
-    this.speechGate = speechGate; this.barging = false; this.preRoll = new Uint8Array();
+    this.speechGate = speechGate; this.barging = false; this.preRoll = new Uint8Array(); this.retainedCapture = null;
     this.segmenter = new UtteranceSegmenter(pcm => {
       if (this.session.getSnapshot().phase === 'ready' && !this.session.getSnapshot().muted) void this.session.receive(pcm).catch(() => onError('VOICE_TURN_FAILED'));
-    });
+    }, { onOverflow: pcm => {
+      this.retainedCapture = pcm; this.media.stopCapture();
+      this.onError('VOICE_CAPTURE_RETAINED_LIMIT'); this.session.reportError('VOICE_CAPTURE_RETAINED_LIMIT');
+      void this.session.mute(true);
+    } });
     this.session = new VoiceSession({ scope, mode, sessionId, ports: { ...ports,
       play: request => media.play({ ...request, outputDeviceId: this.outputDeviceId }),
-      stopPlayback: () => media.stopPlayback(), stopCapture: () => { media.stopCapture(); this.segmenter.reset(); },
+      stopPlayback: () => media.stopPlayback(), stopCapture: () => {
+        if (!this.disposed && !this.retainedCapture && this.segmenter.voicedMs >= this.segmenter.minVoicedMs && this.segmenter.bytes >= 8000)
+          this.retainedCapture = this.segmenter.retainedPcm();
+        media.stopCapture(); this.segmenter.reset();
+      },
     } });
   }
   async start() {
@@ -19,6 +27,7 @@ export class VoiceClient {
     if (await this.session.connect()) await this.capture();
   }
   async capture() {
+    if (this.retainedCapture) throw new VoiceError('VOICE_CAPTURE_RECOVERY_REQUIRED');
     if (this.disposed || this.session.getSnapshot().phase !== 'ready') return;
     try {
       await this.media.startCapture({ deviceId: this.inputDeviceId, onPcm: pcm => {
@@ -42,6 +51,7 @@ export class VoiceClient {
     } catch { this.onError('VOICE_MICROPHONE_UNAVAILABLE'); this.session.reportError('VOICE_MICROPHONE_UNAVAILABLE'); await this.session.mute(true); }
   }
   async mute(muted) {
+    if (!muted && this.retainedCapture) throw new VoiceError('VOICE_CAPTURE_RECOVERY_REQUIRED');
     await this.session.mute(muted);
     if (!muted) await this.capture();
   }
@@ -51,7 +61,13 @@ export class VoiceClient {
     if (!wasMuted) await this.mute(false);
   }
   async reconnect() {
-    if (await this.session.reconnect()) await this.capture();
+    if (await this.session.reconnect()) {
+      if (this.retainedCapture) { await this.session.mute(true); this.session.reportError('VOICE_CAPTURE_RECOVERY_REQUIRED'); }
+      else await this.capture();
+    }
   }
+  getRetainedCapture() { return this.retainedCapture?.slice() ?? null; }
+  hasRetainedCapture() { return this.retainedCapture !== null; }
+  discardRetainedCapture() { this.retainedCapture = null; this.session.reportError(''); }
   async end() { this.disposed = true; this.media.dispose(); this.segmenter.reset(); this.preRoll = new Uint8Array(); await this.session.end(); }
 }

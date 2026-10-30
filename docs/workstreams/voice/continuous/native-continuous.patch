@@ -1,0 +1,981 @@
+--- a/crates/adapters/src/voice.rs
++++ b/crates/adapters/src/voice.rs
+@@ -18,6 +18,8 @@
+ };
+ use veyra_contracts::{ExecutionEnvironment, VoiceSessionOwner};
+ mod privacy;
++#[path = "voice/segments.rs"]
++mod segments;
+ 
+ #[derive(Debug, Clone, Copy)]
+ pub enum Error {
+@@ -68,6 +70,8 @@
+ }
+ #[derive(Clone, Serialize, Deserialize)]
+ pub struct UtteranceView {
++    #[serde(default)]
++    pub children: Vec<segments::SpeechChild>,
+     pub id: String,
+     pub state: String,
+     pub transcript: Option<String>,
+@@ -104,6 +108,8 @@
+ }
+ #[derive(Clone, Serialize, Deserialize)]
+ struct Utterance {
++    #[serde(default)]
++    original_audio: Option<String>,
+     view: UtteranceView,
+     digest: String,
+     asr_id: String,
+@@ -364,16 +370,16 @@
+         if self.stopping.load(Ordering::Acquire) {
+             return Err(Error::Unavailable);
+         }
+-        // Exactly the canonical speech format, bounded to a 20-second VAD turn.
++        // One retained logical capture; neural ASR calls remain bounded to 15 seconds.
+         use base64::Engine as _;
+-        if wav_base64.len() > 860000 {
++        if wav_base64.len() > 2_560_064 {
+             return Err(Error::Invalid);
+         }
+         let wav = base64::engine::general_purpose::STANDARD
+             .decode(&wav_base64)
+             .map_err(|_| Error::Invalid)?;
+-        if wav.len() < 46
+-            || wav.len() > 44 + 16000 * 2 * 20
++        if wav.len() < 8044
++            || wav.len() > 44 + segments::MAX_CAPTURE_BYTES
+             || &wav[..4] != b"RIFF"
+             || &wav[8..16] != b"WAVEfmt "
+             || &wav[36..40] != b"data"
+@@ -409,10 +415,18 @@
+         if record.state != "listening" || record.active.is_some() || record.utterances.len() >= 32 {
+             return Err(Error::Conflict);
+         }
++        // Reserve private receipt headroom before any speech/admission effect.
++        // No eviction of original captures to make room for the next turn.
++        if serde_json::to_vec(&*record).map_err(|_| Error::Unavailable)?.len()
++            + wav_base64.len() + 512 * 1024 > segments::MAX_RECORD_BYTES {
++            return Err(Error::Conflict);
++        }
++        let children = segments::pcm_children(&wav[44..])?;
+         let mut workers = self.worker_gate()?;
+         self.reap_workers(&mut workers)?;
+         self.admit_worker(&workers, id)?;
+         let initial = UtteranceView {
++            children: children.clone(),
+             id: id.into(),
+             state: "transcribing".into(),
+             transcript: None,
+@@ -432,8 +446,8 @@
+             match stage {
+                 ReceiptStage::Pending => {
+                     record.utterances.push(Utterance {
+-                        view: initial.clone(), digest: digest.clone(),
+-                        asr_id: uuid::Uuid::new_v4().to_string(), tts_id: None,
++                        view: initial.clone(), digest: digest.clone(), original_audio: Some(wav_base64.clone()),
++                        asr_id: children[0].request_id.clone(), tts_id: None,
+                         admission_started: false, turn_terminal: false, interrupt_attempt: None,
+                     });
+                     record.active = Some(id.into()); record.last_turn = Some(id.into());
+@@ -468,6 +482,7 @@
+         let mut result = match original {
+             Some(original) => original.view.clone(),
+             None if record.state == "stopped" => UtteranceView {
++                children: Vec::new(),
+                 id: id.into(), state: "cancelled".into(), transcript: None,
+                 prompt_request_id: id.into(), prompt_admission: Some("rejected".into()),
+                 reply_text: None, speech_operation_id: None, wav_base64: None,
+@@ -475,16 +490,57 @@
+             },
+             None => return Err(Error::NotFound),
+         };
+-        if result.state == "completed" {
++        if result.state == "awaiting_playback" || (result.state == "completed" && result.children.is_empty()) {
+             result.wav_base64 = self
+                 .audio
+                 .lock()
+                 .map_err(|_| Error::Unavailable)?
+                 .entries
+-                .get(id)
++                .get(result.speech_operation_id.as_deref().unwrap_or(id))
+                 .cloned();
+         }
+         Ok(result)
++    }
++    /// Claim and acknowledge one exact current playback under its original Voice
++    /// record. A read/reconnect never claims, starts or acknowledges playback.
++    pub fn playback(&self, session: &str, id: &str, child: &str, claim: &str,
++        generation: u64, played: bool) -> Result<UtteranceView> {
++        uuid(id)?; uuid(child)?; uuid(claim)?;
++        let slot = self.slot(session)?;
++        let _dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
++        let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++        if record.active.as_deref() != Some(id) || record.state != "speaking"
++            || self.stopping.load(Ordering::Acquire) { return Err(Error::Conflict); }
++        let utterance = find_mut(&mut record, id)?;
++        if utterance.view.state != "awaiting_playback"
++            || utterance.view.speech_operation_id.as_deref() != Some(child) { return Err(Error::Conflict); }
++        let part = utterance.view.children.iter_mut().find(|part| part.request_id == child)
++            .ok_or(Error::NotFound)?;
++        if part.generation != generation || part.kind != "tts" || part.state != "completed" {
++            return Err(Error::Conflict);
++        }
++        let previous = part.clone();
++        match part.playback_id.as_deref() {
++            None if !played && part.playback_state.as_deref() == Some("ready") => {
++                part.playback_id = Some(claim.into()); part.playback_state = Some("claimed".into());
++            }
++            Some(original) if original == claim => {
++                if played && part.playback_state.as_deref() == Some("claimed") {
++                    part.playback_state = Some("played".into());
++                } else if played && part.playback_state.as_deref() != Some("played") { return Err(Error::Conflict); }
++            }
++            _ => return Err(Error::Conflict),
++        }
++        // Retain acknowledgement BEFORE releasing the only cached child WAV.
++        if let Err(error) = self.persist(&record) {
++            // A failed durable acknowledgement cannot advance the worker from an
++            // optimistic in-memory value. Preserve the cache and prior receipt.
++            *find_mut(&mut record,id)?.view.children.iter_mut().find(|part| part.request_id == child)
++                .ok_or(Error::Unavailable)? = previous;
++            return Err(error);
++        }
++        if played { self.release_audio(child)?; }
++        Ok(find(&record, id)?.view.clone())
+     }
+     pub fn control(
+         self: &Arc<Self>,
+@@ -625,16 +681,18 @@
+                 if result.is_err() && record.active.as_deref() == Some(id) {
+                     let original = find(&record, id).ok().cloned();
+                     let safe_failure = original.as_ref().is_some_and(|utterance| {
+-                        let local_done = std::iter::once(Some(utterance.asr_id.as_str()))
+-                            .chain(std::iter::once(utterance.tts_id.as_deref()))
+-                            .flatten()
++                        let local_done = utterance.view.children.iter().map(|part| part.request_id.as_str())
++                            .chain(std::iter::once(utterance.asr_id.as_str()))
++                            .chain(utterance.tts_id.as_deref())
+                             .all(|id| match self.speech.get(id) {
+                                 Ok(operation) => ["completed", "failed", "cancelled"]
+                                     .contains(&operation.state.as_str()),
+                                 Err(crate::speech::Error::NotFound) => true,
+                                 Err(_) => false,
+                             });
+-                        local_done && (utterance.turn_terminal || !utterance.admission_started)
++                        local_done && !utterance.view.children.iter().any(|part|
++                            matches!(part.playback_state.as_deref(), Some("ready" | "claimed")))
++                            && (utterance.turn_terminal || !utterance.admission_started)
+                     });
+                     if let Some(utterance) = record.utterances.iter_mut().find(|u| u.view.id == id)
+                     {
+@@ -673,23 +731,32 @@
+         cancel: &AtomicBool,
+     ) -> Result<()> {
+         let slot = self.slot(session)?;
+-        let asr = {
++        use base64::Engine as _;
++        let original = base64::engine::general_purpose::STANDARD.decode(&audio).map_err(|_| Error::Invalid)?;
++        let children = {
+             let record = slot.record.lock().map_err(|_| Error::Unavailable)?;
+-            find(&record, id)?.asr_id.clone()
++            let utterance = find(&record, id)?;
++            if utterance.original_audio.as_deref() != Some(audio.as_str()) { return Err(Error::Conflict); }
++            utterance.view.children.clone()
+         };
+-        {
+-            let _dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
+-            if self.cancelling(cancel) {
+-                return Ok(());
+-            }
+-            self.submit_speech(cancel, || self.speech.transcribe(&asr, &audio))?;
+-        }
+-        let transcription =
+-            self.wait_speech(&asr, cancel, Instant::now() + Duration::from_secs(185))?;
+-        let transcript = transcription
+-            .text
+-            .filter(|text| !text.trim().is_empty() && text.chars().count() <= 4000)
+-            .ok_or(Error::Invalid)?;
++        let mut transcripts = Vec::new();
++        for child in children.iter().filter(|child| child.kind == "asr") {
++            let wav = base64::engine::general_purpose::STANDARD.encode(segments::child_wav(&original, child)?);
++            {
++                let _dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
++                if self.cancelling(cancel) { return Ok(()); }
++                self.child_state(&slot, id, &child.request_id, "dispatching")?;
++                self.submit_speech(cancel, || self.speech.transcribe(&child.request_id, &wav))?;
++            }
++            let result = self.wait_speech(&child.request_id, cancel, Instant::now()+Duration::from_secs(185))?;
++            let text = result.text.filter(|text| text.chars().count() <= 2000).ok_or(Error::Invalid)?;
++            self.child_state(&slot, id, &child.request_id, "completed")?;
++            transcripts.push(text);
++        }
++        // Exact ordered child transcripts, no overlap heuristic or deduplication.
++        // This is one prompt admission and the existing transcript writer.
++        let transcript = transcripts.join("\n");
++        if transcript.trim().is_empty() { return Err(Error::Invalid); }
+         let _dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
+         if self.cancelling(cancel) {
+             return Ok(());
+@@ -758,8 +825,7 @@
+             thread::sleep(Duration::from_millis(250));
+         };
+         let full_reply = turn.text.unwrap_or_default();
+-        let shortened = full_reply.chars().count() > 2000;
+-        let spoken: String = full_reply.chars().take(2000).collect();
++
+         let (read, voice) = {
+             let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
+             if self.cancelling(cancel) || record.active.as_deref() != Some(id) {
+@@ -767,39 +833,66 @@
+             }
+             let utterance = find_mut(&mut record, id)?;
+             utterance.turn_terminal = true;
+-            utterance.view.reply_text = Some(spoken.clone());
+-            if shortened {
+-                utterance.view.message = Some("Speech reads the first 2,000 characters; the complete reply remains in the chat.".into());
+-            }
++            utterance.view.reply_text = Some(full_reply.clone());
++            // The complete reply is retained before planning can refuse it.
+             self.persist(&record)?;
+             (record.read_replies, record.voice.clone())
+         };
+-        if read && !spoken.trim().is_empty() {
+-            let dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
+-            if self.cancelling(cancel) {
+-                return Ok(());
+-            }
+-            let tts = uuid::Uuid::new_v4().to_string();
+-            {
+-                let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
+-                let utterance = find_mut(&mut record, id)?;
+-                utterance.tts_id = Some(tts.clone());
+-                utterance.view.speech_operation_id = Some(tts.clone());
+-                utterance.view.state = "synthesizing".into();
+-                record.state = "processing".into();
+-                self.persist(&record)?;
+-            }
+-            if self.cancelling(cancel) {
+-                return Ok(());
+-            }
+-            self.submit_speech(cancel, || {
+-                self.speech.synthesize(&tts, spoken.clone(), voice.clone())
+-            })?;
+-            drop(dispatch);
+-            let synthesized =
+-                self.wait_speech(&tts, cancel, Instant::now() + Duration::from_secs(185))?;
+-            if let Some(wav) = synthesized.wav_base64 {
+-                self.cache_audio(id, wav)?;
++        let plan = if read { segments::text_children(&full_reply)? } else { Vec::new() };
++        {
++            let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++            if self.cancelling(cancel) || record.active.as_deref() != Some(id) { return Ok(()); }
++            find_mut(&mut record,id)?.view.children.extend(plan.clone()); self.persist(&record)?;
++        }
++        if read {
++            for child in &plan {
++                let spoken = full_reply[child.source_start..child.source_end].replace('\r', "\n");
++                if segments::digest(spoken.as_bytes()) != child.speech_digest { return Err(Error::Conflict); }
++                let dispatch = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
++                if self.cancelling(cancel) { return Ok(()); }
++                {
++                    let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++                    let utterance = find_mut(&mut record, id)?;
++                    utterance.tts_id = Some(child.request_id.clone());
++                    utterance.view.speech_operation_id = Some(child.request_id.clone());
++                    utterance.view.state = "synthesizing".into();
++                    utterance.view.children.iter_mut().find(|part| part.request_id == child.request_id)
++                        .ok_or(Error::Unavailable)?.state = "dispatching".into();
++                    record.state = "processing".into(); self.persist(&record)?;
++                }
++                self.submit_speech(cancel, || self.speech.synthesize(&child.request_id, spoken, voice.clone()))?;
++                drop(dispatch);
++                let synthesized = self.wait_speech(&child.request_id, cancel, Instant::now()+Duration::from_secs(185))?;
++                let wav = synthesized.wav_base64.ok_or(Error::Unavailable)?;
++                let wav_digest = segments::digest(&base64::engine::general_purpose::STANDARD.decode(&wav).map_err(|_| Error::Invalid)?);
++                // Publication is serialized with original cancellation, so a
++                // late result cannot repopulate audio after control cleaned it.
++                let publication = slot.dispatch.lock().map_err(|_| Error::Unavailable)?;
++                if self.cancelling(cancel) { return Ok(()); }
++                self.cache_audio(&child.request_id, wav)?;
++                {
++                    let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++                    if self.cancelling(cancel) || record.active.as_deref() != Some(id) { return Ok(()); }
++                    let utterance = find_mut(&mut record, id)?;
++                    let part = utterance.view.children.iter_mut().find(|part| part.request_id == child.request_id).ok_or(Error::Unavailable)?;
++                    part.state = "completed".into(); part.wav_digest = Some(wav_digest);
++                    part.playback_state = Some("ready".into());
++                    utterance.view.state = "awaiting_playback".into(); record.state = "speaking".into();
++                    self.persist(&record)?;
++                }
++                drop(publication);
++                // One child at a time: next inference requires exact browser ended
++                // acknowledgement. Timeout/reconnect cannot manufacture it.
++                let deadline = Instant::now()+Duration::from_secs(120);
++                loop {
++                    if self.cancelling(cancel) { return Ok(()); }
++                    let record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++                    let part = find(&record,id)?.view.children.iter().find(|part| part.request_id == child.request_id).ok_or(Error::Unavailable)?;
++                    if part.playback_state.as_deref() == Some("played") { break; }
++                    drop(record);
++                    if Instant::now() >= deadline { return Err(Error::Unavailable); }
++                    thread::sleep(Duration::from_millis(50));
++                }
+             }
+         }
+         if self.cancelling(cancel) {
+@@ -888,9 +981,9 @@
+             return Ok(());
+         };
+         self.control_live(admitted_deadline)?;
+-        for speech in std::iter::once(Some(utterance.asr_id.clone()))
+-            .chain(std::iter::once(utterance.tts_id.clone()))
+-            .flatten()
++        for speech in utterance.view.children.iter().map(|part| part.request_id.clone())
++            .chain(std::iter::once(utterance.asr_id.clone())).chain(utterance.tts_id.clone())
++            .collect::<std::collections::BTreeSet<_>>()
+         {
+             self.control_live(admitted_deadline)?;
+             match self.speech.cancel(&speech) {
+@@ -900,6 +993,16 @@
+                 Err(crate::speech::Error::NotFound) => {}
+                 Err(_) => return Err(Error::Unavailable),
+             }
++        }
++        {
++            let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++            let original = find_mut(&mut record, &utterance.view.id)?;
++            for child in &mut original.view.children {
++                child.generation += 1;
++                if child.playback_state.as_deref() != Some("played") { child.playback_state = Some("cancelled".into()); }
++                self.release_audio(&child.request_id)?;
++            }
++            self.persist(&record)?;
+         }
+         if utterance.admission_started && !utterance.turn_terminal {
+             let can_interrupt = Self::can_interrupt(utterance.interrupt_attempt.as_deref());
+@@ -1016,18 +1119,25 @@
+             );
+         }
+     }
++    fn child_state(&self, slot: &Slot, id: &str, child: &str, state: &str) -> Result<()> {
++        let mut record = slot.record.lock().map_err(|_| Error::Unavailable)?;
++        find_mut(&mut record,id)?.view.children.iter_mut().find(|part| part.request_id == child)
++            .ok_or(Error::NotFound)?.state = state.into();
++        self.persist(&record)
++    }
++    fn release_audio(&self, id: &str) -> Result<()> {
++        let mut audio = self.audio.lock().map_err(|_| Error::Unavailable)?;
++        if let Some(wav) = audio.entries.remove(id) { audio.bytes -= wav.len(); }
++        audio.order.retain(|key| key != id); Ok(())
++    }
+     fn cache_audio(&self, id: &str, wav: String) -> Result<()> {
+         if wav.len() > 12 * 1024 * 1024 {
+             return Err(Error::Unavailable);
+         }
+         let mut audio = self.audio.lock().map_err(|_| Error::Unavailable)?;
+-        while audio.bytes + wav.len() > 32 * 1024 * 1024 {
+-            let Some(oldest) = audio.order.pop_front() else {
+-                return Err(Error::Unavailable);
+-            };
+-            if let Some(old) = audio.entries.remove(&oldest) {
+-                audio.bytes -= old.len();
+-            }
++        // Never evict a current, unacknowledged child. Capacity is a refusal.
++        if audio.entries.contains_key(id) || audio.bytes + wav.len() > 32 * 1024 * 1024 {
++            return Err(Error::Unavailable);
+         }
+         audio.bytes += wav.len();
+         audio.order.push_back(id.into());
+@@ -1075,17 +1185,17 @@
+         })?;
+         if metadata.file_type().is_symlink()
+             || !metadata.is_file()
+-            || metadata.len() > 2 * 1024 * 1024
++            || metadata.len() > segments::MAX_RECORD_BYTES as u64
+         {
+             return Err(Error::Unavailable);
+         }
+         let mut bytes = Vec::new();
+         fs::File::open(path)
+             .map_err(|_| Error::Unavailable)?
+-            .take(2 * 1024 * 1024 + 1)
++            .take(segments::MAX_RECORD_BYTES + 1)
+             .read_to_end(&mut bytes)
+             .map_err(|_| Error::Unavailable)?;
+-        if bytes.len() > 2 * 1024 * 1024 {
++        if bytes.len() > segments::MAX_RECORD_BYTES {
+             return Err(Error::Unavailable);
+         }
+         let mut record: Record = serde_json::from_slice(&bytes).map_err(|_| Error::Unavailable)?;
+@@ -1116,7 +1226,7 @@
+         }
+         self.prepare()?;
+         let bytes = serde_json::to_vec(record).map_err(|_| Error::Unavailable)?;
+-        if bytes.len() > 2 * 1024 * 1024 {
++        if bytes.len() > segments::MAX_RECORD_BYTES {
+             return Err(Error::Unavailable);
+         }
+         let temporary = self.directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
+@@ -1226,3 +1336,7 @@
+ 
+ #[cfg(test)]
+ mod speech_status_tests;
++
++#[cfg(test)]
++#[path = "voice/continuous_tests.rs"]
++mod continuous_tests;
+--- /dev/null
++++ b/crates/adapters/src/voice/continuous_tests.rs
+@@ -0,0 +1,73 @@
++//! In-memory metadata and the actual Voice playback method. No model, worker,
++//! device, socket, service, file or engine action is permitted by this fixture.
++use super::*;
++struct NoEngine;
++impl VoiceEngine for NoEngine {
++    fn admit(&self, _: &Binding, _: &str, _: &str) -> Result<Value> { panic!("engine forbidden") }
++    fn observe(&self, _: &Binding, _: &str) -> Result<Turn> { panic!("engine forbidden") }
++    fn interrupt(&self, _: &Binding, _: &str) -> Result<Value> { panic!("engine forbidden") }
++}
++fn fixture() -> (Arc<Voice>,String,String,String,String) {
++    let directory=Path::new("inert-continuous-voice-source");
++    let voice=Voice::new(directory,Arc::new(Speech::new(directory)),Arc::new(NoEngine));
++    *voice.source_persist.lock().unwrap()=Some(Arc::new(|_| Ok(())));
++    let session=uuid::Uuid::new_v4().to_string();let id=uuid::Uuid::new_v4().to_string();
++    let claim=uuid::Uuid::new_v4().to_string();
++    let mut children=segments::text_children("The full original reply.").unwrap();
++    let child=children[0].request_id.clone();children[0].state="completed".into();
++    children[0].playback_state=Some("ready".into());children[0].wav_digest=Some("fixture-digest".into());
++    let record=Record {version:1,id:session.clone(),binding:Binding {project_id:"p".into(),session_id:"ses_source".into(),
++        directory:"inert".into(),environment:ExecutionEnvironment::Windows,profile_id:"unchanged".into(),quant:"q".into(),context:1},
++        authority:None,read_replies:true,voice:Some("af_sarah".into()),state:"speaking".into(),active:Some(id.clone()),
++        last_turn:Some(id.clone()),controls:BTreeMap::new(),message:None,
++        utterances:vec![Utterance {original_audio:Some("retained-original-source".into()),digest:"original-digest".into(),
++            asr_id:uuid::Uuid::new_v4().to_string(),tts_id:Some(child.clone()),admission_started:true,turn_terminal:true,interrupt_attempt:None,
++            view:UtteranceView {children,id:id.clone(),state:"awaiting_playback".into(),transcript:Some("full transcript".into()),
++                prompt_request_id:id.clone(),prompt_admission:Some("admitted".into()),reply_text:Some("The full original reply.".into()),
++                speech_operation_id:Some(child.clone()),wav_base64:None,message:None}}]};
++    voice.slots.lock().unwrap().insert(session.clone(),Arc::new(Slot {record:Mutex::new(record),dispatch:Mutex::new(())}));
++    voice.cache_audio(&child,"current-bounded-wav".into()).unwrap();
++    (voice,session,id,child,claim)
++}
++#[test] fn claim_does_not_acknowledge_playback_or_release_current_audio() {
++    let (voice,session,id,child,claim)=fixture();
++    let result=voice.playback(&session,&id,&child,&claim,1,false).unwrap();
++    assert_eq!(result.children[0].playback_state.as_deref(),Some("claimed"));
++    assert!(voice.audio.lock().unwrap().entries.contains_key(&child));
++    assert_eq!(voice.slot(&session).unwrap().record.lock().unwrap().active.as_deref(),Some(id.as_str()));
++}
++#[test] fn only_exact_claim_generation_and_original_can_acknowledge_playback() {
++    let (voice,session,id,child,claim)=fixture();
++    assert!(voice.playback(&session,&id,&child,&claim,1,true).is_err());
++    voice.playback(&session,&id,&child,&claim,1,false).unwrap();
++    assert!(voice.playback(&session,&id,&child,&uuid::Uuid::new_v4().to_string(),1,true).is_err());
++    assert!(voice.playback(&session,&id,&child,&claim,2,true).is_err());
++    assert!(voice.playback(&session,&uuid::Uuid::new_v4().to_string(),&child,&claim,1,true).is_err());
++    assert!(voice.audio.lock().unwrap().entries.contains_key(&child));
++    let result=voice.playback(&session,&id,&child,&claim,1,true).unwrap();
++    assert_eq!(result.children[0].playback_state.as_deref(),Some("played"));
++    assert!(!voice.audio.lock().unwrap().entries.contains_key(&child));
++}
++#[test] fn failed_ack_retention_does_not_release_wav_or_fabricate_terminal_parent() {
++    let (voice,session,id,child,claim)=fixture();
++    voice.playback(&session,&id,&child,&claim,1,false).unwrap();
++    *voice.source_persist.lock().unwrap()=Some(Arc::new(|_| Err(Error::Unavailable)));
++    assert!(voice.playback(&session,&id,&child,&claim,1,true).is_err());
++    assert!(voice.audio.lock().unwrap().entries.contains_key(&child));
++    assert_eq!(voice.slot(&session).unwrap().record.lock().unwrap().state,"speaking");
++    assert_eq!(voice.slot(&session).unwrap().record.lock().unwrap().utterances[0].view.children[0].playback_state.as_deref(),Some("claimed"));
++}
++#[test] fn cancellation_or_retirement_fences_late_browser_ended_acknowledgement() {
++    let (voice,session,id,child,claim)=fixture();
++    voice.playback(&session,&id,&child,&claim,1,false).unwrap();
++    voice.slot(&session).unwrap().record.lock().unwrap().state="interruption_pending".into();
++    assert!(voice.playback(&session,&id,&child,&claim,1,true).is_err());
++    voice.close_admission();
++    assert!(voice.playback(&session,&id,&child,&claim,1,true).is_err());
++    assert!(voice.audio.lock().unwrap().entries.contains_key(&child));
++}
++#[test] fn current_audio_cannot_be_evicted_or_replaced_by_duplicate_child() {
++    let (voice,_,_,child,_)=fixture();
++    assert!(voice.cache_audio(&child,"replacement".into()).is_err());
++    assert_eq!(voice.audio.lock().unwrap().entries[&child],"current-bounded-wav");
++}
+--- a/crates/adapters/src/voice/privacy.rs
++++ b/crates/adapters/src/voice/privacy.rs
+@@ -207,6 +207,11 @@
+         uuid(&utterance.asr_id)?;
+         utterances.insert(utterance.view.id.clone());
+         speech.insert(utterance.asr_id.clone());
++        for child in &utterance.view.children {
++            uuid(&child.request_id)?;
++            speech.insert(child.request_id.clone());
++            utterances.insert(child.request_id.clone()); // child-keyed current WAV cache
++        }
+         for id in [
+             utterance.tts_id.as_ref(),
+             utterance.view.speech_operation_id.as_ref(),
+@@ -320,7 +325,7 @@
+             .ok_or(Error::Unavailable)?;
+         uuid(id)?;
+         let metadata = fs::symlink_metadata(&path).map_err(|_| Error::Unavailable)?;
+-        if redirected(&metadata) || !metadata.is_file() || metadata.len() > 2 * 1024 * 1024 {
++        if redirected(&metadata) || !metadata.is_file() || metadata.len() > segments::MAX_RECORD_BYTES as u64 {
+             return Err(Error::Unavailable);
+         }
+         let resolved = fs::canonicalize(&path).map_err(|_| Error::Unavailable)?;
+@@ -336,14 +341,14 @@
+         }
+         let file = options.open(&path).map_err(|_| Error::Unavailable)?;
+         let metadata = file.metadata().map_err(|_| Error::Unavailable)?;
+-        if redirected(&metadata) || !metadata.is_file() || metadata.len() > 2 * 1024 * 1024 {
++        if redirected(&metadata) || !metadata.is_file() || metadata.len() > segments::MAX_RECORD_BYTES as u64 {
+             return Err(Error::Unavailable);
+         }
+         let mut bytes = Vec::new();
+-        file.take(2 * 1024 * 1024 + 1)
++        file.take((segments::MAX_RECORD_BYTES + 1) as u64)
+             .read_to_end(&mut bytes)
+             .map_err(|_| Error::Unavailable)?;
+-        if bytes.len() > 2 * 1024 * 1024 {
++        if bytes.len() > segments::MAX_RECORD_BYTES {
+             return Err(Error::Unavailable);
+         }
+         let record: Record = serde_json::from_slice(&bytes).map_err(|_| Error::Unavailable)?;
+--- /dev/null
++++ b/crates/adapters/src/voice/segments.rs
+@@ -0,0 +1,100 @@
++//! Pure source partitions under one existing Voice utterance. No operation
++//! admission, model, conversation, scheduler, file or playback authority.
++use super::{Error, Result};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++
++pub const MAX_CAPTURE_BYTES: usize = 60 * 16000 * 2;
++pub const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
++pub fn digest(source: &[u8]) -> String { format!("{:x}", Sha256::digest(source)) }
++#[derive(Clone, Serialize, Deserialize)]
++pub struct SpeechChild {
++    pub request_id: String,
++    pub kind: String,
++    pub index: usize,
++    pub source_start: usize,
++    pub source_end: usize,
++    pub source_digest: String,
++    pub digest: String,
++    pub speech_digest: String,
++    pub generation: u64,
++    pub state: String,
++    pub playback_id: Option<String>,
++    pub playback_state: Option<String>,
++    pub wav_digest: Option<String>,
++}
++impl SpeechChild {
++    fn planned(kind: &str, index: usize, start: usize, end: usize, whole: &str, source: &[u8], spoken: &[u8]) -> Self {
++        Self { request_id:uuid::Uuid::new_v4().to_string(),kind:kind.into(),index,
++            source_start:start,source_end:end,source_digest:whole.into(),digest:digest(source),
++            speech_digest:digest(spoken),generation:1,state:"planned".into(),
++            playback_id:None,playback_state:None,wav_digest:None }
++    }
++}
++pub fn pcm_children(pcm: &[u8]) -> Result<Vec<SpeechChild>> {
++    if pcm.len() < 8000 || pcm.len() > MAX_CAPTURE_BYTES || pcm.len() % 2 != 0 { return Err(Error::Invalid); }
++    let whole = digest(pcm);
++    let mut ranges = Vec::new(); let mut offset = 0;
++    while pcm.len()-offset > 480000 { ranges.push((offset,offset+480000)); offset += 480000; }
++    if offset < pcm.len() {
++        if pcm.len()-offset < 8000 {
++            let previous = ranges.last_mut().ok_or(Error::Invalid)?;
++            previous.1 -= 8000-(pcm.len()-offset); offset = previous.1;
++        }
++        ranges.push((offset,pcm.len()));
++    }
++    Ok(ranges.into_iter().enumerate().map(|(index,(start,end))|
++        SpeechChild::planned("asr",index,start,end,&whole,&pcm[start..end],&pcm[start..end])).collect())
++}
++pub fn text_children(text: &str) -> Result<Vec<SpeechChild>> {
++    if text.chars().count() > 32000 { return Err(Error::Invalid); }
++    let whole = digest(text.as_bytes());
++    let chars: Vec<(usize,char)> = text.char_indices().collect();
++    let mut start = 0; let mut result = Vec::new();
++    while start < chars.len() {
++        let mut end = (start+160).min(chars.len());
++        if end < chars.len() {
++            for boundary in ((start.max(end.saturating_sub(16))+1)..=end).rev() {
++                if chars[boundary-1].1.is_whitespace() || ".!?;:".contains(chars[boundary-1].1) { end=boundary;break; }
++            }
++        }
++        let begin = chars[start].0;
++        let stop = chars.get(end).map(|item| item.0).unwrap_or(text.len());
++        let original = &text[begin..stop];
++        // Preserve exact original source bytes. The worker cannot accept CR;
++        // an explicit one-byte CR→LF speech projection keeps separate digests.
++        let spoken = original.replace('\r', "\n");
++        if !spoken.trim().is_empty() {
++            if spoken.chars().any(|c| c < ' ' && c != '\n' && c != '\t') { return Err(Error::Invalid); }
++            result.push(SpeechChild::planned("tts",result.len(),begin,stop,&whole,original.as_bytes(),spoken.as_bytes()));
++        }
++        start=end;
++    }
++    Ok(result)
++}
++pub fn child_wav(original: &[u8], child: &SpeechChild) -> Result<Vec<u8>> {
++    if original.len() < 44 || child.kind != "asr" || child.source_start >= child.source_end
++        || child.source_end > original.len()-44 || child.source_end-child.source_start > 480000
++        || digest(&original[44..]) != child.source_digest { return Err(Error::Invalid); }
++    let pcm = &original[44+child.source_start..44+child.source_end];
++    if digest(pcm) != child.digest { return Err(Error::Conflict); }
++    let mut wav = original[..44].to_vec(); wav.extend_from_slice(pcm);
++    let length = (wav.len()-8) as u32;
++    wav[4..8].copy_from_slice(&length.to_le_bytes()); wav[40..44].copy_from_slice(&(pcm.len() as u32).to_le_bytes());
++    Ok(wav)
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test] fn tiny_tail_is_balanced_without_padding_or_lost_bytes() {
++        let input=vec![7;480002];let children=pcm_children(&input).unwrap();
++        assert_eq!(children.len(),2);assert_eq!(children[0].source_end,472002);
++        assert_eq!(children[1].source_start,472002);assert_eq!(children[1].source_end,480002);
++    }
++    #[test] fn full_reply_offsets_preserve_unicode_and_cr_source() {
++        let source=format!("{}\r\n{}","😀".repeat(601),"x".repeat(2001));let children=text_children(&source).unwrap();
++        assert!(children.len()>4);assert_eq!(children.last().unwrap().source_end,source.len());
++        for child in children { let part=&source[child.source_start..child.source_end];
++            assert!(part.chars().count()<=160);assert_eq!(digest(part.as_bytes()),child.digest); }
++    }
++}
+--- a/apps/service/src/routes/voice.rs
++++ b/apps/service/src/routes/voice.rs
+@@ -122,7 +122,8 @@
+         .route("/sessions/{id}/barge-in", post(barge_in))
+         .route("/sessions/{id}/stop", post(stop))
+         .route("/sessions/{id}/controls/{control}", get(control))
+-        .layer(DefaultBodyLimit::max(1024 * 1024))
++        .route("/sessions/{id}/utterances/{utterance}/playback", post(playback))
++        .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
+ }
+ struct ApiError(Error);
+ impl IntoResponse for ApiError {
+@@ -131,7 +132,7 @@
+             Error::Invalid => (
+                 StatusCode::BAD_REQUEST,
+                 "voice_invalid_request",
+-                "Voice requires explicit send consent, original UUIDs, and a canonical mono 16 kHz PCM16 utterance of at most 20 seconds",
++                "Voice requires explicit send consent, original UUIDs, and a canonical mono 16 kHz PCM16 utterance of at most 60 seconds (15-second speech children)",
+             ),
+             Error::Conflict => (
+                 StatusCode::CONFLICT,
+@@ -171,11 +172,11 @@
+     let speech = state.speech.clone();
+     let speech_status = tokio::task::spawn_blocking(move || speech.status()).await
+         .unwrap_or_else(|_| json!({"backend":"unavailable","available":false,"qualified":false,"transcription_configured":false,"synthesis_configured":false}));
+-    let max_utterance_seconds = speech_status["limits"]["max_recording_ms"]
+-        .as_u64().map(|ms| ms.min(20_000) as f64 / 1000.0).unwrap_or(20.0);
++    let max_utterance_seconds = 60;
++    // Aggregate capture capability is separate from the unchanged worker limit.
+     Json(
+         json!({"speech":speech_status,"continuous_voice":true,"vad_owner":"client microphone","vad_speech_ms":150,"vad_silence_ms":700,"max_utterance_seconds":max_utterance_seconds,
+-        "max_unacknowledged_utterances":1,"barge_in":"exact voice-owned request only","execution":"local CPU ASR/TTS; selected local engine","qualified":false}),
++        "segmented_capture":true,"playback_protocol":"voice-child-claim-v1","max_unacknowledged_utterances":1,"barge_in":"exact voice-owned request only","execution":"local CPU ASR/TTS; selected local engine","qualified":false}),
+     )
+ }
+ #[derive(Deserialize)]
+@@ -349,3 +350,21 @@
+ pub(super) fn stop_until(state: &ServiceState, deadline: Instant) -> Result<(), String> {
+     state.voice.stop_until(deadline)
+ }
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Playback {
++    child_request_id: String,
++    claim_id: String,
++    generation: u64,
++    played: bool,
++}
++async fn playback(State(state): State<Arc<ServiceState>>, Path((id, utterance)): Path<(String,String)>,
++    payload: Result<Json<Playback>, axum::extract::rejection::JsonRejection>) -> Result<Json<Value>,ApiError> {
++    ready(&state)?;
++    let payload = body(payload)?; let owner = owner(&state)?;
++    let result = tokio::task::spawn_blocking(move || owner.playback(&id,&utterance,
++        &payload.child_request_id,&payload.claim_id,payload.generation,payload.played)).await
++        .map_err(|_| ApiError(Error::Unavailable))?.map_err(ApiError)?;
++    Ok(Json(serde_json::to_value(result).map_err(|_| ApiError(Error::Unavailable))?))
++}
+--- a/apps/web/src/features/workbench/VoiceChat.tsx
++++ b/apps/web/src/features/workbench/VoiceChat.tsx
+@@ -1,12 +1,13 @@
+ import { useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { Mic, Square, Volume2 } from "lucide-react";
+ import { AttentionDetails } from "../voice-ui/AttentionDetails";
+-import { captureFrame, recordingFrames, selectedVoice, speechCapabilities, type SpeechCapabilities } from "../voice-ui/capabilities";
++import { recordingFrames, selectedVoice, speechCapabilities, type SpeechCapabilities } from "../voice-ui/capabilities";
+ 
+ type Obj = Record<string, unknown>;
+ import type { VoiceSessionOwner } from "@veyra/contracts";
+ import type { AudioLease, SpeechRequest } from "./VoiceWorkspace";
+-type Tracking = { sessionId: string; utteranceId?: string; bargeId?: string; stopId?: string; stopRequested?: boolean; issue?: string };
++type Playback = { childId: string; claimId: string; generation: number };
++type Tracking = { playback?: Playback; sessionId: string; utteranceId?: string; bargeId?: string; stopId?: string; stopRequested?: boolean; issue?: string };
+ type Samples = { frames: Float32Array[]; rate: number };
+ const obj = (value: unknown): Obj => value && typeof value === "object" && !Array.isArray(value) ? value as Obj : {};
+ const text = (value: unknown) => typeof value === "string" ? value : "";
+@@ -18,9 +19,15 @@
+   try {
+     if (raw.length > 4096) throw new Error("Receipt exceeds limit");
+     const value = obj(JSON.parse(raw));
+-    if (!uuid.test(text(value.sessionId)) || Object.keys(value).some(field => !["sessionId", "utteranceId", "bargeId", "stopId", "stopRequested"].includes(field))
++    if (!uuid.test(text(value.sessionId)) || Object.keys(value).some(field => !["sessionId", "utteranceId", "bargeId", "stopId", "stopRequested", "playback"].includes(field))
+       || (value.stopRequested !== undefined && typeof value.stopRequested !== "boolean")
+       || ["utteranceId", "bargeId", "stopId"].some(field => value[field] !== undefined && !uuid.test(text(value[field])))) throw new Error("Invalid original voice receipt");
++    if (value.playback !== undefined) {
++      const playback = obj(value.playback);
++      if (Object.keys(playback).sort().join() !== "childId,claimId,generation" || !uuid.test(text(playback.childId))
++        || !uuid.test(text(playback.claimId)) || typeof playback.generation !== "number" || !Number.isSafeInteger(playback.generation) || playback.generation < 1)
++        throw new Error("Invalid original playback receipt");
++    }
+     return value as Tracking;
+   } catch { return { sessionId: "", issue: "The saved original voice receipt is malformed. Preserve and recover it before starting another voice session; it was not replaced." }; }
+ }
+@@ -29,7 +36,7 @@
+   const boundedCount = recordingFrames(length * 1000 / samples.rate, capabilities, true);
+   const source = new Float32Array(length); let position = 0;
+   for (const frame of samples.frames) { source.set(frame, position); position += frame.length; }
+-  const count = capabilities.backend === "owned-http-cpu" ? boundedCount : Math.min(320000, Math.floor(length * 16000 / samples.rate));
++  const count = boundedCount;
+   const bytes = new Uint8Array(44 + count * 2), view = new DataView(bytes.buffer);
+   const label = (offset: number, value: string) => { for (let index = 0; index < value.length; index++) bytes[offset + index] = value.charCodeAt(index); };
+   label(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); label(8, "WAVE"); label(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); label(36, "data"); view.setUint32(40, count * 2, true);
+@@ -49,8 +56,13 @@
+   const [session, setSession] = useState<Obj | null>(null), [speech, setSpeech] = useState<Obj>({}), [readReplies, setReadReplies] = useState(true), [voice, setVoice] = useState("");
+   const [replyAudio, setReplyAudio] = useState<{ id: string; data: string } | null>(null);
+   const [monitoring, setMonitoring] = useState(false), [recording, setRecording] = useState(false), [playing, setPlaying] = useState(false), [seconds, setSeconds] = useState(0), [busy, setBusy] = useState(false), [paused, setPaused] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
++  const [voiceProtocol, setVoiceProtocol] = useState<Obj>({});
++  const [retainedCapture, setRetainedCapture] = useState<Samples | null>(null);
+   const capabilities = speechCapabilities(speech);
+-  const presentationNeeded = monitoring || recording || playing || busy || paused || !!tracking || !!error || session?.state === "uncertain";
++  const segmented = voiceProtocol.segmented_capture === true && voiceProtocol.playback_protocol === "voice-child-claim-v1"
++    && voiceProtocol.max_utterance_seconds === 60;
++  const captureCapabilities = segmented ? { ...capabilities, maxTurnMs: 60000 } : capabilities;
++  const presentationNeeded = monitoring || recording || playing || busy || paused || !!retainedCapture || !!tracking || !!error || session?.state === "uncertain";
+   useLayoutEffect(() => { onPresentationNeeded?.(presentationNeeded); }, [onPresentationNeeded, presentationNeeded]);
+   useLayoutEffect(() => () => onPresentationNeeded?.(false), [onPresentationNeeded]);
+   const viewCurrent = () => live.current && isCurrent();
+@@ -73,6 +85,9 @@
+   };
+   const stopPlayback = () => { player.current?.pause(); player.current = null; if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); audioUrl.current = ""; if (live.current) setPlaying(false); if (!watching.current && !starting.current) lease.release(micToken.current); };
+   const releaseMic = () => {
++    const pending = queued.current || (capture.current?.confirmed && devices.current
++      ? { frames: capture.current.frames, rate: devices.current.context.sampleRate } : null);
++    if (live.current && pending) setRetainedCapture(previous => previous || pending);
+     generation.current++; watching.current = false; lease.release(micToken.current); queued.current = null; capture.current = null;
+     const current = devices.current; devices.current = null;
+     if (current) { current.processor.onaudioprocess = null; current.source.disconnect(); current.processor.disconnect(); current.gain.disconnect(); current.stream.getTracks().forEach(track => track.stop()); void current.context.close().catch(() => {}); }
+@@ -80,17 +95,20 @@
+   };
+   const uncertain = (message: string) => { releaseMic(); stopPlayback(); pausedRef.current = true; if (viewCurrent()) { setPaused(true); setError(message); } };
+   const refuseUnsubmittedAudio = (message: string) => {
++    const source = capture.current;
++    if (source && devices.current) setRetainedCapture({ frames: source.frames, rate: devices.current.context.sampleRate });
++    else if (queued.current) setRetainedCapture(queued.current);
+     releaseMic(); stopPlayback();
+-    if (viewCurrent()) { setError(message); setNotice("No utterance was submitted. Existing session and control receipts remain unchanged; stop or resume explicitly when compatible."); }
+-  };
+-  const playReply = (utterance: Obj) => {
++    if (viewCurrent()) { setError(message); setNotice("No utterance was submitted. The full unsubmitted recording is retained in this view for export or explicit discard. Keep this view open until recovered."); }
++  };
++  const playReply = (utterance: Obj, ended?: () => void) => {
+     if (!viewCurrent() || admissionBlocked.current || !admittedOwner.current || !ownerMatches(admittedOwner.current) || !lease.claim(micToken.current)) return;
+     const data = text(utterance.wav_base64); if (!data || data.length > 12 * 1024 * 1024) { if (!watching.current) lease.release(micToken.current); return; }
+     stopPlayback(); if (!lease.claim(micToken.current)) return;
+     try {
+       const bytes = Uint8Array.from(atob(data), character => character.charCodeAt(0)); audioUrl.current = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+       const audio = new Audio(audioUrl.current); player.current = audio; setPlaying(true);
+-      audio.onended = () => { if (player.current === audio) stopPlayback(); }; audio.onerror = () => { if (player.current === audio) { stopPlayback(); setError("The returned voice reply could not be played."); } };
++      audio.onended = () => { if (player.current === audio) { stopPlayback(); ended?.(); } }; audio.onerror = () => { if (player.current === audio) { stopPlayback(); setError("The returned voice reply could not be played."); } };
+       void audio.play().then(() => { if (!viewCurrent() || admissionBlocked.current || player.current !== audio) audio.pause(); }).catch(() => { if (player.current === audio && viewCurrent()) { stopPlayback(); setError("Playback was blocked. Use Play reply to hear the returned audio."); } });
+     } catch { stopPlayback(); setError("The returned speech audio could not be decoded."); }
+   };
+@@ -101,6 +119,56 @@
+     admittedOwner.current = owner;
+   };
+   const acceptUtterance = async (utterance: Obj, automatic: boolean) => {
++    if (rows(utterance.children).length) {
++      if (terminal(utterance.state)) return;
++      const current = tracked.current;
++      if (!current || utterance.id !== current.utteranceId) return;
++      const child = rows(utterance.children).find(part => part.request_id === utterance.speech_operation_id);
++      if (current.playback) {
++        const original = rows(utterance.children).find(part => part.request_id === current.playback?.childId);
++        if (original?.playback_id === current.playback.claimId && original.playback_state === "played") {
++          const saved = { ...tracked.current! }; delete saved.playback; save(saved);
++        } else if (!player.current && !tracked.current?.stopRequested && !tracked.current?.bargeId) {
++          uncertain("The original segment playback is unconfirmed. It will not replay after reconnect. Check or stop the original voice session.");
++        }
++        return;
++      }
++      if (!automatic || !watching.current || utterance.state !== "awaiting_playback" || !child
++        || child.kind !== "tts" || child.playback_state !== "ready" || child.state !== "completed"
++        || !uuid.test(text(child.request_id)) || child.generation !== 1 || played.current.has(text(child.request_id))) return;
++      const stamp = generation.current;
++      await verifyPlaybackOwner();
++      const encoded = text(utterance.wav_base64);
++      if (!encoded || encoded.length > 12 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(text(child.wav_digest)))
++        throw new Error("The current bounded waveform or its digest is unavailable.");
++      const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
++      const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
++        .map(value => value.toString(16).padStart(2,"0")).join("");
++      if (digest !== child.wav_digest) throw new Error("The current child waveform does not match its original speech receipt.");
++      if (!viewCurrent() || generation.current !== stamp || tracked.current?.stopRequested || tracked.current?.bargeId) return;
++      const playback: Playback = { childId: text(child.request_id), claimId: crypto.randomUUID(), generation: 1 };
++      // Persist local identity before the claim mutation, never infer playback
++      // from a claim acknowledgement or a hydrated server snapshot.
++      save({ ...tracked.current!, playback });
++      const route = `/v1/voice/sessions/${current.sessionId}/utterances/${current.utteranceId}/playback`;
++      const body = { child_request_id: playback.childId, claim_id: playback.claimId, generation: playback.generation };
++      const claimed = obj(await request("POST", route, { ...body, played: false }));
++      const accepted = rows(claimed.children).find(part => part.request_id === playback.childId);
++      if (!viewCurrent() || generation.current !== stamp || tracked.current?.stopRequested || tracked.current?.bargeId) return;
++      if (claimed.id !== current.utteranceId || accepted?.playback_id !== playback.claimId || accepted.playback_state !== "claimed")
++        throw new Error("The exact child playback claim could not be confirmed.");
++      played.current.add(playback.childId);
++      playReply(utterance, () => {
++        if (!viewCurrent() || generation.current !== stamp || tracked.current?.playback?.claimId !== playback.claimId
++          || tracked.current?.stopRequested || tracked.current?.bargeId) return;
++        void request("POST", route, { ...body, played: true }).then(() => {
++          if (viewCurrent() && tracked.current?.playback?.claimId === playback.claimId) {
++            const saved = { ...tracked.current! }; delete saved.playback; save(saved);
++          }
++        }).catch(() => uncertain("The segment ended, but its exact played acknowledgement is unknown. Check the original; no audio is replayed."));
++      });
++      return;
++    }
+     const data = text(utterance.wav_base64), id = text(utterance.id);
+     if (!viewCurrent() || utterance.state !== "completed" || !data || data.length > 12 * 1024 * 1024) return;
+     setReplyAudio({ id, data });
+@@ -125,7 +193,7 @@
+     if (value.state === "uncertain" || utterances.some(item => item.id === tracked.current?.utteranceId && item.state === "uncertain")) uncertain(text(value.message) || "The voice turn is uncertain. Microphone and playback stopped. Check the original before continuing.");
+     const pending = tracked.current;
+     if (pending?.utteranceId && utterances.some(item => item.id === pending.utteranceId && terminal(item.state))) {
+-      const next = { ...pending }; delete next.utteranceId; save(next);
++      const next = { ...pending }; delete next.utteranceId; delete next.playback; save(next);
+     }
+     if (value.state === "stopped") { releaseMic(); stopPlayback(); }
+   };
+@@ -156,7 +224,8 @@
+         // Stop and steering suppress the original reply even if its audio
+         // arrives before the control's terminal receipt.
+         await acceptUtterance(result, !tracked.current?.stopRequested && !tracked.current?.bargeId);
+-        if (terminal(result.state) && tracked.current?.utteranceId === next.utteranceId) { const saved = { ...tracked.current! }; delete saved.utteranceId; save(saved); }
++        if (!terminal(result.state) && tracked.current?.playback && !player.current) return;
++        if (terminal(result.state) && tracked.current?.utteranceId === next.utteranceId) { const saved = { ...tracked.current! }; delete saved.utteranceId; delete saved.playback; save(saved); }
+       }
+       const value = obj(await request("GET", `/v1/voice/sessions/${current.sessionId}`));
+       if (!viewCurrent() || tracked.current?.sessionId !== current.sessionId) return;
+@@ -174,7 +243,7 @@
+     return () => { live.current = false; releaseMic(); stopPlayback(); lease.release(micToken.current); };
+   }, []);
+   useEffect(() => {
+-    if (connected) { void request("GET", "/v1/speech/status").then(value => { if (viewCurrent()) setSpeech(obj(value)); }).catch(cause => { if (viewCurrent()) setError(cause instanceof Error ? cause.message : "Speech configuration could not be read."); }); if (tracked.current) void checkRef.current(); }
++    if (connected) { void request("GET", "/v1/voice/status").then(value => { if (viewCurrent()) setVoiceProtocol(obj(value)); }).catch(() => {}); void request("GET", "/v1/speech/status").then(value => { if (viewCurrent()) setSpeech(obj(value)); }).catch(cause => { if (viewCurrent()) setError(cause instanceof Error ? cause.message : "Speech configuration could not be read."); }); if (tracked.current) void checkRef.current(); }
+   }, [connected, request]);
+   useEffect(() => {
+     if (!connected || !tracking || paused || (session?.state === "stopped" && !tracking.stopId && !tracking.bargeId && !tracking.utteranceId)) return;
+@@ -214,14 +283,17 @@
+     if (!queued.current || !current || !watching.current || pausedRef.current || writeLock.current || current.utteranceId || current.bargeId || current.stopRequested || current.stopId || state?.state !== "listening" || state.active_utterance_id != null) return;
+     const samples = queued.current; queued.current = null;
+     let data: string;
+-    try { data = wav(samples, capabilities); }
+-    catch (cause) { if (viewCurrent()) refuseUnsubmittedAudio(cause instanceof Error ? cause.message : "The complete recording could not be prepared. No audio was submitted."); return; }
++    try { data = wav(samples, captureCapabilities); }
++    catch (cause) { queued.current = samples; if (viewCurrent()) refuseUnsubmittedAudio(cause instanceof Error ? cause.message : "The complete recording could not be prepared. No audio was submitted."); return; }
+     const id = crypto.randomUUID(); writeLock.current = true;
+     try {
+       save({ ...current, utteranceId: id });
+       const result = obj(await request("POST", `/v1/voice/sessions/${current.sessionId}/utterances`, { request_id: id, wav_base64: data }, viewCurrent));
+       if (viewCurrent() && tracked.current?.sessionId === current.sessionId) { if (result.id === id && result.state === "uncertain") uncertain(text(result.message) || "The voice utterance admission is uncertain."); else await checkRef.current(); }
+-    } catch (cause) { if (viewCurrent()) uncertain(`${cause instanceof Error ? cause.message : "The voice utterance outcome is unknown."} Its original request must be checked before another turn.`); }
++    } catch (cause) { if (viewCurrent()) {
++      setRetainedCapture(previous => previous || samples);
++      uncertain(`${cause instanceof Error ? cause.message : "The voice utterance outcome is unknown."} Its original request must be checked before another turn. The original local capture is retained for export; never resubmit it automatically.`);
++    } }
+     finally { writeLock.current = false; }
+   };
+   flushHandler.current = () => { void flush(); };
+@@ -234,11 +306,12 @@
+     let energy = 0; for (const sample of frame) energy += sample * sample;
+     const loud = Math.sqrt(energy / frame.length) >= 0.018, duration = frame.length / rate;
+     if (!active) { if (!loud) return; active = { frames: [], count: 0, speech: 0, quiet: 0, confirmed: false }; capture.current = active; }
+-    const maximum = capabilities.maxTurnMs / 1000;
+-    const allowed = captureFrame(active.count, frame.length, rate, capabilities);
+-    if (!allowed.ok) { refuseUnsubmittedAudio(allowed.message); return; }
+-    const part = allowed.length === frame.length ? frame : frame.subarray(0, allowed.length);
+-    if (part.length) { active.frames.push(new Float32Array(part)); active.count += part.length; }
++    const maximum = captureCapabilities.maxTurnMs / 1000;
++    // Retain the complete incoming frame BEFORE any bound refusal; no clipping.
++    active.frames.push(new Float32Array(frame)); active.count += frame.length;
++    if (active.count > rate * maximum) {
++      refuseUnsubmittedAudio(`The complete spoken turn exceeded ${maximum} seconds before its silence boundary. Recover the retained recording.`); return;
++    }
+     active.speech = loud ? active.speech + duration : active.confirmed ? active.speech : 0;
+     active.quiet = loud ? 0 : active.quiet + duration;
+     if (!active.confirmed && active.speech >= .15) {
+@@ -246,8 +319,8 @@
+       if (player.current || state.state !== "listening" || state.active_utterance_id != null || current.utteranceId) { if (current.utteranceId) suppressed.current.add(current.utteranceId); rows(state.utterances).forEach(item => suppressed.current.add(text(item.id))); stopPlayback(); void control("barge"); }
+     }
+     if (active.confirmed) setSeconds(Math.min(maximum, Math.floor(active.count / rate)));
+-    if (capabilities.backend === "owned-http-cpu" && active.count >= rate * maximum && active.quiet < .7) {
+-      refuseUnsubmittedAudio(`The spoken turn reached the ${maximum}-second CPU limit before its silence boundary. The complete turn was discarded, not split or submitted.`); return;
++    if (active.count >= rate * maximum && active.quiet < .7) {
++      refuseUnsubmittedAudio(`The spoken turn reached the ${maximum}-second CPU limit before its silence boundary. The complete unsubmitted turn remains retained for recovery.`); return;
+     }
+     if ((!active.confirmed && !loud) || active.quiet >= .7 || active.count >= rate * maximum) {
+       capture.current = null; setRecording(false); setSeconds(0); refractory.current = Date.now() + 150;
+@@ -274,7 +347,7 @@
+     const existing = tracked.current;
+     const resumingCpu = capabilities.backend === "owned-http-cpu" && !!existing && observed.current?.state !== "stopped";
+     const wantsReplies = resumingCpu ? observed.current?.read_replies === true : readReplies;
+-    if (!viewCurrent() || !connected || disabled || busy || starting.current || watching.current || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis)) return;
++    if (!viewCurrent() || !connected || disabled || busy || starting.current || watching.current || retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis)) return;
+     const selected = selectedVoice(resumingCpu ? text(observed.current?.voice) : voice, capabilities);
+     if (!selected.ok) { setError(selected.message); return; }
+     if (capabilities.backend === "owned-http-cpu" && existing && observed.current?.state !== "stopped" && observed.current?.read_replies === true
+@@ -337,26 +410,34 @@
+   const retainedCpu = capabilities.backend === "owned-http-cpu" && retained;
+   const displayVoice = retainedCpu ? text(session?.voice) : voice;
+   const wantsReplies = retainedCpu && session ? session.read_replies === true : readReplies;
+-  const plannedVoice = selectedVoice(displayVoice, capabilities), maxSeconds = capabilities.maxTurnMs / 1000;
++  const plannedVoice = selectedVoice(displayVoice, capabilities), maxSeconds = captureCapabilities.maxTurnMs / 1000;
+   const retainedVoiceIssue = capabilities.backend === "owned-http-cpu" && retained && session?.read_replies === true
+     && (!text(session.voice) || !capabilities.voices.includes(text(session.voice)))
+     ? "The original session's speech voice is missing or unsupported by this CPU catalog. Check and stop the original before explicitly starting a compatible session. No default is inferred for it." : "";
+   return <AttentionDetails className="wb-voice-chat" needed={presentationNeeded} summary={<><Mic size={13}/>Continuous voice chat{monitoring && <span role="status"> · Microphone on{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span>}{playing && <span role="status"> · Reply playing</span>}</>}><div className="wb-voice-panel">
+     <p>Spoken turns are sent automatically to this existing chat through configured speech tools. The microphone uses a 150 ms speech onset and 700 ms silence boundary, with at most {maxSeconds} seconds per turn. Local speech detection has not been qualified.</p>
+     {!sessionId && <p>Create or select a chat first.</p>}
++    {retainedCapture && <div role="alert"><p>The complete unsubmitted capture is retained in this view. Export or discard it before resuming. Closing this view loses this unsubmitted copy.</p>
++      <button type="button" onClick={() => {
++        const source = retainedCapture;
++        const header = JSON.stringify({ format: "veyra-float32-frames-v1", sampleRate: source.rate, frameLengths: source.frames.map(frame => frame.length) }) + "\n";
++        const url = URL.createObjectURL(new Blob([header, ...source.frames.map(frame => new Float32Array(frame).buffer)], { type: "application/octet-stream" }));
++        const link = document.createElement("a"); link.href = url; link.download = "veyra-unsubmitted-capture.f32"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
++      }}>Export complete unsubmitted capture</button>
++      <button type="button" onClick={() => { setRetainedCapture(null); setError(""); }}>Discard unsubmitted capture</button></div>}
+     <label className="wb-voice-check"><input type="checkbox" checked={wantsReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label>
+     {capabilities.backend === "owned-http-cpu" ? <label>Configured speech voice<select value={displayVoice} disabled={busy || retained} onChange={event => setVoice(event.target.value)}>
+       <option value="">{retainedCpu ? "Original voice unavailable" : `Configured default${capabilities.defaultVoice ? ` (${capabilities.defaultVoice})` : " unavailable"}`}</option>
+       {displayVoice && !capabilities.voices.includes(displayVoice) && <option value={displayVoice}>{displayVoice} (unavailable)</option>}
+       {capabilities.voices.map(id => <option key={id} value={id}>{id}</option>)}
+     </select></label> : <label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>}
+-    <div className="wb-voice-actions"><button type="button" disabled={!connected || disabled || busy || monitoring || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={13}/>{retained ? "Resume microphone" : "Start voice chat and send spoken turns"}</button><button type="button" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><Square size={13}/>Stop voice chat</button><button type="button" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}>Interrupt voice turn for spoken steering</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" disabled={!connected} onClick={() => void checkRef.current()}>Check original voice session and controls</button>}</div>
++    <div className="wb-voice-actions"><button type="button" disabled={!connected || disabled || busy || monitoring || !!retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={13}/>{retained ? "Resume microphone" : "Start voice chat and send spoken turns"}</button><button type="button" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><Square size={13}/>Stop voice chat</button><button type="button" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}>Interrupt voice turn for spoken steering</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" disabled={!connected} onClick={() => void checkRef.current()}>Check original voice session and controls</button>}</div>
+     {(!capabilities.transcription || (wantsReplies && !capabilities.synthesis)) && <p>Configure transcription{wantsReplies ? " and speech output" : ""} before starting.</p>}
+     {capabilities.reason && <p role="status">{capabilities.reason}</p>}{!plannedVoice.ok && <p>{plannedVoice.message}</p>}{retainedVoiceIssue && <p role="alert">{retainedVoiceIssue}</p>}
+     <p role="status">{monitoring ? disabled || !connected ? "New voice admission paused · incoming audio is discarded" : recording ? `Recording spoken turn · ${seconds}/${maxSeconds} seconds` : playing ? "Listening during reply playback; speaking interrupts this voice turn" : "Microphone listening" : "Microphone off"}{session ? ` · Service: ${text(session.state)}` : ""}{paused ? " · Automatic checks paused for original-request recovery" : ""}</p>
+     {tracking && <p className="wb-voice-note">Original voice session: {tracking.sessionId}{tracking.utteranceId ? " · Original utterance retained" : ""}{tracking.bargeId ? " · Original interruption retained" : ""}{tracking.stopId ? " · Original stop retained" : ""}. Audio is never automatically submitted again.</p>}
+     {notice && <p role="status">{notice}</p>}{tracking?.issue && <p role="alert">{tracking.issue}</p>}{error && <p role="alert">{error}</p>}{text(session?.message) && <p>{text(session?.message)}</p>}
+-    {utterances.length > 0 && <ol className="wb-voice-turns">{utterances.map(item => <li key={text(item.id)}><strong>{text(item.state)}</strong>{text(item.transcript) && <p>You: {text(item.transcript)}</p>}{text(item.reply_text) && <p>Reply: {text(item.reply_text)}</p>}{text(item.message) && <p>{text(item.message)}</p>}{replyAudio?.id === item.id ? <button type="button" onClick={() => { if (replyAudio && replyAudio.id === item.id) void playOriginalReply({ ...item, wav_base64: replyAudio.data }); }}><Volume2 size={13}/>Play reply</button> : item.state === "completed" && text(item.speech_operation_id) && <button type="button" disabled={!connected} onClick={() => void loadReply(text(item.id))}>Load original reply audio</button>}</li>)}</ol>}
++    {utterances.length > 0 && <ol className="wb-voice-turns">{utterances.map(item => <li key={text(item.id)}><strong>{text(item.state)}</strong>{text(item.transcript) && <p>You: {text(item.transcript)}</p>}{text(item.reply_text) && <p>Reply: {text(item.reply_text)}</p>}{text(item.message) && <p>{text(item.message)}</p>}{!rows(item.children).length && replyAudio?.id === item.id ? <button type="button" onClick={() => { if (replyAudio && replyAudio.id === item.id) void playOriginalReply({ ...item, wav_base64: replyAudio.data }); }}><Volume2 size={13}/>Play reply</button> : !rows(item.children).length && item.state === "completed" && text(item.speech_operation_id) && <button type="button" disabled={!connected} onClick={() => void loadReply(text(item.id))}>Load original reply audio</button>}</li>)}</ol>}
+     <p className="wb-voice-note">Speaking during this view’s reply playback stops that playback immediately and requests interruption of the exact voice-owned turn. Steering audio waits for the original safe-interruption receipt. Switching away releases local devices; use Stop voice chat to stop service-owned work.</p>
+   </div></AttentionDetails>;
+ }
