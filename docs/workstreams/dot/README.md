@@ -51,3 +51,5 @@ Follow [integration.md](integration.md). The coordinator alone allocates migrati
 Request composition and remaining owner contracts: [request-binding.md](request-binding.md).
 
 Existing runner settlement source proposal: [settlement-proposal.md](settlement-proposal.md).
+
+Managed original-JobRun container and async execution proposal: [managed-job-protocol.md](managed-job-protocol.md).

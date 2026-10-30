@@ -1,0 +1,102 @@
+{
+  "state": "isolated original-JobRun container + async execution source proposal; not activated",
+  "owner": "01a18935-103f-7432-98b0-cd2c51f8c8ab",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "preimages": {
+    "services/ingenium-api/scripts/runtime-manager.ts": "ae6888fb9e28a4188f520c854985dbe324978a47f73787bed8946cd273881f42",
+    "services/ingenium-api/lib/runtime-manager-client.ts": "4527dc37d53edcdcade93be4f7801f966350b0d85f1b92b423d18937d3efcd93",
+    "services/ingenium-api/lib/runtime-manager-contract.ts": "24d56e1853162d94a2254bf3ba2766097e552b144162a78d8c4369fb21f3b8b6",
+    "services/ingenium-api/lib/runtime-placement-contract.ts": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd",
+    "services/ingenium-api/lib/dot-v2/core-binding.ts": "a16e5c7f1ba8b7e1e32fadd96cc6c60580a22f4fb491966748d045c832ec7a90",
+    "scripts/runtime-entrypoint.sh": "04c6cbe0177b47b47c178857d3b1ec00736d2f6db4f6c31ec3d4dc64647581e6",
+    "runtime-supervisord.conf": "b38c61ea34538a0e75a77bdbbd3b937a220c647f4bc00574251005d6817e3b49",
+    "scripts/start-runtime-opencode-web.sh": "ffa2d40ffbf770ec1de7da6ace79b22c54a84abf57c0ea270c6b473667397043",
+    "services/ingenium-api/scripts/runtime-gateway.ts": "774b25b3380f31c1b481bd4194907a9c80288ba9453e273af1e9425f0f2eaf0e",
+    "services/ingenium-api/lib/dot-v2/service.ts": "1448803a29ddd1c584dc391e47d911625aa9f6488a0305b11b050266c7ca815e",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs": null,
+    "services/ingenium-api/scripts/runtime-job-child.ts": null,
+    "services/ingenium-api/lib/scheduler.ts": "b0c9f6246d063a5266616b8649edf76bd44a690523d2c3bdccbf85a869c22061",
+    "services/ingenium-api/lib/dot-v2/router.ts": "996427ee5b8635d4d0e9765fb6bd599031a69358fc0d19411ab3c3fed31da4a3",
+    "services/ingenium-api/lib/dot-v2/request-session.ts": "52546420de8060667141b2a5df1be8f77f29825628692c38be5462c38f6af72c"
+  },
+  "patchTarget": "services/ingenium-api/lib/runtime-manager-client.ts",
+  "patchSha256": "f503cef7614b3404f8db39d4be783295710d004693031464c95aa36774e5f031",
+  "gateSha256": "859b75eb52797e2a816c185562fdd3b03353cec5a1eebf3676f113274c591f41",
+  "sharedEdits": false,
+  "executionProtocolImplemented": "Canonical injected-owner/manager/client/child proposal present; Core admission/ledger/credential endpoints and integration remain Root-owned",
+  "blockingOwners": [
+    "Canonical original Core JobRun/profile/grant admission lookup",
+    "Per-JobRun child/group owner in selected managed runtime",
+    "Private manager launch/cancel/inspect owner protocol",
+    "End-to-end asynchronous cancel/recovery/inspection contract"
+  ],
+  "validation": {
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --test docs/workstreams/dot/managed-job-owner.cpu.mjs docs/workstreams/dot/managed-job-async.cpu.mjs docs/workstreams/dot/managed-job-child.cpu.mjs docs/workstreams/dot/managed-dot-execution.cpu.mjs docs/workstreams/dot/managed-job-proposal.cpu.mjs",
+    "passed": 36,
+    "failed": 0,
+    "skipped": 0,
+    "caseGroups": {
+      "managerOwner": 17,
+      "asyncDot": 8,
+      "fixedChild": 3,
+      "coreExecutionAdapter": 3,
+      "unavailableFallbackOnly": 5
+    },
+    "outputSha256": "384c21871313f7253842182053f56488ebe555e061653f8ba8d6959873cdc138",
+    "limits": "Fake owners/spawn only; no live Docker, processes, models, DB, services, compiler, install or control"
+  },
+  "asyncPatchSha256": "c93bd7ff323a7cc472d36c043bfde83864bbfe29df21eef42b35d05903be3805",
+  "managerPatchSha256": "779f1ee90804e4dff1f407ad2267c8edbe3a6142a19f02f185535418f890dc6e",
+  "newSourceHashes": {
+    "managed-dot-execution.proposal.mjs": "3d50b6771a692289db71973bc9cafad608679787c8d8aa0e48bec9644ba334fd",
+    "managed-job-child.proposal.mjs": "1150da451146621eff1218a2b146941e0aaeb2f8c74aba1bdbe5cb9a395f6519",
+    "managed-job-core-client.proposal.mjs": "ff4429a4ddd3b44bd8637f9f380c6da23da63f13fc427dc643fb5a6f7d3de55d",
+    "managed-job-owner.proposal.mjs": "98b77dde187d6f114a1ab79e6f716c406a060ed11e26923f81850fc6db4e2573"
+  },
+  "applyChecks": {
+    "managed-job-manager.patch": {
+      "exit": 0,
+      "stderr": "",
+      "sha256": "779f1ee90804e4dff1f407ad2267c8edbe3a6142a19f02f185535418f890dc6e"
+    },
+    "managed-job-async-dot.patch": {
+      "exit": 0,
+      "stderr": "",
+      "sha256": "c93bd7ff323a7cc472d36c043bfde83864bbfe29df21eef42b35d05903be3805"
+    }
+  },
+  "bundleParseResults": {
+    "services/ingenium-api/scripts/runtime-manager.ts": 0,
+    "services/ingenium-api/lib/runtime-manager-client.ts": 0,
+    "scripts/runtime-entrypoint.sh": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs": 0,
+    "services/ingenium-api/scripts/runtime-job-child.ts": 0
+  },
+  "remainingGates": [
+    "Root Core journal migration/endpoints and run-scoped credential/grant/profile/resource/result owner implementation",
+    "Root strict types/new MJS declarations and packaging/image job-role capability qualification",
+    "Integrated API HTTP/router/scheduler/Core tests",
+    "Actual selected container launch/cancel/descendant wait/restart/workflow/platform acceptance"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "runtimeObjectsCreated": false,
+    "retainedConsumer": "Root review/integration of minimal source proposals, then version-controlled supersession",
+    "centralFixturesUntouched": true
+  },
+  "migrationReservation": {
+    "number": 126,
+    "owner": "Root 01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",
+    "file": "126_managed_job_execution.proposal.sql",
+    "installed": false,
+    "productionWriteCutoverApproved": false
+  }
+}

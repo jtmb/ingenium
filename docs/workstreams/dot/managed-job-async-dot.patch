@@ -1,0 +1,149 @@
+--- a/services/ingenium-api/lib/dot-v2/service.ts
++++ b/services/ingenium-api/lib/dot-v2/service.ts
+@@ -195 +195 @@
+-  cancel(actor: Actor, scope: DotScope, id: string, revision: number): void {
++  persistCancellationIntent(actor: Actor, scope: DotScope, id: string, revision: number): void {
+@@ -211,0 +212,3 @@
++  }
++  cancel(actor: Actor, scope: DotScope, id: string, revision: number): void {
++    this.persistCancellationIntent(actor,scope,id,revision);
+@@ -213,0 +217,24 @@
++  }
++  async cancelAsync(actor:Actor,scope:DotScope,id:string,revision:number,jobs:{requestCancellation(scope:DotScope,id:string):Promise<void>;inspect(scope:DotScope,id:string):Promise<ReturnType<JobAuthority["inspect"]>>}):Promise<void> {
++    this.persistCancellationIntent(actor,scope,id,revision);
++    let cursor="";
++    do { const page=this.repository.page<Operation>("operation",scope,cursor,100);
++      for(const op of page.data)if(op.followupId===id)await this.recoverOperationAsync(actor,scope,op.id,jobs);
++      cursor=page.nextCursor??"";
++    } while(cursor);
++  }
++  async recoverOperationAsync(actor:Actor,scope:DotScope,id:string,jobs:{requestCancellation(scope:DotScope,id:string):Promise<void>;inspect(scope:DotScope,id:string):Promise<ReturnType<JobAuthority["inspect"]>>}):Promise<void> {
++    this.require(actor,scope,"read");text(id,512);
++    const original=this.repository.get<Operation>("operation",id,scope);
++    if(!original)throw new DotError("DOT_NOT_FOUND");
++    if(!original.runId||terminal.has(original.state))return;
++    if(original.state==="cancel_requested") {this.require(actor,scope,"cancel");await jobs.requestCancellation(scope,original.runId);}
++    const state=await jobs.inspect(scope,original.runId);
++    // Await boundaries must never retain a transaction or stale operation CAS/authorization.
++    this.require(actor,scope,"read");
++    const current=this.repository.get<Operation>("operation",id,scope);
++    if(!current||current.runId!==original.runId)throw new DotError("DOT_RUN_BINDING_CHANGED");
++    if(terminal.has(current.state))return;
++    if(current.state==="cancel_requested")this.require(actor,scope,"cancel");
++    const next=current.state==="cancel_requested"&&(state==="running"||state==="unknown")?"cancel_requested":state;
++    if(next!==current.state||(state==="unknown"&&current.code!=="RUN_OUTCOME_UNKNOWN"))this.repository.put("operation",{...current,state:next,code:state==="unknown"?"RUN_OUTCOME_UNKNOWN":current.code,revision:current.revision+1,updatedAt:this.now()},current.revision);
+--- a/services/ingenium-api/lib/dot-v2/core-binding.ts
++++ b/services/ingenium-api/lib/dot-v2/core-binding.ts
+@@ -35,0 +36,5 @@
++export interface AsyncCoreDotExecution {
++  executeJobRun(runId:string,job:CoreJob,prompt:string):Promise<void>;
++  requestCancellation(scope:DotScope,run:CoreRun):Promise<void>;
++  inspectOwnedRun(scope:DotScope,run:CoreRun):Promise<"running"|"success"|"failed"|"cancelled"|"unknown">;
++}
+@@ -36,0 +42 @@
++  asyncExecution?:AsyncCoreDotExecution;
+@@ -41,0 +48 @@
++  usesAsyncExecution:boolean;
+@@ -45,0 +53,2 @@
++  recoverOperationsAsync(limit?:number):Promise<number>;
++  cancelFollowupAsync(actor:Actor,scope:DotScope,id:string,revision:number):Promise<void>;
+@@ -98,2 +107,2 @@
+-    requestCancellation(scope,id){const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");execution.requestCancellation(scope,run);},
+-    inspect(scope,id){const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");return execution.inspectOwnedRun(scope,run);},
++    requestCancellation(scope,id){if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");execution.requestCancellation(scope,run);},
++    inspect(scope,id){if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");return execution.inspectOwnedRun(scope,run);},
+@@ -114,0 +124,15 @@
++  const asyncJobs={
++    async requestCancellation(scope:DotScope,id:string){
++      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
++      const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");
++      await options.asyncExecution.requestCancellation(scope,run);
++      sameConnection();if(db.inTransaction)throw new DotError("DOT_OUTER_TRANSACTION_UNSUPPORTED");
++    },
++    async inspect(scope:DotScope,id:string){
++      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
++      const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"read");
++      const result=await options.asyncExecution.inspectOwnedRun(scope,run);
++      sameConnection();if(db.inTransaction)throw new DotError("DOT_OUTER_TRANSACTION_UNSUPPORTED");
++      binding.authorizeRun(actorFor(scope),scope,knownRun(scope,id),"read");return result;
++    },
++  };
+@@ -118,0 +143 @@
++    usesAsyncExecution:!!options.asyncExecution,
+@@ -156,0 +182 @@
++      if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
+@@ -180,2 +206,31 @@
+-  };
+-}
++    async cancelFollowupAsync(actor,scope,id,revision){
++      sameConnection();if(db.inTransaction||!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
++      await service.cancelAsync(actor,scope,id,revision,asyncJobs);
++    },
++    async recoverOperationsAsync(limit=100){
++      if(!options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");
++      sameConnection();if(!Number.isInteger(limit)||limit<1||limit>100)throw new DotError("DOT_VALIDATION");
++      const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
++      let rows=page();
++      if(!rows.length && recoveryCursor){recoveryCursor="";rows=page();}
++      if(rows.length)recoveryCursor=rows[rows.length-1]!.id;
++      for(const row of rows){
++        const op=JSON.parse(row.body) as Operation;
++        try{
++          await service.recoverOperationAsync(actorFor(op.scope),op.scope,op.id,asyncJobs);
++          recoveryDiagnostics.delete(op.id);
++        }catch(error){
++          if(!(error instanceof DotError) || !recoverableDenials.has(error.code))throw error;
++          if(recoveryDiagnostics.get(op.id)!==error.code){
++            options.onDiagnostic({phase:"recovery",code:"DOT_RECOVERY_OPERATION_BLOCKED",runId:op.runId??undefined,error});
++            recoveryDiagnostics.delete(op.id);recoveryDiagnostics.set(op.id,error.code);
++            if(recoveryDiagnostics.size>100)recoveryDiagnostics.delete(recoveryDiagnostics.keys().next().value!);
++          }
++          continue;
++        }
++        notify(op.scope,op.id);
++      }
++      return rows.length;
++    },
++  };
++}
+--- a/services/ingenium-api/lib/scheduler.ts
++++ b/services/ingenium-api/lib/scheduler.ts
+@@ -387 +387 @@
+-function runJobScheduler(generation: number): void {
++async function runJobScheduler(generation: number): Promise<void> {
+@@ -393 +393 @@
+-    try { dotRuntime?.recoverOperations(100); }
++    try { if(dotRuntime?.usesAsyncExecution)await dotRuntime.recoverOperationsAsync(100);else dotRuntime?.recoverOperations(100); }
+@@ -394,0 +395 @@
++    if(!isSchedulerActive(generation))return;
+@@ -493 +494 @@
+-  scheduleTimeout(generation, 60_000, () => runJobScheduler(generation));
++  scheduleTimeout(generation, 60_000, () => { void trackTask(runJobScheduler(generation)).catch(() => { logger.warn("dot-scheduler","Dot async recovery retained unresolved work"); }); });
+--- a/services/ingenium-api/lib/dot-v2/router.ts
++++ b/services/ingenium-api/lib/dot-v2/router.ts
+@@ -17 +17 @@
+-export interface DotRequestSession {service:DotService;context:DotRequestContext;queue:DotQueueReader}
++export interface DotRequestSession {service:DotService;context:DotRequestContext;queue:DotQueueReader;asyncCancel?:(actor:Actor,scope:DotScope,id:string,revision:number)=>Promise<void>}
+@@ -55 +55 @@
+- router.post("/commands",(req,res,next)=>{
++ router.post("/commands",async(req,res,next)=>{
+@@ -57 +57 @@
+-   const {service,context}=factory(req);
++   const {service,context,asyncCancel}=factory(req);
+@@ -59 +59,3 @@
+-   const data=executeDotCommand(service,actor,scope,req.body as DotCommand);
++   const command=req.body as DotCommand;
++   if(command?.type==="cancel"&&asyncCancel&&(typeof command.id!=="string"||!command.id.length||!Number.isSafeInteger(command.revision)||command.revision<0))throw new DotError("DOT_VALIDATION");
++   const data=command?.type==="cancel"&&asyncCancel?await asyncCancel(actor,scope,command.id,command.revision):executeDotCommand(service,actor,scope,command);
+--- a/services/ingenium-api/lib/dot-v2/request-session.ts
++++ b/services/ingenium-api/lib/dot-v2/request-session.ts
+@@ -43,0 +44,4 @@
++  const execution=options.asyncExecution?{executeJobRun:options.asyncExecution.executeJobRun,
++    requestCancellation(){throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");},
++    inspectOwnedRun():never{throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");},
++  }:binding.execution;
+@@ -52,2 +56,2 @@
+-  }},binding.authorization,binding.bindingPolicy,binding.execution,options);
+-  return {service:runtime.service,context:binding.context(),queue:binding.queue};
++  }},binding.authorization,binding.bindingPolicy,execution,options);
++  return {service:runtime.service,context:binding.context(),queue:binding.queue,asyncCancel:options.asyncExecution?runtime.cancelFollowupAsync:undefined};

@@ -1,0 +1,274 @@
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -11,0 +12,2 @@
++import { createManagedJobContainerOwner } from "../lib/dot-v2/managed-job-owner.mjs";
++import { createManagedJobCoreClient } from "../lib/dot-v2/managed-job-core-client.mjs";
+@@ -371,0 +374,11 @@
++  const jobCore=createManagedJobCoreClient({apiUrl:environment("INGENIUM_RUNTIME_API_URL"),managerToken:token});
++  const jobOwner=createManagedJobContainerOwner({core:jobCore,docker:dockerRequest,
++    async buildRuntimeSpec(admission){
++      const material=await jobCore.launchMaterial(admission),input=material.provision;
++      if(material.runId!==admission.runId||material.attemptId!==admission.attemptId||material.credentialRunId!==admission.runId||material.profileQualified!==true||input.capability!==material.capability
++        ||input.runtimeId!==admission.runtimeId||input.organizationId!==admission.organizationId||input.projectId!==admission.projectId||input.ownerUserId!==admission.ownerUserId||input.workspaceId!==admission.workspaceId||input.storageMappingHash!==admission.bindingHash||input.securityEpoch!==admission.bindingEpoch||input.revision!==admission.provisioningRevision)throw Error("Managed JobRun material binding changed");
++      const mapping=mappings.get(input.workspaceId);if(!mapping)throw Error("Managed JobRun workspace mapping unavailable");
++      return {capability:material.capability,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
++    },
++    handoff:(containerId,_admission,capability)=>handoffRuntimeCapability(containerId,capability),
++  });
+@@ -390,0 +404,12 @@
++      const jobRoute=/^\/v1\/job-runs\/([0-9a-f-]+)(\/launch|\/cancel|\/cleanup)?$/.exec(url.pathname);
++      if(jobRoute&&UUID.test(jobRoute[1]!)){
++        const runId=jobRoute[1]!;let result;
++        if(request.method==="GET"&&!jobRoute[2])result=await jobOwner.inspect(runId);
++        else if(request.method==="POST"&&jobRoute[2]==="/cancel")result=await jobOwner.cancel(runId);
++        else if(request.method==="POST"&&jobRoute[2]==="/cleanup")result=await jobOwner.cleanup(runId);
++        else if(request.method==="POST"&&jobRoute[2]==="/launch"){
++          const input=await readJsonBody(request) as {runId?:string;runtimeId?:string};
++          if(input.runId!==runId)throw Error("Managed JobRun path binding changed");result=await jobOwner.launch(input);
++        }
++        if(result){response.writeHead(200).end(JSON.stringify({data:result}));return;}
++      }
+--- a/services/ingenium-api/lib/runtime-manager-client.ts
++++ b/services/ingenium-api/lib/runtime-manager-client.ts
+@@ -140,0 +141,18 @@
++
++export interface ManagedJobObservation {state:"active"|"settled"|"unknown"|"removed";code:string;proof?:unknown}
++async function requestManagedJob(runId:string,operation:"inspect"|"launch"|"cancel"|"cleanup",runtimeId?:string):Promise<ManagedJobObservation>{
++  if(!UUID.test(runId)||(operation==="launch"&&(!runtimeId||!UUID.test(runtimeId))))throw Error("Managed JobRun identity is invalid");
++  const response=await fetch(new URL(`/v1/job-runs/${encodeURIComponent(runId)}${operation==="inspect"?"":"/"+operation}`,managerUrl()),{
++    method:operation==="inspect"?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${managerToken()}`,Accept:"application/json",...(operation==="launch"?{"Content-Type":"application/json"}:{})},
++    body:operation==="launch"?JSON.stringify({runId,runtimeId}):undefined,signal:AbortSignal.timeout(30_000),
++  });
++  if(!response.ok){await response.body?.cancel().catch(()=>undefined);throw Error("Managed JobRun owner unavailable");}
++  const result=await response.json() as {data?:ManagedJobObservation};
++  if(!result.data||!["active","settled","unknown",...(operation==="cleanup"?["removed"]:[])].includes(result.data.state)||typeof result.data.code!=="string"||result.data.code.length>128||(result.data.state==="settled"&&!result.data.proof))throw Error("Managed JobRun owner response invalid");
++  return result.data;
++}
++export const launchManagedJobRun=(runId:string,runtimeId:string)=>requestManagedJob(runId,"launch",runtimeId);
++export const inspectManagedJobRun=(runId:string)=>requestManagedJob(runId,"inspect");
++export const cancelManagedJobRun=(runId:string)=>requestManagedJob(runId,"cancel");
++
++export const cleanupManagedJobRun=(runId:string)=>requestManagedJob(runId,"cleanup");
+--- a/scripts/runtime-entrypoint.sh
++++ b/scripts/runtime-entrypoint.sh
+@@ -69,0 +70,2 @@
++mcp_audience="runtime"
++if [ "${INGENIUM_RUNTIME_ROLE:-runtime}" = "job" ]; then mcp_audience="job-run"; fi
+@@ -84 +86 @@
+-          "INGENIUM_MCP_AUDIENCE": "runtime",
++          "INGENIUM_MCP_AUDIENCE": "$mcp_audience",
+@@ -105,2 +107,11 @@
+-export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
+-exec supervisord -c /app/runtime-supervisord.conf
++case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
++  job)
++    if [ -z "${INGENIUM_JOB_RUN_ID:-}" ] || [ -z "${INGENIUM_JOB_ATTEMPT_ID:-}" ]; then echo "ERROR: original JobRun identity missing"; exit 1; fi
++    exec node /app/services/ingenium-api/dist/scripts/runtime-job-child.js
++    ;;
++  runtime)
++    export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
++    exec supervisord -c /app/runtime-supervisord.conf
++    ;;
++  *) echo "ERROR: runtime role unavailable"; exit 1 ;;
++esac
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/managed-job-owner.mjs
+@@ -0,0 +1,100 @@
++// Canonical SOURCE PROPOSAL: wire only through the existing private manager token/Docker owner.
++// Core ports are authenticated API operations, never a manager-local database or caller DTO authority.
++const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const sha=/^[a-f0-9]{64}$/;
++const error=code=>Object.assign(Error(code),{code,status:code.endsWith("UNAVAILABLE")?503:409});
++const unknown=code=>({state:"unknown",code});
++const jobName=a=>`ingenium-job-${a.runId.replaceAll("-","")}-${a.attemptId.replaceAll("-","")}`;
++const runtimeName=id=>`ingenium-runtime-${id.replaceAll("-","")}`;
++const path=id=>encodeURIComponent(id);
++function identity(a){return JSON.stringify([a.runId,a.jobId,a.projectId,a.organizationId,a.ownerUserId,a.attemptId,a.runtimeId,a.runtimeRevision,a.workspaceId,a.bindingHash,a.bindingEpoch,a.jobRevision,a.scheduleRevision,a.grantRevision,a.profileId,a.profileHash,a.promptHash,a.specHash,a.daemonId,a.imageId]);}
++function validate(a,runId){
++ if(!a||a.runId!==runId||![a.runId,a.jobId,a.attemptId,a.runtimeId,a.projectId,a.organizationId,a.ownerUserId].every(v=>typeof v==="string"&&uuid.test(v))||!a.workspaceId||typeof a.workspaceId!=="string"||a.workspaceId.length>256||![a.bindingHash,a.profileHash,a.promptHash,a.specHash].every(v=>typeof v==="string"&&sha.test(v))||!/^sha256:[a-f0-9]{64}$/.test(a.imageId)||typeof a.daemonId!=="string"||!a.daemonId||![a.provisioningRevision,a.runtimeRevision,a.bindingEpoch,a.jobRevision,a.scheduleRevision,a.grantRevision,a.revision].every(v=>Number.isSafeInteger(v)&&v>=0)||typeof a.profileId!=="string"||!a.profileId||a.parentContainerId===a.containerId&&a.containerId)throw error("MANAGED_JOB_BINDING_CHANGED");
++ return a;
++}
++function labels(a){return {"com.ingenium.managed":"job-run-manager","com.ingenium.job.run":a.runId,"com.ingenium.job.attempt":a.attemptId,"com.ingenium.job.id":a.jobId,"com.ingenium.job.spec":a.specHash,"com.ingenium.runtime.id":a.runtimeId,"com.ingenium.runtime.organization":a.organizationId,"com.ingenium.runtime.owner":a.ownerUserId,"com.ingenium.runtime.project":a.projectId,"com.ingenium.runtime.workspace":a.workspaceId,"com.ingenium.runtime.storage":a.bindingHash,"com.ingenium.runtime.security-epoch":String(a.bindingEpoch)};}
++function validateChild(a,c){
++ const expected=labels(a);
++ if(!a.containerId||!sha.test(a.containerId)||!c||c.Id!==a.containerId||c.Id===a.parentContainerId||c.Name!=="/"+jobName(a)||c.Image!==a.imageId||Object.entries(expected).some(([k,v])=>c.Config?.Labels?.[k]!==v))throw error("MANAGED_JOB_CONTAINER_CHANGED");
++ return c;
++}
++/** buildRuntimeSpec is the EXISTING canonical mapping/resource/profile provision builder.
++ * Core supplies a distinct original-run scoped credential, not the parent's broad credential.
++ * handoff is the existing manager attach-only stdin handoff. No shell/command/container comes from HTTP.
++ */
++export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,handoff}){
++ for(const [name,value] of Object.entries({core,docker,buildRuntimeSpec,handoff}))if(!value)throw error("MANAGED_JOB_OWNER_UNAVAILABLE");
++ const admission=async(runId,action)=>validate(await core.admit(runId,action),runId);
++ const fresh=async(a,action)=>{const next=await admission(a.runId,action);if(identity(next)!==identity(a)||next.containerId!==a.containerId||next.parentContainerId!==a.parentContainerId)throw error("MANAGED_JOB_BINDING_CHANGED");return next;};
++ const daemon=async a=>{const response=await docker("GET","/info");if(response.status!==200||response.data?.ID!==a.daemonId)throw error("MANAGED_JOB_DAEMON_CHANGED");};
++ const child=async a=>{await daemon(a);if(!a.containerId)return null;const result=await docker("GET",`/containers/${path(a.containerId)}/json`);if(result.status===404)return null;if(result.status!==200)throw error("MANAGED_JOB_INSPECTION_UNAVAILABLE");return validateChild(a,result.data);};
++ const parent=async a=>{
++  await daemon(a);const response=await docker("GET",`/containers/${path(runtimeName(a.runtimeId))}/json`),p=response.data,l=p?.Config?.Labels??{};
++  const expected={"com.ingenium.managed":"runtime-manager","com.ingenium.runtime.id":a.runtimeId,"com.ingenium.runtime.organization":a.organizationId,"com.ingenium.runtime.owner":a.ownerUserId,"com.ingenium.runtime.project":a.projectId,"com.ingenium.runtime.workspace":a.workspaceId,"com.ingenium.runtime.storage":a.bindingHash,"com.ingenium.runtime.security-epoch":String(a.bindingEpoch),"com.ingenium.runtime.revision":String(a.provisioningRevision)};
++  if(response.status!==200||p.Id!==a.parentContainerId||p.Name!=="/"+runtimeName(a.runtimeId)||p.Image!==a.imageId||p.State?.Running!==true||p.State?.Health?.Status!=="healthy"||Object.entries(expected).some(([k,v])=>l[k]!==v))throw error("MANAGED_JOB_PARENT_CHANGED");
++ };
++ async function settle(a){
++  const current=await fresh(a,"inspect"),c=await child(current);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
++  if(c.State?.Running===true)return {state:"active",code:"MANAGED_JOB_CONTAINER_ACTIVE"};
++  if(!["exited","dead"].includes(c.State?.Status))return unknown("MANAGED_JOB_CONTAINER_NOT_RETIRED");
++  // Positive original-daemon wait join; absent/inspect-only/PID/leader/idle is never proof.
++  const joined=await docker("POST",`/containers/${path(a.containerId)}/wait?condition=not-running`);
++  if(joined.status!==200||!Number.isInteger(joined.data?.StatusCode)||joined.data?.Error)return unknown("MANAGED_JOB_RETIREMENT_UNCONFIRMED");
++  const again=await fresh(current,"inspect"),final=await child(again);
++  if(!final||final.State?.Running!==false||!["exited","dead"].includes(final.State?.Status)||final.State?.ExitCode!==joined.data.StatusCode)return unknown("MANAGED_JOB_RETIREMENT_UNCONFIRMED");
++  const proof={schemaVersion:1,runId:a.runId,attemptId:a.attemptId,containerId:a.containerId,daemonId:a.daemonId,specHash:a.specHash,exitCode:joined.data.StatusCode,kind:"original-daemon-container-wait-join"};
++  await core.recordRetired(again,proof); // Core sole writer; does not imply a verified model response.
++  return {state:"settled",code:"MANAGED_JOB_CONTAINER_RETIRED",proof};
++ }
++ return Object.freeze({
++  async launch(input){
++   if(!input||Object.keys(input).sort().join("|")!=="runId|runtimeId"||!uuid.test(input.runId)||!uuid.test(input.runtimeId))throw error("MANAGED_JOB_BINDING_CHANGED");
++   let a=await admission(input.runId,"launch");if(a.runtimeId!==input.runtimeId)throw error("MANAGED_JOB_BINDING_CHANGED");
++   // Only an existing original Core claim with a canonical immutable admission may reach this point.
++   if(a.phase!=="prepared"||a.containerId)return unknown("MANAGED_JOB_LAUNCH_ALREADY_DECIDED");
++   await parent(a);a=await fresh(a,"launch");
++   const material=await buildRuntimeSpec(a),spec=material?.spec;
++   if(typeof material?.capability!=="string"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(material.capability))throw error("MANAGED_JOB_CREDENTIAL_UNAVAILABLE"); // Reuses original canonical map and original resource/credential owners.
++   if(!spec||spec.Image!==a.imageId||spec.WorkingDir!=="/workspace"||spec.User!=="1000:1000"||spec.HostConfig?.AutoRemove!==false||spec.HostConfig?.Privileged===true||spec.HostConfig?.PidMode||spec.HostConfig?.NetworkMode==="host")throw error("MANAGED_JOB_PROFILE_UNAVAILABLE");
++   // Fixed managed-job role; no caller supplied entrypoint, argv, cwd, credential or container selector.
++   spec.Entrypoint=["/app/scripts/runtime-entrypoint.sh"];spec.Cmd=[];
++   spec.Env=[...spec.Env,"INGENIUM_RUNTIME_ROLE=job",`INGENIUM_JOB_RUN_ID=${a.runId}`,`INGENIUM_JOB_ATTEMPT_ID=${a.attemptId}`];
++   spec.Labels={...spec.Labels,...labels(a)};
++   // Core persists create_intent BEFORE the first Docker effect. CAS admits one original attempt only.
++   if(!await core.claimEffect(a,"create"))return unknown("MANAGED_JOB_LAUNCH_ALREADY_DECIDED");
++   let created;
++   try{created=await docker("POST",`/containers/create?name=${path(jobName(a))}`,spec);}catch{await core.recordUnknown(a,"create");return unknown("MANAGED_JOB_CREATE_UNKNOWN");}
++   if(created.status!==201||!sha.test(created.data?.Id??"")){await core.recordUnknown(a,"create");return unknown("MANAGED_JOB_CREATE_UNKNOWN");}
++   const id=created.data.Id;
++   // A lost persistence acknowledgement may leave an owned container; never create/adopt/start a replacement.
++   try{a=validate(await core.recordCreated(a,id),a.runId);if(a.containerId!==id)throw error("MANAGED_JOB_BINDING_CHANGED");}catch{return unknown("MANAGED_JOB_CREATE_PERSISTENCE_UNKNOWN");}
++   await parent(a);a=await fresh(a,"launch");if(!await child(a))return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
++   if(!await core.claimEffect(a,"start"))return unknown("MANAGED_JOB_START_ALREADY_DECIDED");
++   try{
++    const started=await docker("POST",`/containers/${path(id)}/start`);
++    if(started.status!==204){await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
++    // Existing attach-only credential handoff; credential is scoped to this original run by Core.
++    a=await fresh(a,"launch");await handoff(id,a,material.capability);await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
++   }catch{await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
++  },
++  async inspect(runId){if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");try{return await settle(await admission(runId,"inspect"));}catch(e){return unknown(e.code??"MANAGED_JOB_INSPECTION_UNAVAILABLE");}},
++  async cleanup(runId){
++   if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");
++   try{let a=await admission(runId,"cleanup");if(!a.outcomeConsumed)return unknown("MANAGED_JOB_OUTCOME_NOT_CONSUMED");
++    const observed=await settle(a);if(observed.state!=="settled")return observed;
++    a=await fresh(a,"cleanup");if(!a.outcomeConsumed)return unknown("MANAGED_JOB_OUTCOME_NOT_CONSUMED");
++    const original=await child(a);if(!original||original.State?.Running!==false)return unknown("MANAGED_JOB_CLEANUP_UNCONFIRMED");
++    const removed=await docker("DELETE",`/containers/${path(a.containerId)}?v=false`);
++    if(removed.status!==204)return unknown("MANAGED_JOB_CLEANUP_UNCONFIRMED");
++    await core.recordRemoved(a);return {state:"removed",code:"MANAGED_JOB_ORIGINAL_CONTAINER_REMOVED"};
++   }catch(e){return unknown(e.code??"MANAGED_JOB_CLEANUP_UNCONFIRMED");}
++  },
++  async cancel(runId){
++   if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");
++   try{let a=await admission(runId,"cancel");if(!a.cancelRequested)return unknown("MANAGED_JOB_CANCEL_INTENT_REQUIRED");const c=await child(a);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");a=await fresh(a,"cancel");
++    if(c.State?.Running===true){const stopped=await docker("POST",`/containers/${path(a.containerId)}/stop?t=5`);if(![204,304].includes(stopped.status))return unknown("MANAGED_JOB_CANCEL_PENDING");}
++    return await settle(a);
++   }catch(e){return unknown(e.code??"MANAGED_JOB_CANCEL_PENDING");}
++  },
++ });
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
+@@ -0,0 +1,25 @@
++// Fixed per-container child scope. All assignment/grant/result ports are the existing Core API owner.
++import {createHash} from "node:crypto";
++const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const sha=s=>createHash("sha256").update(s).digest("hex");
++const unavailable=()=>{throw Object.assign(Error("Managed JobRun profile unavailable"),{code:"MANAGED_JOB_PROFILE_UNAVAILABLE"});};
++export function createManagedJobChild({fetchAssignment,reportResult,spawn,verifierFactory,environment}){
++ return async function run(identity){
++  if(!identity||Object.keys(identity).sort().join("|")!=="attemptId|runId"||![identity.runId,identity.attemptId].every(v=>uuid.test(v)))unavailable();
++  const a=await fetchAssignment(identity); // Reuses run-scoped credential and current original Core grants.
++  if(!a||a.runId!==identity.runId||a.attemptId!==identity.attemptId||a.workspaceId!==environment.INGENIUM_WORKSPACE_ID||a.bindingHash!==environment.INGENIUM_STORAGE_MAPPING_HASH||a.runtimeId!==environment.INGENIUM_RUNTIME_ID||a.projectId!==environment.INGENIUM_PROJECT_ID||a.organizationId!==environment.INGENIUM_ORGANIZATION_ID||a.ownerUserId!==environment.INGENIUM_RUNTIME_OWNER_ID||!a.profileQualified||a.executable!=="opencode"||a.cwd!=="/workspace"||!a.credentialBoundToOriginalRun||typeof a.prompt!=="string"||!a.prompt.length||a.prompt.length>16000||sha(a.prompt)!==a.promptHash||typeof a.agent!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(a.agent))unavailable();
++  const names=["PATH","HOME","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_STATE_HOME","TMPDIR","INGENIUM_API_URL","INGENIUM_PROJECT","INGENIUM_PROJECT_ID","INGENIUM_ORGANIZATION_ID","INGENIUM_RUNTIME_ID","INGENIUM_RUNTIME_OWNER_ID","INGENIUM_WORKSPACE_ID","INGENIUM_STORAGE_MAPPING_HASH"];
++  const env=Object.fromEntries(names.filter(n=>environment[n]!==undefined).map(n=>[n,environment[n]]));
++  Object.assign(env,{PWD:"/app",OPENCODE_CONFIG_DIR:"/home/appuser/.config/opencode/runtime",OPENCODE_CONFIG:"/usr/local/share/ingenium/opencode-managed/opencode.json",INGENIUM_WORKTREE:"/workspace",INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_RUNTIME_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId});
++  const verifier=verifierFactory();
++  return await new Promise((resolve,reject)=>{
++   // Fixed binary/argv/cwd, no shell and no host/container selector from assignment or HTTP.
++   const proc=spawn("opencode",["run",a.prompt,"--agent",a.agent,"--auto","--standalone","--format","json"],{cwd:"/workspace",env,stdio:["ignore","pipe","pipe"],shell:false,detached:false});
++   let done=false;proc.stdout?.on("data",value=>verifier.accept(value));proc.stderr?.on("data",()=>{});
++   proc.on("error",reject);proc.on("close",code=>{if(done)return;done=true;const result=verifier.finish();
++    // No raw output, prompt, transcript, credential or provider text is returned or logged.
++    Promise.resolve(reportResult(identity,{exitCode:Number.isInteger(code)?code:-1,verifiedResponse:code===0&&result.verified===true})).then(()=>resolve(code===0&&result.verified===true?0:1),reject);
++   });
++  });
++ };
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs
+@@ -0,0 +1,22 @@
++// Existing manager identity calls the proposed Core-only execution journal endpoints.
++// This client never reads/writes a database or accepts an owner/container/command from a public request.
++export function createManagedJobCoreClient({apiUrl,managerToken,fetchOwner=fetch}){
++ const base=new URL(apiUrl);if(base.protocol!=="http:"||base.username||base.password||base.pathname!=="/api/v1"||base.search||base.hash||!/^[a-z0-9][a-z0-9.-]*$/i.test(base.hostname)||!managerToken)throw Error("Managed JobRun Core authority unavailable");
++ async function request(runId,operation,body,action){
++  const url=new URL(base);url.pathname+=`/internal/managed-job-runs/${encodeURIComponent(runId)}/${operation}`;if(action)url.searchParams.set("action",action);
++  const response=await fetchOwner(url,{method:body===undefined?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${managerToken}`,Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(30_000)});
++  if(!response.ok){await response.body?.cancel();throw Object.assign(Error("Managed JobRun Core authority rejected operation"),{code:"MANAGED_JOB_CORE_UNAVAILABLE"});}
++  const data=await response.json();if(!data||typeof data!=="object"||!("data" in data))throw Error("Managed JobRun Core response invalid");return data.data;
++ }
++ const key=a=>({attemptId:a.attemptId,revision:a.revision,specHash:a.specHash});
++ return Object.freeze({
++  admit:(runId,action)=>request(runId,"admission",undefined,action),
++  claimEffect:async(a,kind)=>{const result=await request(a.runId,"effect-intent",{...key(a),kind});return result?.accepted===true;},
++  recordCreated:(a,containerId)=>request(a.runId,"created",{...key(a),containerId}),
++  recordStarted:a=>request(a.runId,"started",key(a)),
++  recordUnknown:(a,phase)=>request(a.runId,"unknown",{...key(a),phase}),
++  recordRetired:(a,proof)=>request(a.runId,"retired",{...key(a),proof}),
++  launchMaterial:a=>request(a.runId,"launch-material",key(a)),
++  recordRemoved:a=>request(a.runId,"removed",key(a)),
++ });
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs
+@@ -0,0 +1,23 @@
++// AsyncCoreDotExecution adapter. Core owns all records/grants and the original claim; manager owns Docker only.
++export function createManagedDotExecution({core,manager}){
++ const fail=code=>{throw Object.assign(Error(code),{code});};
++ const owned=async(scope,run)=>{if(core.inTransaction())fail("DOT_OUTER_TRANSACTION_UNSUPPORTED");const current=await core.requireOriginalRun(scope,run.id);if(current.id!==run.id||current.job_id!==run.job_id||current.project_id!==run.project_id||current.organization_id!==run.organization_id)fail("DOT_RUN_BINDING_CHANGED");return current;};
++ return Object.freeze({
++  async executeJobRun(runId,job,prompt){
++   if(core.inTransaction())fail("DOT_OUTER_TRANSACTION_UNSUPPORTED");
++   // This does NOT call startJobRun. Existing core-binding already committed original JobRun and Dot operation.
++   const admission=await core.prepareManagedExecution(runId,job,prompt);
++   if(core.inTransaction()||admission.runId!==runId||admission.jobId!==job.id||admission.projectId!==job.project_id||admission.jobRevision!==job.revision||admission.scheduleRevision!==job.schedule_revision)fail("DOT_RUN_BINDING_CHANGED");
++   const result=await manager.launchManagedJobRun(runId,admission.runtimeId);
++   if(result.state!=="active")fail("DOT_MANAGED_LAUNCH_OUTCOME_UNKNOWN");
++  },
++  async requestCancellation(scope,run){await owned(scope,run);await core.requireCancellationIntent(scope,run.id);await manager.cancelManagedJobRun(run.id);},
++  async inspectOwnedRun(scope,run){
++   await owned(scope,run);const observation=await manager.inspectManagedJobRun(run.id);
++   if(observation.state==="active")return "running";if(observation.state!=="settled")return "unknown";
++   await core.requireOriginalRetirementProof(run.id,observation.proof);
++   const latest=await owned(scope,run); // Never equate wait/exit zero with a verified model response.
++   return latest.status==="success"?"success":latest.status==="failed"||latest.status==="timeout"?"failed":latest.status==="cancelled"?"cancelled":"unknown";
++  },
++ });
++}
+--- /dev/null
++++ b/services/ingenium-api/scripts/runtime-job-child.ts
+@@ -0,0 +1,16 @@
++import { readFileSync, lstatSync } from "node:fs";
++import { spawn } from "node:child_process";
++import { createManagedJobChild } from "../lib/dot-v2/managed-job-child.mjs";
++import { JobResponseVerification } from "../lib/job-response-verification.js";
++const runId=process.env.INGENIUM_JOB_RUN_ID??"",attemptId=process.env.INGENIUM_JOB_ATTEMPT_ID??"";
++const file="/run/ingenium-runtime/capability",stat=lstatSync(file);
++if(!stat.isFile()||stat.isSymbolicLink()||(stat.mode&0o777)!==0o600||stat.uid!==process.getuid?.())throw Error("Original-run capability unavailable");
++const token=readFileSync(file,"utf8").trim(),base=new URL(process.env.INGENIUM_API_URL??"");
++if(!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token)||base.protocol!=="http:"||base.username||base.password||base.pathname!=="/api/v1"||base.search||base.hash)throw Error("Original-run API authority unavailable");
++async function request(operation:string,body?:unknown){
++ const url=new URL(base);url.pathname+=`/runtime/job-runs/${encodeURIComponent(runId)}/${operation}`;
++ const response=await fetch(url,{method:body===undefined?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${token}`,Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15_000)});
++ if(!response.ok){await response.body?.cancel();throw Error("Original-run API authority denied operation");}const json=await response.json() as {data:unknown};return json.data;
++}
++const run=createManagedJobChild({environment:process.env,spawn,verifierFactory:()=>new JobResponseVerification(),fetchAssignment:()=>request("assignment"),reportResult:(_identity:unknown,result:unknown)=>request("result",{attemptId,result})});
++try{process.exitCode=await run({runId,attemptId});}catch{console.error("Managed JobRun did not complete; original ownership retained.");process.exitCode=1;}
