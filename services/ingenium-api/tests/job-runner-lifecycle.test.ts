@@ -40,7 +40,7 @@ function fixtureDirectory(prefix: string): string {
   const declared = process.env.INGENIUM_TEST_GENERATED_OUTPUT_ROOT;
   if (!declared || !isAbsolute(declared) || resolve(declared) !== declared) throw new Error("Explicit task-owned test output root required");
   if (realpathSync(declared) !== declared || lstatSync(declared).isSymbolicLink()) throw new Error("Redirected task root refused");
-  const base = join(declared, "real-gmail-ui/veyra-phase-1/coordination/job-runner-lifecycle");
+  const base = resolve(process.env.INGENIUM_JOB_RUNNER_TEST_ROOT || join(declared, "tests/job-runner-lifecycle"));
   const contained = relative(declared, base);
   if (contained.startsWith("..") || isAbsolute(contained)) throw new Error("Fixture root escaped declared ownership");
   mkdirSync(base, { recursive: true, mode: 0o700 });
