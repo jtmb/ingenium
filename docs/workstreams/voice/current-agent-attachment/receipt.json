@@ -1,0 +1,76 @@
+{
+  "kind": "current-agent-attachment-source-receipt-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "proposalOnly": true,
+  "runtimeQualified": false,
+  "productionApproval": false,
+  "architecture": "Attachment owns speech/subscription/delivery transport only; existing canonical agent/chat/goal owner keeps execution",
+  "requestContext": {
+    "proposedPostimageSha256": "5ac980bb93bef74fa6102cc3e8a4aa78dee47226d663a432977a808152d8df6e",
+    "target": "services/ingenium-api/lib/voice-v2/request-context.ts",
+    "postimageRecipe": "UTF8(preimage text + one LF + exact additions text), no BOM/no normalization",
+    "preimageSha256": "cfeb6c08395d7e726ab13dfc7bc5f8fb13323e2e198144d0129c11af892fa6ed",
+    "applied": false,
+    "appendSource": "request-context.additions.ts",
+    "preimageBytes": 12773
+  },
+  "rootReservedMigration": 132,
+  "coreOwner": "Same existing Core getDb/transaction writer, metadata receipt factory only",
+  "tests": {
+    "command": "node --test attachment.test.mjs hosted-owner.test.mjs delivery-owner.test.mjs",
+    "hostedOwner": 4,
+    "sqliteOwner": 5,
+    "authored": 17,
+    "executed": false,
+    "attachment": 8,
+    "typeScriptOrSqlValidated": false,
+    "javascriptBodyParse": "Six modules; imports removed and import.meta substituted for V8 body syntax only; no module evaluation"
+  },
+  "remaining": [
+    "Root application/schema registration/exports/private constructor wiring",
+    "Actual canonical selected-state fence and any typed source/memory message preparation",
+    "Real private auth and current context read/write/control assertion tests",
+    "Actual original agent cancellation capture/pending owner integration",
+    "Actual call-scoped managed speech owner and routes/UI agent-call attachment branch",
+    "Root actual SQLite migration/restart tests and SSE transport joins",
+    "Attended Windows/hosted runtime/audio acceptance"
+  ],
+  "protectedSourceSnapshots": [
+    {
+      "path": "services/ingenium-api/lib/voice-v2/current-agent.mjs",
+      "sha256": "0432a1593ee0b5b0f27702be9d33fb0f0f9c05c9b43112d8ed0da2b93e79845f",
+      "workerWritten": false
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/hosted-lifecycle.mjs",
+      "sha256": "31077326b0f2f680db1e9e94c2a702ed3d9c384c1fda36462af3eed9e510ca2d",
+      "workerWritten": false
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/core-operations.mjs",
+      "sha256": "cb508d4e1bf4b390da505e5b6e7bca9a87719e076e71552bfc2d3c324e2e8fb5",
+      "workerWritten": false
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/service.mjs",
+      "sha256": "739a795d003d0f1861c0c4ee74e1267708258c575929f0251455db1eb2f71347",
+      "workerWritten": false
+    },
+    {
+      "path": "packages/veyra-voice/session.mjs",
+      "sha256": "ef82844a682cd13231221749c8e69b8227d6560d7174bcc7a4ac8adae40f27d2",
+      "workerWritten": false
+    }
+  ],
+  "separateExecutionBoundaryAudit": "e2a1f0a2 voice current-agent-original docs; ordinary attachment not blocked by missing upstream execution join",
+  "cleanup": {
+    "retainedConsumer": "Root exact source review/import, SQL132 and auth/queue/speech/UI integration and qualification",
+    "newBuildDependencyCacheModelOrRuntimeTrees": [],
+    "windowsRecoveredBytes": 0,
+    "removedPaths": [],
+    "endCondition": "Keep minimal source/hash/receipt evidence; no generated runtime derivatives created by worker",
+    "removedBytes": 0,
+    "linuxFilesystemRecoveredBytes": 0
+  }
+}

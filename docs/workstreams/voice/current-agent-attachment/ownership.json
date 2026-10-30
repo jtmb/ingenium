@@ -1,0 +1,18 @@
+{
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "Existing C-backed Ubuntu ext4 VHDX, paired C volume EE22980A",
+  "output": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/current-agent-attachment",
+  "sourceOutputLimitBytes": 65536,
+  "scope": "Bounded attachment source/interface proposal and model-free tests only",
+  "protected": [
+    "Original agent/goal/chat queue, canonical persistence and model selection",
+    "Shared Native/API sources and all active runtime/build/Stratus state",
+    "Existing full-agent original retirement guards and earlier13Native drafts"
+  ],
+  "regeneration": "Reviewed source in this directory; Root copies into owned actual modules and runs declared tests",
+  "consumer": "Root auth/canonical-queue/speech/event integration and actual runtime/audio acceptance",
+  "effects": "No builds, tests, models, runtime, devices, CU or shared writes",
+  "cleanup": "Remove proven reproducible inactive generated outputs after consumer; this worker creates no bulk/temp outputs",
+  "productionApproval": false
+}

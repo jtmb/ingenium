@@ -1,0 +1,63 @@
+{
+  "kind": "current-agent-attachment-source-manifest-v1",
+  "applied": false,
+  "qualified": false,
+  "files": [
+    {
+      "path": "132_voice_attachment_deliveries.sql",
+      "bytes": 1797,
+      "sha256": "b2c7e1485660b05edea3869b7e68d760cfadf084b25019fc256045e952186eba"
+    },
+    {
+      "path": "attachment.mjs",
+      "bytes": 17211,
+      "sha256": "c033338361bc1630d5d8c5e74de21a7206a4e32a7320cf5ef880918c87a83dbb"
+    },
+    {
+      "path": "attachment.test.mjs",
+      "bytes": 7592,
+      "sha256": "9799ed259401f1df728e3f6020e82b13fdb74dbd8a0336bb37208efe25f96622"
+    },
+    {
+      "path": "delivery-owner.mjs",
+      "bytes": 6411,
+      "sha256": "adbb5d8404ed41f3a944a0105f9d7369faa075a0dfed486d4455897504205f55"
+    },
+    {
+      "path": "delivery-owner.test.mjs",
+      "bytes": 4074,
+      "sha256": "c13e0fbb1f91dba079a5b55274b7230b34641c5b4c01b1f18fa9dd45d35b40ea"
+    },
+    {
+      "path": "hosted-owner.mjs",
+      "bytes": 5234,
+      "sha256": "f36737054caa4d748dfae1d4d67da5675db7c924ff960a5b018ee4380434d394"
+    },
+    {
+      "path": "hosted-owner.test.mjs",
+      "bytes": 3717,
+      "sha256": "b8de66975f5673bbd2a6ff590a5ce69a4906493f5d5b2b5b2826587d51d542b8"
+    },
+    {
+      "path": "ownership.json",
+      "bytes": 1164,
+      "sha256": "7ecc406ad70bb1093e6f501f10bdb7b899a3132645486ea3f4b25b4cf7d6c6ad"
+    },
+    {
+      "path": "README.md",
+      "bytes": 7463,
+      "sha256": "374e8cda858ead4d3c5775033b495928cd77fa220bbe0f487abd68b747664ed2"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 3568,
+      "sha256": "0d2dfb0b33d63f401eae8083683b5b4ae1644b5195fc4e8403be71087944b5cb"
+    },
+    {
+      "path": "request-context.additions.ts",
+      "bytes": 4923,
+      "sha256": "c96a7bd9c59a71e54a3316ca30b62008e7b1da859d1b3810d34f8470b37e070b"
+    }
+  ],
+  "totalContentBytes": 63154.0
+}
