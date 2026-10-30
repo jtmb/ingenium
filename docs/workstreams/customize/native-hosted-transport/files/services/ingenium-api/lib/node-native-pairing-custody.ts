@@ -128,7 +128,8 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
  }
  function pendingEffects(id:string,p:Principal,installation:string,projectId:string):number{
   const row=backend.db().prepare("SELECT count(*) AS count FROM native_hosted_governance_effects e JOIN native_hosted_governance_grants g ON g.id=e.grant_id WHERE g.enrollment_request_id=? AND g.owner_user_id=? AND g.installation_id=? AND g.hosted_project_id=? AND e.state='executing'").get(id,p.id,installation,projectId) as Row;
-  return Number(row.count);
+  const scoped=backend.db().prepare("SELECT count(*) AS count FROM customize_commands command JOIN customize_native_consents consent ON consent.id=command.native_consent_id WHERE consent.enrollment_request_id=? AND consent.owner_user_id=? AND consent.installation_id=? AND consent.hosted_project_id=? AND command.result_json IS NULL").get(id,p.id,installation,projectId) as Row;
+  return Number(row.count)+Number(scoped.count);
  }
  function writable(row:Row,c:Config,p:Principal){
   if(!backend.owned(p,row,"provider_connection","write")||!backend.retirementProject(p,c.projectId))fail("NOT_FOUND",404);
@@ -164,6 +165,7 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
    const grants=backend.db().prepare("SELECT * FROM native_hosted_governance_grants WHERE enrollment_request_id=?").all(id) as Row[];
    for(const g of grants)if(g.owner_user_id!==current.p.id||g.installation_id!==current.installation||g.hosted_project_id!==current.c.projectId||g.native_library_id!==credential.original.nativeOwner.library_id||g.native_service_instance_id!==credential.original.nativeOwner.service_instance_id||g.native_project_id!==(credential.original.nativeOwner.project?.id??null)||g.native_project_revision!==(credential.original.nativeOwner.project?.revision??null))fail("NATIVE_ATTESTATION_REFUSED",503);
    backend.db().prepare("UPDATE native_hosted_governance_grants SET revoked_at=COALESCE(revoked_at,?) WHERE enrollment_request_id=? AND owner_user_id=? AND installation_id=?").run(new Date().toISOString(),id,current.p.id,current.installation);
+   backend.db().prepare("UPDATE customize_native_consents SET revoked_at=?,revision=revision+1 WHERE enrollment_request_id=? AND owner_user_id=? AND installation_id=? AND revoked_at IS NULL").run(new Date().toISOString(),id,current.p.id,current.installation);
    // Existing audited vault SOFT deletion. Ciphertext/originals are preserved; no physical-erasure claim.
    backend.vault.deleteItem(actual.project_id,actual.id,{type:"user",id:current.p.id});
    const deleted=backend.db().prepare("SELECT access_policy FROM vault_items WHERE id=?").get(actual.id) as Row;

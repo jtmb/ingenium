@@ -58,3 +58,28 @@ CREATE TABLE customize_projection_preimages(
  snapshot_sha256 TEXT NOT NULL CHECK(length(snapshot_sha256)=64));
 CREATE TRIGGER customize_preimage_no_update BEFORE UPDATE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Immutable server projection preimage'); END;
 CREATE TRIGGER customize_preimage_no_delete BEFORE DELETE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Retain original server projection preimage'); END;
+-- Explicit separately versioned consent metadata, proved by original Native custody.
+CREATE TABLE customize_native_consents(
+ id TEXT PRIMARY KEY,owner_user_id TEXT NOT NULL REFERENCES users(id),installation_id TEXT NOT NULL,
+ parent_grant_id TEXT NOT NULL REFERENCES native_hosted_governance_grants(id),enrollment_request_id TEXT NOT NULL,
+ organization_id TEXT NOT NULL REFERENCES organizations(id),hosted_project_id TEXT NOT NULL REFERENCES projects(id),
+ native_custodian_grant_id TEXT NOT NULL,original_json TEXT NOT NULL CHECK(json_valid(original_json)),
+ request_sha256 TEXT NOT NULL CHECK(length(request_sha256)=64),registration_json TEXT NOT NULL CHECK(json_valid(registration_json)),
+ revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>=1),revoked_at TEXT,created_at TEXT NOT NULL);
+CREATE TRIGGER customize_native_consent_immutable BEFORE UPDATE ON customize_native_consents
+WHEN NEW.id<>OLD.id OR NEW.owner_user_id<>OLD.owner_user_id OR NEW.installation_id<>OLD.installation_id
+ OR NEW.parent_grant_id<>OLD.parent_grant_id OR NEW.enrollment_request_id<>OLD.enrollment_request_id
+ OR NEW.organization_id<>OLD.organization_id OR NEW.hosted_project_id<>OLD.hosted_project_id
+ OR NEW.native_custodian_grant_id<>OLD.native_custodian_grant_id OR NEW.original_json<>OLD.original_json
+ OR NEW.request_sha256<>OLD.request_sha256 OR NEW.registration_json<>OLD.registration_json OR NEW.created_at<>OLD.created_at
+ OR OLD.revoked_at IS NOT NULL OR NEW.revoked_at IS NULL OR NEW.revision<>OLD.revision+1
+BEGIN SELECT RAISE(ABORT,'Immutable explicit scoped consent'); END;
+CREATE TRIGGER customize_native_consent_no_delete BEFORE DELETE ON customize_native_consents BEGIN SELECT RAISE(ABORT,'Retain scoped consent original'); END;
+ALTER TABLE customize_commands ADD COLUMN native_consent_id TEXT REFERENCES customize_native_consents(id);
+ALTER TABLE customize_commands ADD COLUMN native_request_sha256 TEXT;
+CREATE TRIGGER customize_native_request_insert BEFORE INSERT ON customize_commands
+WHEN (NEW.native_consent_id IS NULL)<>(NEW.native_request_sha256 IS NULL) OR (NEW.native_request_sha256 IS NOT NULL AND length(NEW.native_request_sha256)<>64)
+BEGIN SELECT RAISE(ABORT,'Scoped original context required'); END;
+CREATE TRIGGER customize_native_request_immutable BEFORE UPDATE ON customize_commands
+WHEN NEW.native_consent_id IS NOT OLD.native_consent_id OR NEW.native_request_sha256 IS NOT OLD.native_request_sha256
+BEGIN SELECT RAISE(ABORT,'Immutable scoped original context'); END;

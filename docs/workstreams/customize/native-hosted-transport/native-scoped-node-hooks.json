@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "sources": [
+    {
+      "path": "services/ingenium-api/lib/paired-native-reader.ts",
+      "preimageSha256": "efb00f645734f3d626e667d4251e98176a197e2022c064e0d7b27ba923b5a7c6",
+      "postimageSha256": "7bc967099af80b05ce9bc7c0dc287831c85630a64189538dd668912585ed0fcd"
+    }
+  ]
+}

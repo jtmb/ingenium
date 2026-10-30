@@ -8,7 +8,7 @@ const host=ts.createCompilerHost(options),get=host.getSourceFile.bind(host),exis
 host.fileExists=p=>virtual.has(p)||exists(p);host.readFile=p=>virtual.get(p)??read(p);host.getSourceFile=(p,v,...rest)=>virtual.has(p)?ts.createSourceFile(p,virtual.get(p),v,true):get(p,v,...rest);
 host.resolveModuleNames=(names,from)=>names.map(n=>{
  if(n==='ingenium-core')return {resolvedFileName:app+'/packages/ingenium-core/lib/index.ts',extension:ts.Extension.Ts};
- if(n.startsWith('ingenium-core/lib/'))return {resolvedFileName:app+'/packages/ingenium-core/lib/'+n.slice('ingenium-core/lib/'.length).replace(/\\.js$/,'')+'.ts',extension:ts.Extension.Ts};
+ if(n.startsWith('ingenium-core/lib/'))return {resolvedFileName:app+'/packages/ingenium-core/lib/'+n.slice('ingenium-core/lib/'.length)+'.ts',extension:ts.Extension.Ts};
  return ts.resolveModuleName(n,from,options,host).resolvedModule;
 });host.writeFile=()=>{emitted++;throw Error('Source-only check attempted an output');};
 const roots=[...virtual.keys()],program=ts.createProgram(roots,options,host),diagnostics=ts.getPreEmitDiagnostics(program);

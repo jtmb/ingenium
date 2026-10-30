@@ -20,12 +20,12 @@
     {
       "path": "services/ingenium-api/scripts/api-server.ts",
       "preimageSha256": "3ffbb929802883bda600dbc40394780180ee024383ace2a3011c944363942166",
-      "postimageSha256": "360bfe035dd4afd205138a1f0d1c37c36a3feb74edfe8f7594610b8f04f52674"
+      "postimageSha256": "5d355e752fb79174154f879e05e6a81fc748c0198efc4a36bdaeb76c9f289c88"
     },
     {
       "path": "services/ingenium-api/lib/authorization-policy.ts",
       "preimageSha256": "ea923e5a072820a4ca9391a85c8fe7cddd31753c13e35af5cb5d9113d9fce3d9",
-      "postimageSha256": "80fefa7cf397bdd22d595ad0fe6b8fa3a686d2af6c28f61e5609854c034e33b6"
+      "postimageSha256": "49be0ef7bf16328b79b9097bf7b2f9ace86922491bb68c8d1dac00311dd44a15"
     },
     {
       "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
@@ -35,7 +35,7 @@
     {
       "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
       "newFile": true,
-      "postimageSha256": "87ff4c8ecf520404634ff245963eea7119c5c098201735bfe16993f0775773f4"
+      "postimageSha256": "41e9c624fb2a65ad90d4d9068cb43133154f2c683ddd1f091942041e068e67bb"
     },
     {
       "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
@@ -55,12 +55,37 @@
     {
       "path": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
       "newFile": true,
-      "postimageSha256": "88d0c87dfe37ba81cc78a85130d62da1c2fa2f16d5a2037adca6b8b24fa21f6b"
+      "postimageSha256": "f495504a64bd0b8256b246bc095345d5037773d2a3495648196e86b396fd68ab"
     },
     {
       "path": "services/ingenium-api/lib/routes/customize-scoped.ts",
       "newFile": true,
       "postimageSha256": "0204d7975e9ea06419fc5db82bb559212a09987642f14ed33ec2187f9792b572"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/customize-scoped-v1-contracts.ts",
+      "newFile": true,
+      "postimageSha256": "d139f7f68aaefdd7de8e2b6688e0027d5c62c19a6d342bb7b321ae176fa47901"
+    },
+    {
+      "path": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+      "newFile": true,
+      "postimageSha256": "2fd945e90299950e000cac11b37545f99191a0672f87768dba757a0cef8e986b"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "newFile": true,
+      "postimageSha256": "0c5bba402d65a2f971f9e9ea047006c39772476db13949aa252819487470dc65"
+    },
+    {
+      "path": "services/ingenium-api/lib/paired-native-reader.ts",
+      "preimageSha256": "efb00f645734f3d626e667d4251e98176a197e2022c064e0d7b27ba923b5a7c6",
+      "postimageSha256": "7bc967099af80b05ce9bc7c0dc287831c85630a64189538dd668912585ed0fcd"
+    },
+    {
+      "path": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "preimageSha256": "c09d4338bbf98ca0876b5c72e8c27f99016298c63551aed3279806e66484235a",
+      "postimageSha256": "88ac772e292760d02b94aa55039a291da269c2138c4a0db11c43a4dea2702668"
     }
   ]
 }

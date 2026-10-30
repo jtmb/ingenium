@@ -55,9 +55,13 @@ function projectSnapshot(principal:auth.AuthorizationPrincipal,projectId:string,
  return {row,payload,sourceSha256:payloadHash(payload)};
 }
 /** Every callback is synchronous under the original Core writer. */
-export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipal){
+export interface VerifiedScopedCustomizeContext {
+ /** Only the actual request-bound Native proof owner constructs this callback. */
+ consentId:string;organizationId:string;nativeRequestSha256?:string;assertCurrent():void;authorizeCommand(command:z.infer<typeof CatalogCommandSchema>):void;
+}
+export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipal,native?:VerifiedScopedCustomizeContext){
  active(principal);
- function current(){active(principal);return principal;}
+ function current(){active(principal);native?.assertCurrent();return principal;}
  function reconciliation(sourceOperationId:string,ignoreOperationId?:string):Row{
   current();const original=db().prepare('SELECT * FROM customize_commands WHERE id=? AND actor_id=? AND installation_id=?').get(id.parse(sourceOperationId),principal.id,instance()) as Row|undefined;
   requireValue(original&&original.project_id&&original.kind==='plugin'&&!original.result_json,'ORIGINAL_NOT_PENDING');
@@ -91,7 +95,7 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
   return {original,pending,review,reviewSha256:payloadHash(review)};
  }
  function authorize(command:z.infer<typeof CatalogCommandSchema>):{projectId:string|null;kind:'plugin'|'skill';resourceKey:string}{
-  current();
+  current();native?.authorizeCommand(command);
   if(command.op==='reconcile-local-metadata'){const state=atomicReconciliation(command.sourceOperationId,command.operationId);return {projectId:state.original.project_id,kind:state.original.kind,resourceKey:state.original.resource_key};}
   if(command.op==='reconcile-plugin-projection'){const state=reconciliation(command.sourceOperationId,command.operationId);return {projectId:state.original.project_id,kind:'plugin',resourceKey:state.original.resource_key};}
   if(command.op==='publish'){const p=project(principal,command.projectId,command.kind==='plugin'?'plugins':'skills','admin');
@@ -182,13 +186,15 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
   return {pluginId:actual.id,projectId:actual.project_id,revision:actual.revision,archived:Boolean(actual.archived_at),enabled:Boolean(actual.enabled)};
  }
  function command(input:unknown):Row{
-  const c=CatalogCommandSchema.parse(input),scope=authorize(c),installationId=instance(),original={command:c,actorId:principal.id,installationId},digest=payloadHash(original);
+  if(native)requireValue(native.nativeRequestSha256,'NATIVE_ORIGINAL_PROOF_REQUIRED',503);
+  const c=CatalogCommandSchema.parse(input),scope=authorize(c),installationId=instance(),original={command:c,actorId:principal.id,installationId,...(native?{nativeConsentId:native.consentId,nativeRequestSha256:native.nativeRequestSha256}: {})},digest=payloadHash(original);
+  if(native)requireValue(native.nativeRequestSha256,'NATIVE_ORIGINAL_PROOF_REQUIRED',503);
   const prior=execTransaction(()=>{
    authorize(c);const old=db().prepare('SELECT * FROM customize_commands WHERE id=?').get(c.operationId) as Row|undefined;
    if(old){requireValue(old.actor_id===principal.id&&old.installation_id===installationId&&old.payload_sha256===digest,'ORIGINAL_REUSE_CONFLICT');return old;}
    const observedPreimage=review(c);
    if(scope.projectId&&c.op!=='reconcile-plugin-projection'&&c.op!=='reconcile-local-metadata')requireValue(!db().prepare('SELECT 1 FROM customize_commands WHERE project_id=? AND kind=? AND result_json IS NULL LIMIT 1').get(scope.projectId,scope.kind),'ORIGINAL_RECONCILIATION_REQUIRED');
-   db().prepare('INSERT INTO customize_commands(id,installation_id,actor_id,project_id,kind,resource_key,original_json,payload_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(c.operationId,installationId,principal.id,scope.projectId,scope.kind,scope.resourceKey,JSON.stringify(original),digest,new Date().toISOString());
+   db().prepare('INSERT INTO customize_commands(id,installation_id,actor_id,project_id,kind,resource_key,original_json,payload_sha256,created_at,native_consent_id,native_request_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(c.operationId,installationId,principal.id,scope.projectId,scope.kind,scope.resourceKey,JSON.stringify(original),digest,new Date().toISOString(),native?.consentId??null,native?.nativeRequestSha256??null);
    const witness=observedPreimage??(metadataOps.has(c.op)?{protocol:'customize-atomic-metadata-v1',requestSha256:digest,implementation:'local_SQLite_only_v1'}:undefined);
    if(witness)db().prepare('INSERT INTO customize_projection_preimages(command_id,snapshot_json,snapshot_sha256) VALUES(?,?,?)').run(c.operationId,JSON.stringify(witness),payloadHash(witness));return undefined;
   },1,'immediate');checkpointAfterWrite();
@@ -207,13 +213,18 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
  }
  return {
   command,
+  projectCatalog(projectId:string,resourceKind:'plugin'|'skill'){
+   current();project(principal,id.parse(projectId),resourceKind==='plugin'?'plugins':'skills','read');
+   const rows=resourceKind==='plugin'?plugins.listPlugins(projectId):skills.listSkills(projectId);
+   return {data:rows.map(row=>({id:row.id,kind:resourceKind,name:row.name,description:row.description??'',visibility:'project',installed:true,enabled:Boolean(row.enabled),revision:(row as Row).revision??null})),projectId};
+  },
   reconciliationReview(sourceOperationId:string){const witness=db().prepare('SELECT snapshot_json FROM customize_projection_preimages WHERE command_id=?').get(id.parse(sourceOperationId)) as Row|undefined;requireValue(witness,'ORIGINAL_SERVER_WITNESS_UNAVAILABLE',503);const marker=JSON.parse(witness.snapshot_json);const v=marker.protocol==='customize-atomic-metadata-v1'?atomicReconciliation(sourceOperationId):reconciliation(sourceOperationId);return {protocol:v.review.protocol,sourceOperationId:v.original.id,reviewSha256:v.reviewSha256,pluginId:v.row?.id??null,projectId:v.original.project_id,revision:v.row?.revision??null,pendingOriginals:v.pending.map((r:Row)=>r.id),purpose:marker.protocol==='customize-atomic-metadata-v1'?'atomic_local_metadata_only':'local_projection_preimage_only',remoteOutcome:'never_interpreted'};},
   projectSource(projectId:string,resourceKind:'plugin'|'skill',resourceName:string){current();const v=projectSnapshot(principal,id.parse(projectId),kind.parse(resourceKind),name.parse(resourceName));return {id:v.row.id,revision:v.row.revision,sourceSha256:v.sourceSha256,payload:v.payload};},
   discover(scope:unknown,after:unknown='',limit:unknown=50){current();const v=visibility.parse(scope),take=z.number().int().min(1).max(100).parse(limit),cursor=z.string().max(128).parse(after);
-   const rows=db().prepare(`SELECT s.* FROM customize_catalog_sources s JOIN organization_memberships m ON m.organization_id=s.organization_id AND m.user_id=? AND m.status='active' WHERE s.installation_id=? AND s.visibility=? AND s.archived_at IS NULL AND (s.owner_user_id IS NULL OR s.owner_user_id=?) AND s.id>? ORDER BY s.id LIMIT ?`).all(principal.id,instance(),v,principal.id,cursor,take+1) as Row[];
+   const rows=db().prepare(`SELECT s.* FROM customize_catalog_sources s JOIN organization_memberships m ON m.organization_id=s.organization_id AND m.user_id=? AND m.status='active' WHERE s.installation_id=? AND s.visibility=? AND s.archived_at IS NULL AND (s.owner_user_id IS NULL OR s.owner_user_id=?) AND s.id>? AND (? IS NULL OR s.organization_id=?) ORDER BY s.id LIMIT ?`).all(principal.id,instance(),v,principal.id,cursor,native?.organizationId??null,native?.organizationId??null,take+1) as Row[];
    for(const row of rows)sourceAllowed(principal,row);return {data:rows.slice(0,take).map(dto),next:rows.length>take?rows[take-1]!.id:null};
   },
-  source(sourceId:string){const row=sourceRow(principal,id.parse(sourceId));requireValue(!row.archived_at,'NOT_FOUND',404);const payload=JSON.parse(row.payload_json);requireValue(payloadHash(payload)===row.payload_sha256,'SOURCE_SNAPSHOT_CORRUPT',503);return {...dto(row),payload};},
+  source(sourceId:string){current();const row=sourceRow(principal,id.parse(sourceId));requireValue(!row.archived_at,'NOT_FOUND',404);const payload=JSON.parse(row.payload_json);requireValue(payloadHash(payload)===row.payload_sha256,'SOURCE_SNAPSHOT_CORRUPT',503);return {...dto(row),payload};},
   inspect(operationId:string){current();const row=db().prepare('SELECT * FROM customize_commands WHERE id=? AND actor_id=? AND installation_id=?').get(id.parse(operationId),principal.id,instance()) as Row|undefined;requireValue(row,'NOT_FOUND',404);if(row.project_id){const p=db().prepare('SELECT organization_id,archived_at FROM projects WHERE id=?').get(row.project_id) as Row|undefined;requireValue(p,'NOT_FOUND',404);if(!p.archived_at)project(principal,row.project_id,row.kind==='plugin'?'plugins':'skills','read');else requireValue(auth.requireOrganizationPermission(principal,p.organization_id,row.kind==='plugin'?'plugins':'skills','read').allowed,'NOT_FOUND',404);}else{const original=JSON.parse(row.original_json);sourceRow(principal,original.command.sourceId);}return {operationId:row.id,payloadSha256:row.payload_sha256,...(row.result_json?JSON.parse(row.result_json):{outcome:'unknown',code:'ORIGINAL_RECONCILIATION_REQUIRED'})};},
   archivedPlugins(projectId:string){current();project(principal,id.parse(projectId),'plugins','read');return lifecycle.archived(projectId);},
   installations(projectId:string){current();project(principal,id.parse(projectId),'plugins','read');return db().prepare('SELECT * FROM customize_installations WHERE project_id=? ORDER BY created_at,id').all(projectId);},

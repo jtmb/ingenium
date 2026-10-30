@@ -1,3 +1,4 @@
+import {createNativeScopedCustomizeRouter} from '../lib/routes/customize-scoped-v1.js';
 import {createScopedCustomizeRouter} from "../lib/routes/customize-scoped.js";
 import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
 import {installedDotSchedulerRuntime} from "../lib/dot-v2/installed-dot-scheduler.js";
@@ -199,6 +200,7 @@ app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/native-customize/pairings",createNativePairingRouter());
 const verifiedNative=createVerifiedNativeContextOwner(req=>createNodeNativePairingOwner(req).custody);
 app.use("/api/v1/native-customize",createNativeCustomizeRouter({context:createNativeCustomizeContextOwner(verifiedNative.owner),preflight:verifiedNative.preflight}));
+app.use("/api/v1/customize-scoped-v1",createNativeScopedCustomizeRouter());
 app.use("/api/v1/customize",createScopedCustomizeRouter());
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);

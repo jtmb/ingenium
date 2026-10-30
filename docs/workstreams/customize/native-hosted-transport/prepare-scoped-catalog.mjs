@@ -1,5 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url));
+if(fs.existsSync(here+'/native-scoped-node-hooks.json'))throw Error('Versioned v1 source exists: restore exact reviewed Git checkpoint; old generator must not overwrite newer hooks');
 const app=process.argv[2]??'/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const existing=fs.existsSync(here+'/scoped-source-manifest.json')?JSON.parse(fs.readFileSync(here+'/scoped-source-manifest.json','utf8')):undefined;

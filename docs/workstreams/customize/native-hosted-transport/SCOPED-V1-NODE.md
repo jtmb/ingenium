@@ -1,0 +1,17 @@
+# customize-scoped-v1 Node source checkpoint
+
+This is a proposal for Root integration. Native consent/Profile/RPC implementations and UI capability projection remain unfinished. No runtime acceptance, TLS proof round trip, credential use, real migration, two-store restore, or phase completion is claimed.
+
+The new route `/api/v1/customize-scoped-v1` uses the actual original session/CSRF owner and `createNodeNativePairingOwner(req).custody`. No injected trust, URL, token, principal, session factory or successful proof callback exists. Private readers call fixed new Native proof paths using the original paired credential. `paired()` builds the actual frozen parent binding through `createHostedGovernanceOwner` with a request-bound proof callback that checks original custody and the current credential version. Frozen capabilities do not authorize the new domain.
+
+A real recent step-up and prepared Native proof register a distinct consent. Original scopes, verbs, Native owner and full parent binding are hashed and immutable. Effective proof verbs cannot widen deliberate selection. Each action rechecks current Core authority, actual consent, original private credential, project/organization and selected visibility. Native effects must already have a durable dispatch claim for the exact new original/hash. They use the same Core domain writers and immutable command receipts, linked to the consent/native original hash. Unknown remains unknown; no resend or success from missing records.
+
+Receipt recovery returns only same-account metadata with `liveBinding:false` and `domainReadback:not_requested`. Recovery never promotes a session or Native proof to live domain authority. Explicit revocation reduces authority without erasing originals. Parent retirement counts unresolved new commands and revokes new consents before the existing audited vault retirement; it does not add a credential/vault schema.
+
+SQL133 contains the new consent metadata and four guards, in addition to the existing scoped catalog/preimage proposal. Root owns migration registration and the SQL132-aware schema. No `db.ts` replacement is supplied. Existing auth and SQL101/102 are untouched.
+
+Source checks: strict noEmit 16 proposed TS roots / 637 actual source files, 0 diagnostics, 0 emitted; 30 pure controls passed; structural empty-database DDL check 17 triggers, zero auth/session rows. These checks do not establish actual authorization, SQLite migration, remote failure, Native profile/custody or visual acceptance.
+
+Regenerate this checkpoint from its exact Git tree and use `scoped-source-manifest.json` preimage/postimage hashes. The old `prepare-scoped-catalog.mjs` is deliberately disabled once the versioned proposal exists because it predates the new hooks and must not overwrite them. Each proposed shared postimage remains subject to Root's semantic rebase; no automatic preimage refresh is allowed. Run `check-scoped-source.mjs`, `check-scoped-ddl.py` and the four `*.test.mjs` suites listed in `scoped-v1-verification.json` using the inherited Node/Python runtimes, with compile caches disabled and temporary paths inside the existing task root.
+
+Cleanup: only source, minimal manifests/tests/receipts were created. No build, dependency, cache or temporary tree was generated. Retained source has Root integration/Native and UI implementation as concrete consumers; remove reproducible source derivatives after integration and retain the reviewed source/manifest in Git. No Linux or Windows disk recovery is claimed.

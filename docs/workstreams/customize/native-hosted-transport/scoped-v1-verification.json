@@ -1,0 +1,42 @@
+{
+  "status": "Source checkpoint only; no runtime qualification",
+  "strict": {
+    "roots": 16,
+    "actualSourceFiles": 637,
+    "diagnostics": 0,
+    "emitted": 0
+  },
+  "pureTests": {
+    "passed": 30,
+    "failed": 0,
+    "suites": [
+      "live-acceptance.test.mjs",
+      "scoped-contract.test.mjs",
+      "plugin-config-text.test.mjs",
+      "scoped-v1-proof.test.mjs"
+    ]
+  },
+  "ddl": {
+    "triggers": 17,
+    "authOrSessionRows": 0,
+    "actualMigrationAcceptance": false
+  },
+  "nativeDraftsNotCompiled": [
+    "files/crates/adapters/src/remote_control/hosted/customize_scoped_v1/contracts.rs",
+    "files/crates/adapters/src/account_vault/node_hosted/scoped_step_up.rs"
+  ],
+  "remaining": [
+    "Root semantic integration and SQL132-aware migration registration",
+    "Native consent/Profile/state/RPC/proof owners",
+    "Actual UI capability projection and consent/catalog workflows",
+    "Real TLS/session/step-up/custody and two-store restore acceptance"
+  ],
+  "cleanup": {
+    "newDisposableTrees": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Reviewed source, manifests and tests for Root integration; Native drafts for continued implementation",
+    "windowsRecoveryClaimed": false,
+    "linuxRecoveryClaimed": false
+  }
+}

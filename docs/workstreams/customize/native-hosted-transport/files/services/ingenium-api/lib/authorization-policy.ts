@@ -118,6 +118,9 @@ export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial
     const collection = req.method === "GET" && (req.path === "/api/v1/projects" || req.path === "/api/v1/projects/archive");
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
   }
+  const nativeScoped=req.method==='GET'&&/^\/api\/v1\/customize-scoped-v1\/(?:offer|consents\/[^/]+\/(?:receipt|operations\/[^/]+))$/.test(req.path)
+    ||req.method==='POST'&&/^\/api\/v1\/customize-scoped-v1\/(?:consents(?:\/[^/]+\/revoke)?|read|effects)$/.test(req.path);
+  if(nativeScoped)return {action:'customize.scoped.v1.'+(req.method==='GET'?'read':'command'),resource:'plugins',permission:'read',target:'private',browserSessionOnly:true,sensitive:req.method!=='GET'};
   const scopedCustomize=req.method==="GET"&&/^\/api\/v1\/customize\/(?:sources(?:\/[^/]+)?|project-source|archived-plugins|installations|commands\/[^/]+|projection-reconciliation\/[^/]+)\/?$/i.test(req.path)
     ||req.method==="POST"&&/^\/api\/v1\/customize\/commands\/?$/i.test(req.path);
   if(scopedCustomize)return {action:"customize.scoped."+(req.method==="GET"?"read":"command"),resource:"plugins",permission:"read",target:"private",browserSessionOnly:true,sensitive:req.method!=="GET"};
