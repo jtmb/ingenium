@@ -1,0 +1,51 @@
+{
+  "kind": "selection-owner-constructor-source-audit-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "f0f49bbdc23b638b5dd0428ffb8dca597ec863d4",
+  "applied": false,
+  "runtimeQualified": false,
+  "globalFenceActive": false,
+  "sourceRoot": "real-gmail-ui/prd-ui-fixes",
+  "sources": [
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "bytes": 93818,
+      "sha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "bytes": 1770,
+      "sha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "bytes": 14065,
+      "sha256": "48394a7d3f701ed28b8c383f17d7b133550bbbab9fb3d3ee95ed39da87f5d118"
+    },
+    {
+      "path": "services/ingenium-api/lib/memory-engine-owner.ts",
+      "bytes": 3095,
+      "sha256": "d90a87248de430671e9efd4418d809d5bdcda810b60be7215624cf0cd4c4a389"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "bytes": 13972,
+      "sha256": "fcee2630d751296df3efb4bf9f45e7d3176187d0102041f9432ef8853d9bbd46"
+    },
+    {
+      "path": "services/ingenium-api/config/index.ts",
+      "bytes": 2091,
+      "sha256": "3905806bc2428e747085f16038f6bbca56e761fb4a29e28bcbfce73d7f54abff"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/122_veyra_workspace_projects.sql",
+      "bytes": 3174,
+      "sha256": "f6ac42adcd1b8c2f02a0da08d4970dc0059a1a305a92f1dcef15dfce3f32c361"
+    }
+  ],
+  "conclusion": "Managed runtime logical owner derivable; default/local alias requires original retained startup transport binding. No guessed identity patch.",
+  "removedPaths": [],
+  "removedBytes": 0,
+  "retained": "Minimal audit/source needed by Root constructor integration; prior13Native drafts protected unchanged",
+  "regeneration": "Source review against exact recorded preimages; no generated runtime outputs"
+}

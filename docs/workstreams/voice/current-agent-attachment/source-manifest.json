@@ -19,6 +19,16 @@
       "sha256": "9799ed259401f1df728e3f6020e82b13fdb74dbd8a0336bb37208efe25f96622"
     },
     {
+      "path": "constructor-audit.json",
+      "bytes": 2044,
+      "sha256": "56bb52a64486a76fc0a3213a4e7796b33934f55ab872daf57135ca2665dc9dac"
+    },
+    {
+      "path": "constructor-audit.md",
+      "bytes": 5996,
+      "sha256": "c1aff30151e63590cfe9188e93cc9f3b35f709dd813808f52f4fa27a1711c06b"
+    },
+    {
       "path": "delivery-owner.mjs",
       "bytes": 6411,
       "sha256": "adbb5d8404ed41f3a944a0105f9d7369faa075a0dfed486d4455897504205f55"
@@ -40,8 +50,8 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1416,
-      "sha256": "b556bea3c7b6ed6306e197143b9879a709f88261005b1bcd33f62005d987fb80"
+      "bytes": 1441,
+      "sha256": "253254e9f4a11ecc9f4b1b983e5c91576354e1888ee6c99bba17df24a50d8f11"
     },
     {
       "path": "README.md",
@@ -94,5 +104,5 @@
       "sha256": "7af6e32542286df976a16c77b1b1c26ba3cd4211deb41e3be2e739802f311608"
     }
   ],
-  "totalContentBytes": 93969.0
+  "totalContentBytes": 102034
 }
