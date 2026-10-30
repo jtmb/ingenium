@@ -2,50 +2,78 @@ use super::*;
 use crate::{native_memory_owner::NativeMemoryOwner,projects::ProjectStore};
 use veyra_memory::{ExecutionStamp,CompletedMessage,SourceRef,Role,content_hash,fingerprint};
 impl LiveRuntime {
- fn memory_stamp_locked(&self,engine:&OwnedEngine,owner:&NativeMemoryOwner,session:&EngineSession)->Result<ExecutionStamp,RuntimeError>{
+ fn memory_verify_owner(engine:&OwnedEngine,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<(),RuntimeError>{
+  owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
+  if let Some(binding)=owner.private_binding(){
+   // The closure borrows the actual locked ProjectStore and sealed owner.
+   // It is not caller-supplied metadata or a decoder permission grant.
+   local_workspaces::require_local_engine(engine,binding,&||owner.verify_chat(store,chat))?;
+  }
   engine.ensure_directory(owner.directory())?;
   if matches!(&engine.environment,Environment::Wsl{user:None,..})||
      fingerprint(&engine.environment).map_err(|_|RuntimeError::Binding)?!=owner.scope().execution_id{return Err(RuntimeError::Binding)}
+  Ok(())
+ }
+ fn memory_stamp_locked(&self,engine:&OwnedEngine,store:&ProjectStore,owner:&NativeMemoryOwner,session:&EngineSession)->Result<ExecutionStamp,RuntimeError>{
+  Self::memory_verify_owner(engine,store,owner,&session.id)?;
   if session.location.directory!=owner.directory(){return Err(RuntimeError::Binding)}
   Ok(ExecutionStamp{scope:owner.scope().clone(),binding_revision:owner.revision(),service_instance_id:owner.instance().into(),
    engine_instance_id:task_permissions::current_engine_instance_id(engine)?,engine_revision:self.credentials_revision(),
    engine_project_id:session.project_id.clone(),directory:owner.directory().into()})
  }
  pub fn memory_current_stamp(&self,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<ExecutionStamp,RuntimeError>{
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;
+  owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
   let engine=self.lock_engine_for_directory(owner.directory())?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
   let session=engine.client()?.session_in_project(chat,&SessionQuery{directory:owner.directory().into(),..SessionQuery::default()})?;
-  let stamp=self.memory_stamp_locked(&engine,owner,&session)?;
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;Ok(stamp)
+  if session.id!=chat{return Err(RuntimeError::Binding)}
+  let stamp=self.memory_stamp_locked(&engine,store,owner,&session)?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;Ok(stamp)
  }
  /// Read one bounded latest page; never follow cursor or use context/history().
  pub fn memory_recent(&self,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<(ExecutionStamp,Vec<CompletedMessage>),RuntimeError>{
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;
+  owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
   let engine=self.lock_engine_for_directory(owner.directory())?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
   let session=engine.client()?.session_in_project(chat,&SessionQuery{directory:owner.directory().into(),..SessionQuery::default()})?;
-  let stamp=self.memory_stamp_locked(&engine,owner,&session)?;
-  // ROOT RECONCILIATION GATE: this provisional call names the superseded
-  // memory-specific client proposal. Replace with Projects' actual frozen ONE
-  // scoped bounded-recent export before Native apply/build. Preserve <=32,
-  // latest-desc first page only, canonical conversion and chronological output.
-  // No duplicate OpenCodeClient implementation is supplied by memory.
-  let messages=engine.client()?.memory_recent(chat)?;
+  if session.id!=chat{return Err(RuntimeError::Binding)}
+  let stamp=self.memory_stamp_locked(&engine,store,owner,&session)?;
+  // Projects 8b18318e owns this ONE canonical decoder. No cursor traversal.
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
+  let page=engine.client()?.local_recent_messages(chat,None,32)?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
+  if page.data.len()>32||serde_json::to_vec(&page).map_err(|_|RuntimeError::Storage)?.len()>4*1024*1024{
+   return Err(RuntimeError::Binding)
+  }
+  // Shared first page is newest-first. Pair projection consumes chronological
+  // order, so reverse exactly once and discard the unused opaque cursor.
+  let mut messages=page.data;messages.reverse();
   let selected=self.memory_pairs(owner,&stamp,chat,&messages)?;
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;
-  if self.memory_stamp_locked(&engine,owner,&session)?!=stamp{return Err(RuntimeError::Binding)}
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
+  if self.memory_stamp_locked(&engine,store,owner,&session)?!=stamp{return Err(RuntimeError::Binding)}
   Ok((stamp,selected))
  }
  /// Re-read EXACT selected canonical message IDs; unrelated later turns are allowed.
  pub fn memory_refresh(&self,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str,ids:&[String])->Result<(ExecutionStamp,Vec<CompletedMessage>),RuntimeError>{
   if ids.is_empty()||ids.len()>32{return Err(RuntimeError::Binding)}
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;
+  owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
   let engine=self.lock_engine_for_directory(owner.directory())?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
   let session=engine.client()?.session_in_project(chat,&SessionQuery{directory:owner.directory().into(),..SessionQuery::default()})?;
-  let stamp=self.memory_stamp_locked(&engine,owner,&session)?;
-  let messages=ids.iter().map(|id|engine.client()?.message(chat,id)).collect::<Result<Vec<_>,_>>()?;
+  if session.id!=chat{return Err(RuntimeError::Binding)}
+  let stamp=self.memory_stamp_locked(&engine,store,owner,&session)?;
+  let mut messages=Vec::with_capacity(ids.len());let mut bytes=0usize;
+  for id in ids{
+   Self::memory_verify_owner(&engine,store,owner,chat)?;
+   let message=engine.client()?.message(chat,id)?;
+   Self::memory_verify_owner(&engine,store,owner,chat)?;
+   bytes=bytes.checked_add(serde_json::to_vec(&message).map_err(|_|RuntimeError::Storage)?.len()).ok_or(RuntimeError::Binding)?;
+   if bytes>4*1024*1024{return Err(RuntimeError::Binding)}
+   messages.push(message);
+  }
   let selected=self.memory_pairs(owner,&stamp,chat,&messages)?;
   if selected.len()!=ids.len(){return Err(RuntimeError::Binding)}
-  owner.verify(store).map_err(|_|RuntimeError::Binding)?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
   Ok((stamp,selected))
  }
  fn memory_pairs(&self,owner:&NativeMemoryOwner,stamp:&ExecutionStamp,chat:&str,messages:&[super::super::EngineMessage])->Result<Vec<CompletedMessage>,RuntimeError>{

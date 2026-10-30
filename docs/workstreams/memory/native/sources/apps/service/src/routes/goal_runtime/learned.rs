@@ -117,6 +117,7 @@ async fn handle(State(state):State<Arc<ServiceState>>,Json(input):Json<Request>)
    }
   };
   if input.chat_id.is_empty()||input.chat_id.len()>512||input.chat_id.chars().any(char::is_control){return Err("Invalid chat policy key".into())}
+  owner.verify_chat(store,&input.chat_id)?;
   let scope=owner.scope();let scope_hash=scope.key().map_err(|e|e.to_string())?;
   let binding_hash=veyra_memory::fingerprint(&(scope,owner.revision(),owner.instance(),owner.directory(),&input.chat_id)).map_err(|e|e.to_string())?;
   let mut guard=state.goals.store.lock().map_err(|_|"Goal store unavailable")?;

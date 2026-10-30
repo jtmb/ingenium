@@ -99,12 +99,17 @@ $custody=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'prompt-custody.appen
 ReplaceOnce 'apps/web/src/features/workbench/promptOriginal.ts' 'export function exportPromptOriginals(' ($custody+[char]10+'export function exportPromptOriginals(')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' 'import { MemoryPanel } from "./MemoryPanel";' ('import { MemoryPanel } from "./MemoryPanel";'+[char]10+'import { LearnedMemoryControls } from "./native-memory/LearnedMemoryControls";')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' '            <MemoryPanel ' ('            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>' +[char]10+'            <MemoryPanel ')
-$manifest=[ordered]@{native_revision=$revision;projects_proposal='7250f55f92e6554c47b945a529fbbbe7de114c06';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
- owner='Root/Projects';status='pending-frozen-shared-contract';actual_export=$null;
+$manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e1cba953c1e68b47529aac1a276';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
+ owner='Root/Projects';status='bound-in-source-awaiting-Native-integration-review';actual_export='OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage';
+ provider_source='docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs';
+ provider_source_sha256='af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215';
+ route_contract='docs/workstreams/projects/native-local-v6/local-route-contract.json';
+ route_contract_sha256='cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f';
  consumer='crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent';
  superseded='eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply';
  contract='ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output';
- apply_gate='Root must replace provisional client call with actual frozen Projects export and verify scope/order/bounds before Native apply/build';
+ authority='Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority';
+ apply_gate='Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance';
 };operations=$ops}
 foreach($path in ($ops.path|Select-Object -Unique)){
  $post=ReadPinned $path

@@ -51,16 +51,16 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/goal_runtime/learned.rs",
     "target": "apps/service/src/routes/goal_runtime/learned.rs",
     "required_preimage": "absent",
-    "sha256": "d5a5494294be8d43320661c432202c9646c1af979679fb2b1345cddb77ac5958",
-    "bytes": 11218,
+    "sha256": "e1f7f4667a26ad9ddba4dc5f467d9b869af45d259c436ff23e4a2f6cf0a2a8bc",
+    "bytes": 11263,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/native_memory_owner.rs",
     "target": "crates/adapters/src/native_memory_owner.rs",
     "required_preimage": "absent",
-    "sha256": "8cd22f5afc38621e97fc01c4563db9465acb20e16e1deac567dd9e653eff7d8e",
-    "bytes": 3289,
+    "sha256": "71e2ca370520e2596e48da159cb513e75557f3c973f0da57d9d9d97f0cd68e99",
+    "bytes": 3758,
     "transform": null
   },
   {
@@ -75,8 +75,8 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "required_preimage": "absent",
-    "sha256": "c704c59501cd7f6b1e2a1ebfc2c64ff327adb33eb4512781c25f657c4a8c7b44",
-    "bytes": 6210,
+    "sha256": "dc215af0dd508abfa79848f40679e3359cac7851f73a63fe1b8389d1dac97d69",
+    "bytes": 7716,
     "transform": null
   },
   {
@@ -94,8 +94,8 @@
     "sha256": "e43c847385614225977bb5c30581f0535e1ee4943ef744a666b1a4db5a5023fc",
     "bytes": 5481,
     "transform": {
-      "find": "../controller.mjs",
-      "replacement": "../memoryController.mjs"
+      "replacement": "../memoryController.mjs",
+      "find": "../controller.mjs"
     }
   },
   {

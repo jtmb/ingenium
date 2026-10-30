@@ -3,7 +3,7 @@
 Status: **unapplied and uncompiled**. This is a source proposal for the existing
 Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
-Required Projects proposal: 7250f55f92e6554c47b945a529fbbbe7de114c06.
+Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
 proposal.json contains 24 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
@@ -34,14 +34,24 @@ declared import transformation. Preparation never changes a Native checkout.
 
 ## Bounded source behavior
 
-Root reconciliation required: Projects now owns the ONE scoped bounded-recent
-OpenCode client extension. The memory-specific client insertion from eddbd5f2
-is superseded and removed from this proposal. The existing LiveRuntime wrapper
-is its consumer. Root must bind its annotated provisional call to the actual
-frozen Projects export and verify scope, latest-desc first-page ordering,
-overfill refusal and chronological conversion before Native apply/build.
-No guessed replacement API or second client method is introduced. The exact-ID
-refresh implementation remains in the memory adapter.
+The shared-client source overlap is reconciled against Projects 8b18318e.
+LiveRuntime calls the actual crate-visible local_recent_messages(chat,None,32)
+decoder, ignores its cursor and reverses the descending page exactly once.
+It refuses overfill and returned canonical projections above 4 MiB. No second
+OpenCodeClient implementation is added. Private source reads borrow the real
+held ProjectStore and sealed binding in the shared require_local_engine current
+closure, including require_local_session's original committed session reference,
+before and after reads. Regular Project records and execution scope
+also remain checked. Decoder output alone is never an authority grant.
+Exact-ID refresh stays bounded and rechecks the same owners around each read.
+
+Verified immutable provider SHA-256:
+af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215.
+Verified closed local route contract SHA-256:
+cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f.
+The existing protected middleware and finite route contract remain authority;
+memory adds no wildcard gateway, remote route or arbitrary upstream proxy.
+The eddbd5f2 memory-specific client insertion remains superseded; do not apply.
 
 Canonical OpenCode requests one latest page of at most 32 messages, never
 follows a cursor and never uses unbounded context/history. Capture requires
@@ -74,8 +84,9 @@ Remaining integration gates, not claimed:
 
 1. Review/apply combined Projects and memory proposals in the owned Native
    integration checkout. The authorized Native owner updates the lockfile,
-   binds the actual frozen shared bounded-recent export, compiles Rust,
-   typechecks and renders React.
+   verifies the combined shared-client/owner module wiring, compiles Rust,
+   typechecks and renders React. The actual export is bound in source; this
+   worker has not compiled or exercised it.
 2. Connect concrete Goals.capture_learning/accept_learning methods to the
    existing generation/model owner. No model dispatcher or scheduler is added.
 3. Mount projectless prompt originals only when their original owner supports

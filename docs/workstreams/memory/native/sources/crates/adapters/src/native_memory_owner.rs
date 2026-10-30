@@ -43,4 +43,13 @@ impl NativeMemoryOwner{
  pub fn directory(&self)->&str{&self.directory}
  pub fn instance(&self)->&str{&self.instance}
  pub fn revision(&self)->u64{self.revision}
+ pub fn verify_chat(&self,store:&ProjectStore,chat:&str)->Result<(),String>{
+  self.verify(store)?;
+  if let Owner::Private(binding)=&self.owner{
+   store.require_local_session(&binding.owner().workspace_id,chat).map_err(|_|"Chat lacks its original committed private-session reference")?;
+  }Ok(())
+ }
+ pub(crate) fn private_binding(&self)->Option<&LocalWorkspaceBinding>{
+  match &self.owner{Owner::Private(binding)=>Some(binding.as_ref()),Owner::Project(_)=>None}
+ }
 }
