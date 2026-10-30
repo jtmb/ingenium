@@ -67,8 +67,8 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/memory.rs",
     "target": "apps/service/src/inference/provider_queue/memory.rs",
     "required_preimage": "absent",
-    "sha256": "0952e7fd3fcf8a327a49ec54ed7baba8d3a05d133ee8536e7fe7cbd56cc5fd9e",
-    "bytes": 6858,
+    "sha256": "c9c04590e7834898d3c33cbdc7154397616028feff1f64ad8e96bae2e2032eb8",
+    "bytes": 7204,
     "transform": null
   },
   {
@@ -123,8 +123,8 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/acquisition/memory.rs",
     "target": "apps/service/src/routes/provider/acquisition/memory.rs",
     "required_preimage": "absent",
-    "sha256": "3c7d68a9f5fa0cb85a34d5bd8a83d2906d72e02d7f29d34978f73d4bac89e789",
-    "bytes": 24338,
+    "sha256": "7e5f09b2749cd14f53ef6a8451a8eec819af3b8956460607f4e5f869947097d1",
+    "bytes": 30781,
     "transform": null
   },
   {
@@ -214,8 +214,8 @@
     "sha256": "e43c847385614225977bb5c30581f0535e1ee4943ef744a666b1a4db5a5023fc",
     "bytes": 5481,
     "transform": {
-      "replacement": "../memoryController.mjs",
-      "find": "../controller.mjs"
+      "find": "../controller.mjs",
+      "replacement": "../memoryController.mjs"
     }
   },
   {

@@ -3,33 +3,33 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
+    "owner": "Root/Projects",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
     "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
-    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
     "memory_purpose": {
-      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
-      "audit": "closed-synthesis-purpose.md",
-      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
-      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN",
       "open_validation": [
         "combined actual Native compile and Task regressions",
         "actual same-slot/authentication/retirement/lease negative controls",
         "Memory phase-owner inclusion in actual global shutdown capture",
         "actual productivity and Project/private generation acceptance"
       ],
-      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route"
+      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
+      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
+      "audit": "closed-synthesis-purpose.md",
+      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN"
     },
-    "owner": "Root/Projects",
-    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
     "status": "bound-in-source-awaiting-Native-integration-review",
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
     "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
     "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill"
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output"
   },
   "operations": [
     {
@@ -727,6 +727,54 @@
       "preimage_sha256": "9c2e4472c3117e824d1f6d88c5405909e6a1bed4850f8daa11dc38b10b432e99",
       "find": "                    let _ = tokio::task::spawn_blocking(move || {\n                        let _serial = serial;\n                        let Ok(_guard) = state.live_agent.hook_serial.lock() else { return; };\n                        if let Ok(intents) = state.live_agent.hooks.all_pending() {\n                            for mut intent in intents { let _ = progress(&state, &mut intent); }\n                        }\n                    }).await;",
       "replacement": "                    let owner=state.clone();\n                    let cursor=std::mem::take(&mut memory_cursor);\n                    let captured=tokio::task::spawn_blocking(move || {\n                        let _serial = serial;\n                        let mut cursor=cursor;\n                        let Ok(_guard) = owner.live_agent.hook_serial.lock() else { return (cursor,None); };\n                        if let Ok(intents) = owner.live_agent.hooks.all_pending() {\n                            for mut intent in intents { let _ = progress(&owner, &mut intent); }\n                        }\n                        let original=memory_learning::capture(&owner,&mut cursor);\n                        (cursor,original)\n                    }).await;\n                    if let Ok((cursor,original))=captured {\n                        memory_cursor=cursor;\n                        // All synchronous guards have dropped. This is the\n                        // original productivity worker, not a second scheduler.\n                        if let Some(original)=original { memory_learning::generate(state,original).await; }\n                    }"
+    },
+    {
+      "path": "apps/service/src/routes/provider/history.rs",
+      "preimage_sha256": "c89280a5406b12907a9565f16a891b052f6abf2219f355e9c9cac156dc373f76",
+      "find": "    requests: Vec<Arc<acquisition::ProviderAcquisition>>,",
+      "replacement": "    requests: Vec<Arc<acquisition::ProviderAcquisition>>,\n    memory_phases: Vec<(Arc<acquisition::ProviderAcquisition>,Arc<crate::inference::owned_transport::CapturedNativePhases>)>,"
+    },
+    {
+      "path": "apps/service/src/routes/provider/history.rs",
+      "preimage_sha256": "c89280a5406b12907a9565f16a891b052f6abf2219f355e9c9cac156dc373f76",
+      "find": "        let history = Self {",
+      "replacement": "        let requests=acquisition::history::records(provider)?;\n        let (_,_,deadline)=native.cancellation_census().map_err(unavailable)?;\n        // Actual joined queue/slot/retirement census precedes this capture.\n        // No request setup/native effect can be admitted into a captured book.\n        let mut memory_phases=Vec::new();\n        for record in &requests {\n            if record.is_memory()? {\n                memory_phases.push((record.clone(),acquisition::memory::capture_phases(record,deadline)?));\n            }\n        }\n        let history = Self {"
+    },
+    {
+      "path": "apps/service/src/routes/provider/history.rs",
+      "preimage_sha256": "c89280a5406b12907a9565f16a891b052f6abf2219f355e9c9cac156dc373f76",
+      "find": "            requests: acquisition::history::records(provider)?,",
+      "replacement": "            requests, memory_phases,"
+    },
+    {
+      "path": "apps/service/src/routes/provider/history.rs",
+      "preimage_sha256": "c89280a5406b12907a9565f16a891b052f6abf2219f355e9c9cac156dc373f76",
+      "find": "        let mut identities = Vec::with_capacity(actual.len());",
+      "replacement": "        let memory=actual.iter().filter_map(|record|match record.is_memory(){\n            Ok(true)=>Some(Ok(record)),Ok(false)=>None,Err(error)=>Some(Err(error))\n        }).collect::<Result<Vec<_>,GatewayError>>()?;\n        if memory.len()!=self.memory_phases.len() || memory.iter().zip(&self.memory_phases)\n            .any(|(actual,(retained,_))|!Arc::ptr_eq(actual,retained)){\n            return Err(GatewayError::InvalidCorrelation);\n        }\n        for (record,captured) in &self.memory_phases {\n            acquisition::memory::check_captured_phases(record,captured)?;\n        }\n        let mut identities = Vec::with_capacity(actual.len());"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "mod task_retirement;",
+      "replacement": "mod task_retirement;\n#[cfg(windows)]\npub(in crate::routes) use acquisition::memory::settle_shutdown as settle_memory_shutdown;"
+    },
+    {
+      "path": "apps/service/src/routes/model_operations.rs",
+      "preimage_sha256": "a331a516c1a43fd10ce8c55cbfc0412a1ac7685232405f66fe43953f2076ec12",
+      "find": "    original.settle_task_progress(state, deadline).await?;",
+      "replacement": "    original.settle_task_progress(state, deadline).await?;\n    #[cfg(windows)]\n    super::provider::settle_memory_shutdown(state,original).await.map_err(|_|\"Captured Memory retirement incomplete\")?;"
+    },
+    {
+      "path": "apps/service/src/routes/model_operations.rs",
+      "preimage_sha256": "a331a516c1a43fd10ce8c55cbfc0412a1ac7685232405f66fe43953f2076ec12",
+      "find": "    // Attempt every irreversible closure, including when another registry poisons.",
+      "replacement": "    // Attempt every irreversible closure, including when another registry poisons.\n    #[cfg(windows)]\n    let memory=match original {\n        Some(original)=>state.provider.try_lock().map_err(|_|\"Provider Memory capture unavailable\".to_string())\n            .and_then(|provider|provider.capture_memory_shutdown(state,original).map_err(|_|\"Memory phase capture unavailable\".to_string())),\n        None=>Ok(()),\n    };\n    #[cfg(not(windows))]\n    let memory:Result<(),String>=Ok(());"
+    },
+    {
+      "path": "apps/service/src/routes/model_operations.rs",
+      "preimage_sha256": "a331a516c1a43fd10ce8c55cbfc0412a1ac7685232405f66fe43953f2076ec12",
+      "find": "    if prepared.is_err()\n        || enrollment.is_err()",
+      "replacement": "    if memory.is_err()\n        || prepared.is_err()\n        || enrollment.is_err()"
     }
   ]
 }

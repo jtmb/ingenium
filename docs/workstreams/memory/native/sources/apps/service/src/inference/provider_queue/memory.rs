@@ -24,6 +24,12 @@ impl MemoryBook{
  }
 }
 impl ProviderQueue{
+ /// Metadata view of the ORIGINAL worker owners. Not admission or cleanup
+ /// proof; callers must join each actual retained handle outside Book/Serial.
+ pub(crate) fn memory_shutdown_workers(&self)->Result<Vec<Arc<QueuedMemory>>,GatewayError>{
+  let book=self.book.try_lock().map_err(metadata_contention)?;
+  Ok(book.memory.entries.clone())
+ }
  /// The original service validates the sealed admission immediately beforehand
  /// under Serial; no source/store/native I/O occurs while Book is held.
  pub(crate) fn enroll_memory(&self,admission:Arc<MemorySynthesisAdmission>,cancellation:CancellationHandle)->Result<Arc<QueuedMemory>,GatewayError>{

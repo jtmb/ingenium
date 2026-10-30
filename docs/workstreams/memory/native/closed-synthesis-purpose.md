@@ -91,8 +91,23 @@ uncertain native cleanup retains the original and fences the shared queue.
 
 Full-chain history includes both purposes; Task-only history skips Memory
 without fabricating a Task row. Complete transport census uses tagged identities.
-Root must independently review Memory NativePhaseBook/RetirementBudget inclusion
-in its actual global shutdown capture and closure workflow. That gate is open.
+Original shutdown preparation now captures the retained Memory phase owner
+against the actual ShutdownOriginal before model stop, retains the exact parent
+and phase capture, then signals original cancellation. In-flight cleanup uses
+that parent's existing compare_resume_progress against the reserved real model
+original, rather than bypassing the busy ModelWork owner. The original shutdown
+admission flow joins the same queue workers outside Serial before final cleanup
+eligibility. Waiting no-native entries are joined too; a model/shutdown fence is
+rechecked before any queued entry can acquire a new utility lease or original.
+
+Original ProviderHistory retains those same Memory phase captures (or captures
+already-retired historical books), checking complete mixed-chain membership and
+capture identity/deadline. Capture permanently closes further setup in the
+original book. Repeated inspection reuses its old cap and cannot renew it.
+Capture contention, unpublished setup, an incompatible deadline or uncertain
+native cleanup fails closed and retains the original; no cleanup receipt is
+fabricated. Root must qualify the actual combined global shutdown/closure
+workflow; that runtime gate remains open.
 The original model owner must also enforce its actual context/token budget
 without truncating source, and qualify the existing backend's closed JSON
 request/response options. Byte/elapsed/output caps alone do not prove model fit.

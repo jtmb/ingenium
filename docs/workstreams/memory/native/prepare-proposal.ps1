@@ -483,6 +483,55 @@ $newWorker=@'
                     }
 '@
 ReplaceOnce 'apps/service/src/routes/live_agent/lifecycle.rs' $oldWorker $newWorker
+ReplaceOnce 'apps/service/src/routes/provider/history.rs' '    requests: Vec<Arc<acquisition::ProviderAcquisition>>,' ('    requests: Vec<Arc<acquisition::ProviderAcquisition>>,'+[char]10+'    memory_phases: Vec<(Arc<acquisition::ProviderAcquisition>,Arc<crate::inference::owned_transport::CapturedNativePhases>)>,')
+ReplaceOnce 'apps/service/src/routes/provider/history.rs' '        let history = Self {' @'
+        let requests=acquisition::history::records(provider)?;
+        let (_,_,deadline)=native.cancellation_census().map_err(unavailable)?;
+        // Actual joined queue/slot/retirement census precedes this capture.
+        // No request setup/native effect can be admitted into a captured book.
+        let mut memory_phases=Vec::new();
+        for record in &requests {
+            if record.is_memory()? {
+                memory_phases.push((record.clone(),acquisition::memory::capture_phases(record,deadline)?));
+            }
+        }
+        let history = Self {
+'@
+ReplaceOnce 'apps/service/src/routes/provider/history.rs' '            requests: acquisition::history::records(provider)?,' '            requests, memory_phases,'
+$phaseCensus=@'
+        let mut identities = Vec::with_capacity(actual.len());
+'@
+ReplaceOnce 'apps/service/src/routes/provider/history.rs' $phaseCensus @'
+        let memory=actual.iter().filter_map(|record|match record.is_memory(){
+            Ok(true)=>Some(Ok(record)),Ok(false)=>None,Err(error)=>Some(Err(error))
+        }).collect::<Result<Vec<_>,GatewayError>>()?;
+        if memory.len()!=self.memory_phases.len() || memory.iter().zip(&self.memory_phases)
+            .any(|(actual,(retained,_))|!Arc::ptr_eq(actual,retained)){
+            return Err(GatewayError::InvalidCorrelation);
+        }
+        for (record,captured) in &self.memory_phases {
+            acquisition::memory::check_captured_phases(record,captured)?;
+        }
+        let mut identities = Vec::with_capacity(actual.len());
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod task_retirement;' ('mod task_retirement;'+[char]10+'#[cfg(windows)]'+[char]10+'pub(in crate::routes) use acquisition::memory::settle_shutdown as settle_memory_shutdown;')
+$shutdownSettle='    original.settle_task_progress(state, deadline).await?;'
+ReplaceOnce 'apps/service/src/routes/model_operations.rs' $shutdownSettle ($shutdownSettle+[char]10+'    #[cfg(windows)]'+[char]10+'    super::provider::settle_memory_shutdown(state,original).await.map_err(|_|"Captured Memory retirement incomplete")?;')
+$preparation=@'
+    // Attempt every irreversible closure, including when another registry poisons.
+'@
+ReplaceOnce 'apps/service/src/routes/model_operations.rs' $preparation @'
+    // Attempt every irreversible closure, including when another registry poisons.
+    #[cfg(windows)]
+    let memory=match original {
+        Some(original)=>state.provider.try_lock().map_err(|_|"Provider Memory capture unavailable".to_string())
+            .and_then(|provider|provider.capture_memory_shutdown(state,original).map_err(|_|"Memory phase capture unavailable".to_string())),
+        None=>Ok(()),
+    };
+    #[cfg(not(windows))]
+    let memory:Result<(),String>=Ok(());
+'@
+ReplaceOnce 'apps/service/src/routes/model_operations.rs' ('    if prepared.is_err()'+[char]10+'        || enrollment.is_err()') ('    if memory.is_err()'+[char]10+'        || prepared.is_err()'+[char]10+'        || enrollment.is_err()')
 $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e1cba953c1e68b47529aac1a276';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
  owner='Root/Projects';status='bound-in-source-awaiting-Native-integration-review';actual_export='OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage';
  provider_source='docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs';
