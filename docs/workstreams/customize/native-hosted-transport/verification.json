@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-30",
+  "owner": "01a18935-0723-7cc0-9ea1-5e70f5627cc5",
+  "status": "Concrete source proposals for Root review; not installed or full-goal complete",
+  "checks": {
+    "transportProofAndActualSql": {
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "network": false,
+      "database": "node:sqlite in-memory; exact Rust SQL constants"
+    },
+    "compatibilityAndActualCoreCanonical": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "portableWebStrict": {
+      "files": 9,
+      "inMemoryCompatibilityOverrides": 5,
+      "diagnostics": 0,
+      "emitted": 0
+    },
+    "privateNodeStandalone": {
+      "ownFiles": 3,
+      "ownDiagnostics": 0,
+      "combinedPass": false,
+      "externalDiagnostics": 3,
+      "externalSource": "Worker5 proposed hosted-governance.ts:61",
+      "reason": "Unknown narrowing at Object.keys(value) and value[key]; Root/Worker5 must resolve, never suppress"
+    },
+    "nativeOwnerPatch": {
+      "passed": true,
+      "mode": "Windows Git apply --check only"
+    },
+    "nodeProofPatch": {
+      "passed": true,
+      "mode": "Root APP WSL Git apply --check only"
+    },
+    "portableCompatPatch": {
+      "passed": false,
+      "reason": "Five Native portable target files absent; apply accepted063 source first; no integration mutation attempted"
+    },
+    "rust": {
+      "compiled": false,
+      "suppliedUnitCases": 6,
+      "actualCoreGoldenVectors": 6
+    },
+    "fullApiTypes": false,
+    "composedNativeUI": false,
+    "actualAuthTlsOrRuntime": false
+  },
+  "sourceContracts": {
+    "frozenNode": {
+      "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/contract-v1.md",
+      "sha256": "74b8df2d6519f030d813668551ebeb3e6b22ca899ce25e6318f9ea32576b42d6"
+    },
+    "canonicalProvenance": {
+      "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts",
+      "sourceSha256": "54f2d84988e3f9754c114fbe337a6ef73f201e8e5eea57231689564418265993",
+      "vectors": 6,
+      "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original"
+    }
+  },
+  "integrationGates": [
+    "Root implements actual Node private paired Native credential custody/explicit actor-bound pairing ceremony; no body-derived verifier",
+    "Root installs synchronous verifier with actual bounded paired preflight and current original/custody checks",
+    "Root wires utility custody checks into actual Project/library/full-restore/grant/profile mutation owners",
+    "Root shared Node/Core SQL125 and IPC/auth policy integration/security review",
+    "Native Rust compile/semantic/lifecycle tests; exact composed Native UI cases"
+  ],
+  "actualEnrollmentGap": "No existing Node private outbound paired-Native credential custody or actor-binding ceremony. Root must actually redeem/store the real custodian-bound Native pairing, then compose the supplied fixed TLS reader/verifier; metadata/default service tokens cannot substitute.",
+  "preservedFullScope": [
+    "actual authenticated archive/restore/enablement",
+    "all proposal/CAS/source permission/dual-lock semantics",
+    "qualified actual synthesis and owned ready runtime; frozen adapter does not execute it",
+    "persisted activation and fresh-session use",
+    "Windows/cluster/visual/workflow acceptance"
+  ],
+  "protected": [
+    "Actual Native and APP integration sources/indexes",
+    "credentials/real accounts/hosts/models/engines/runtime",
+    "prior unique evidence",
+    "Root-owned shared fixture caches"
+  ],
+  "cleanup": {
+    "generatedDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "linuxRecoveryClaimed": false,
+    "windowsRecoveryClaimed": false,
+    "retained": "Canonical current proposals, minimal patches, recipes, fixtures and unique source verification receipts",
+    "consumer": "Root source/security review, integration and focused acceptance; keep minimal canonical proposals, patches, source tests and unique receipts"
+  },
+  "observedRepairs": [
+    "Compatibility strict checker caught additive submit verification signature; corrected and portable strict check passed",
+    "Expanded exact-SQL fixture extractor initially required declaration whitespace; source declarations formatted without SQL behavior change;20 cases passed"
+  ],
+  "overallCompletionClaimed": false
+}

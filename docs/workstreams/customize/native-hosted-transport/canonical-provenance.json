@@ -1,0 +1,6 @@
+{
+  "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts",
+  "sourceSha256": "54f2d84988e3f9754c114fbe337a6ef73f201e8e5eea57231689564418265993",
+  "vectors": 6,
+  "algorithm": "Actual frozen Core canonical/payloadHash exports; exact strings, code-unit key ordering, whole original"
+}

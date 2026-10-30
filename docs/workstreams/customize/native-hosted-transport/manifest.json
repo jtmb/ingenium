@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "mode": "SOURCE PROPOSALS ONLY; no integration writes, builds or credentials",
+  "owner": "01a18935-0723-7cc0-9ea1-5e70f5627cc5",
+  "files": [
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/apps/service/src/routes/remote_control/hosted_governance.rs",
+      "realm": "Native",
+      "target": "apps/service/src/routes/remote_control/hosted_governance.rs",
+      "precondition": "absent",
+      "postSha256": "f6cbf7c0c1c8c938438a9d6d37911d92d20d6df49a3fb450c07f128eb15fb9ae",
+      "bytes": 17696
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/apps/web/src/platform/hostedGovernance.ts",
+      "realm": "Native",
+      "target": "apps/web/src/platform/hostedGovernance.ts",
+      "precondition": "absent",
+      "postSha256": "178c0048359afa84171361f203a33496075cfa803c8bdc99bc2358cc2fe75d13",
+      "bytes": 7497
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/account_vault/node_hosted.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/account_vault/node_hosted.rs",
+      "precondition": "absent",
+      "postSha256": "e7b56c960213588f4aaeb89760d4bcc3d43cd3fea3c1631f4388d968a203b802",
+      "bytes": 11681
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted.rs",
+      "precondition": "absent",
+      "postSha256": "18d259a07a685b6890a992c56d589007d43b8b54c0bf10c29432a2202fa94229",
+      "bytes": 17124
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/attestation.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted/attestation.rs",
+      "precondition": "absent",
+      "postSha256": "7663d24dff8f24a26fde9fc2dfe98131765d8710083f33c09aaef39f6bcb7781",
+      "bytes": 3162
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/canonical-vectors.json",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted/canonical-vectors.json",
+      "precondition": "absent",
+      "postSha256": "e4f0c838a5aa111ce261e21e799c50067cbc322560e4c28990d3aae4c16d9050",
+      "bytes": 2657
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/contracts.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted/contracts.rs",
+      "precondition": "absent",
+      "postSha256": "5e932575138714afb44505f778a22c2018cd42e7fd1fa841d49c1b5c8ef11c55",
+      "bytes": 7972
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/remote_control/hosted/wire.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/hosted/wire.rs",
+      "precondition": "absent",
+      "postSha256": "a9dff7795f470abf48243f60bd45a6a61ac54c06bca808fff4fee506ed2b5d5b",
+      "bytes": 9581
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/crates/adapters/src/utility_operations/hosted.rs",
+      "realm": "Native",
+      "target": "crates/adapters/src/utility_operations/hosted.rs",
+      "precondition": "absent",
+      "postSha256": "93303131d80531167cd49205aef97a91b34491aef30b5be83035900408985c4e",
+      "bytes": 8936
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "realm": "APP",
+      "target": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "precondition": "absent",
+      "postSha256": "e5355038383a02b57a78c536301d8a3d4b40dded26d7f679bcdd1a9933dc6c40",
+      "bytes": 5534
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/services/ingenium-api/lib/paired-native-proof.ts",
+      "realm": "APP",
+      "target": "services/ingenium-api/lib/paired-native-proof.ts",
+      "precondition": "absent",
+      "postSha256": "61e88317e55c16db2fe708e60100ae6319c94817112b42ad229dd2bd9355c109",
+      "bytes": 2303
+    },
+    {
+      "source": "docs/workstreams/customize/native-hosted-transport/files/services/ingenium-api/lib/paired-native-reader.ts",
+      "realm": "APP",
+      "target": "services/ingenium-api/lib/paired-native-reader.ts",
+      "precondition": "absent",
+      "postSha256": "3c91ecf77ae94520ccdba3d20a1aa960ce804099482c0584ee087e9eae37d840",
+      "bytes": 3306
+    }
+  ],
+  "changes": [
+    {
+      "realm": "Native",
+      "target": "crates/adapters/src/utility_operations.rs",
+      "preSha256": "42f4c794d30747085c0da6aa5e7906a396049866934fc36a4a09d771ab5109a9",
+      "postSha256": "9b401acfa0b51b68c7b14ba0f7f9dcb9bc219d9787f6c6b18d491f4ec22a4713"
+    },
+    {
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control.rs",
+      "preSha256": "d119e036f285fecdce616a64b8b2b906d33c153695241cc359a7959b5c0238f2",
+      "postSha256": "207686f973113f290397fd97288711a56065b3d9fdd5ea16eadf5b92a929ef33"
+    },
+    {
+      "realm": "Native",
+      "target": "crates/adapters/src/remote_control/client.rs",
+      "preSha256": "558ebd98ce6184ddbc18f4cf6a06afd0329404e2558d1a7d87b46dd36b1f77a4",
+      "postSha256": "20aee7c77218cc107451829234daa16650a97b9ee93c7e2bdb645ce720c330e4"
+    },
+    {
+      "realm": "Native",
+      "target": "crates/adapters/src/access_profiles.rs",
+      "preSha256": "9aedfcf99727d6a8faa69372f9e52fffec3490b9825626953df50f5d29bf2738",
+      "postSha256": "2954cf5770b87ce134514cc91107a846fde777f0ba279bc3d05990aca7821828"
+    },
+    {
+      "realm": "Native",
+      "target": "crates/adapters/src/account_vault.rs",
+      "preSha256": "94bdebbe72abeea0d7f4e52dde3694af36998fbfb897e776280de27dc4fa3d00",
+      "postSha256": "f90e045cfe3e3cdb48103efc9d78e108da2698046a0ebcc4c9f4a29748a3b1f1"
+    },
+    {
+      "realm": "Native",
+      "target": "apps/service/src/routes/remote_control.rs",
+      "preSha256": "df0b63bf3314c2d79a9484a1becef36aef70c1631947ce438e4e68d1d0073086",
+      "postSha256": "140cb70522baf6f463840ac18857c7e48d4de58e22a61eb943c2ded47ca3dd96"
+    },
+    {
+      "realm": "Native",
+      "target": "apps/service/src/routes/remote_control/proxy.rs",
+      "preSha256": "4e6f49bcd5e7059d244f9fb5708f64d56b73ac7cc72b9718d68723dd3eb51331",
+      "postSha256": "e098380344d65b355a3b2b7d8a72acb864a79ffc6075151dd95a1f4a92bdcc17"
+    },
+    {
+      "realm": "Native",
+      "target": "apps/web/src/platform/gateway.ts",
+      "preSha256": "fab30d1bdd9ce66030f5b908c9d8b8761dea0765b4da208e5f017d40983a943d",
+      "postSha256": "4f2e547a2ac059292e32fbddba91d20b6de328dfc1c405e77417341a6943e419"
+    }
+  ],
+  "compatibility": [
+    {
+      "target": "apps/web/src/features/customize/hosted-governance/contracts.ts",
+      "preSha256": "16a0b24125a8e5fd9853b35bde53ff184f1202be0306406cfb8c4ebd3e2266b2",
+      "postSha256": "07ae0d7da5c3d40ba9ed94851e8b9982d668850079c285ee694cbd603072d437"
+    },
+    {
+      "target": "apps/web/src/features/customize/hosted-governance/client.ts",
+      "preSha256": "93558bb194760b27c93a6fc4d856af301aba671860dd6d33990b845ed9ce7b4b",
+      "postSha256": "993b42ecda77d444d057cc0bb49a06eb6b8c4bc58d67e37486ec43ae1228aa6a"
+    },
+    {
+      "target": "apps/web/src/features/customize/hosted-governance/decoders.ts",
+      "preSha256": "accf94239e733f16e2e90f68d275ee3506e56157ad0850376237a1229976c747",
+      "postSha256": "64d87c10eaae365607da462e04f83135b87c384d2a1095cb01af9c18eb64aaef"
+    },
+    {
+      "target": "apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx",
+      "preSha256": "21171207713817b3516042d34db9b7255896dfe453e8fa7fb467fa01016b1177",
+      "postSha256": "401a64a8c2da831d6f6150105d5af1cf6681a65ec35be0d69cc0acb3cb3efebb"
+    },
+    {
+      "target": "apps/web/src/features/customize/hosted-governance/verification.ts",
+      "preSha256": "78c2b9a6da437c7c57215ae9630c1798084fe079268d4a5682976dbcc4ba73bd",
+      "postSha256": "1dd556d6b1cf561feefe8d3fd428e174640f157ded1133b3ad69788fe52d3fa3"
+    }
+  ],
+  "frozenNodeContract": {
+    "source": "parallel/rust-api/docs/workstreams/rust-api/hosted-governance/contract-v1.md",
+    "sha256": "74b8df2d6519f030d813668551ebeb3e6b22ca899ce25e6318f9ea32576b42d6"
+  },
+  "patches": {
+    "native-owner-proposal.patch": "6a47860c91e53894e04c9016be417607744aa1d83a54022c5f4366a27b28c945",
+    "node-proof-proposal.patch": "ec539d707a863290252ea0b038d4aa361bbb05ba24dbb72cc8fdcf760e0c8c26",
+    "portable-compat.patch": "7abf53d2d35bc97cd2e0a5d324af5b60c2fd56dbf4d4ebd53b9c3ac950b92807"
+  },
+  "generatedDisposableOutputs": [],
+  "removedPaths": [],
+  "removedBytes": 0,
+  "prerequisites": [
+    "Root implements actual Node private paired Native credential custody/explicit actor-bound pairing ceremony; no body-derived verifier",
+    "Root installs synchronous verifier with actual bounded paired preflight and current original/custody checks",
+    "Root wires utility custody checks into actual Project/library/full-restore/grant/profile mutation owners",
+    "Root shared Node/Core SQL125 and IPC/auth policy integration/security review",
+    "Native Rust compile/semantic/lifecycle tests; exact composed Native UI cases"
+  ],
+  "retainedConsumer": "Root source/security review, integration and focused acceptance; keep minimal canonical proposals, patches, source tests and unique receipts"
+}

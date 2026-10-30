@@ -1,0 +1,74 @@
+[
+  {
+    "value": null,
+    "canonical": "null",
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "value": true,
+    "canonical": "true",
+    "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  {
+    "value": [
+      -1,
+      0,
+      9007199254740991
+    ],
+    "canonical": "[-1,0,9007199254740991]",
+    "sha256": "3f93476c27c599c8ca468b1576a692ac48749a820ba00d0a9c21872ffeeef98d"
+  },
+  {
+    "value": {
+      "": false,
+      "𐀀": true
+    },
+    "canonical": "{\"𐀀\":true,\"\":false}",
+    "sha256": "b5a5b511e2be4c77b0653749cdbae4a3a4562618ca59bd5d88bda630ed1d08e2"
+  },
+  {
+    "value": {
+      "x": "line\r\n  \t\"参考🙂"
+    },
+    "canonical": "{\"x\":\"line\\r\\n  \\t\\\"参考🙂\"}",
+    "sha256": "f1dfdacf3580c76439cdf49314cd37dca8b799a4ee5723bb27f2e1f1c1e95666"
+  },
+  {
+    "value": {
+      "id": "operation",
+      "binding": {
+        "authorityId": "authority",
+        "connectionId": "connection",
+        "grantId": "grant",
+        "grantRevision": 1,
+        "epoch": "epoch",
+        "nativeLibraryId": "library",
+        "nativeServiceInstanceId": "native",
+        "hostedServiceInstanceId": "hosted",
+        "nativeProjectId": null,
+        "nativeProjectRevision": null,
+        "actorId": "user",
+        "installationId": "installation",
+        "hostedProjectId": "project",
+        "apiProject": "actual",
+        "visibility": "project"
+      },
+      "command": {
+        "op": "save",
+        "name": "release",
+        "filePath": "refs/参考.md",
+        "target": {
+          "id": "skill",
+          "revision": 3
+        },
+        "content": "body\r\n  ",
+        "extra": {
+          "always_apply": 0,
+          "files": "{\"refs/参考.md\":\"exact\\r\\n\"}"
+        }
+      }
+    },
+    "canonical": "{\"binding\":{\"actorId\":\"user\",\"apiProject\":\"actual\",\"authorityId\":\"authority\",\"connectionId\":\"connection\",\"epoch\":\"epoch\",\"grantId\":\"grant\",\"grantRevision\":1,\"hostedProjectId\":\"project\",\"hostedServiceInstanceId\":\"hosted\",\"installationId\":\"installation\",\"nativeLibraryId\":\"library\",\"nativeProjectId\":null,\"nativeProjectRevision\":null,\"nativeServiceInstanceId\":\"native\",\"visibility\":\"project\"},\"command\":{\"content\":\"body\\r\\n  \",\"extra\":{\"always_apply\":0,\"files\":\"{\\\"refs/参考.md\\\":\\\"exact\\\\r\\\\n\\\"}\"},\"filePath\":\"refs/参考.md\",\"name\":\"release\",\"op\":\"save\",\"target\":{\"id\":\"skill\",\"revision\":3}},\"id\":\"operation\"}",
+    "sha256": "5130cfc7c6f959f9ba5a118d5d5ee75b77e474e2baae4c082a3b1edd083e1bc1"
+  }
+]
