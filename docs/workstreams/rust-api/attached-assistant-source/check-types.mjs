@@ -1,0 +1,12 @@
+import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+const app=process.env.VEYRA_SOURCE_APP;if(!app)throw Error('VEYRA_SOURCE_APP required');
+const ts=createRequire(app+'/package.json')('typescript');
+const virtual=app+'/packages/ingenium-core/lib/tools/voice-assistant-source.ts';
+const source=readFileSync(new URL('./voice-assistant-source.ts',import.meta.url),'utf8');
+const options={strict:true,noUncheckedIndexedAccess:true,noEmit:true,incremental:false,skipLibCheck:true,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,moduleResolution:ts.ModuleResolutionKind.NodeNext,types:['node'],typeRoots:[app+'/node_modules/@types']};
+const host=ts.createCompilerHost(options),read=host.readFile.bind(host),exists=host.fileExists.bind(host);
+host.readFile=p=>p===virtual?source:read(p);host.fileExists=p=>p===virtual||exists(p);host.writeFile=()=>{throw Error('Compiler output forbidden');};
+const diagnostics=ts.getPreEmitDiagnostics(ts.createProgram([virtual],options,host));
+for(const d of diagnostics)console.log((d.file?.fileName??'')+(d.start===undefined?'':':'+(d.file.getLineAndCharacterOfPosition(d.start).line+1))+' '+ts.flattenDiagnosticMessageText(d.messageText,' '));
+if(diagnostics.length)process.exitCode=1;else console.log('PASS strict/noUncheckedIndexedAccess/noEmit against actual existing Core types; no runtime claim');
