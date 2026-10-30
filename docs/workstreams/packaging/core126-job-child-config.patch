@@ -1,0 +1,12 @@
+diff --git a/services/ingenium-api/lib/dot-v2/managed-job-child.mjs b/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
+--- a/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
++++ b/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
+@@ -10,7 +10,7 @@
+   if(!a||a.runId!==identity.runId||a.attemptId!==identity.attemptId||a.workspaceId!==environment.INGENIUM_WORKSPACE_ID||a.bindingHash!==environment.INGENIUM_STORAGE_MAPPING_HASH||a.runtimeId!==environment.INGENIUM_RUNTIME_ID||a.projectId!==environment.INGENIUM_PROJECT_ID||a.organizationId!==environment.INGENIUM_ORGANIZATION_ID||a.ownerUserId!==environment.INGENIUM_RUNTIME_OWNER_ID||!a.profileQualified||a.executable!=="opencode"||a.cwd!=="/workspace"||!a.credentialBoundToOriginalRun||typeof a.prompt!=="string"||!a.prompt.length||a.prompt.length>16000||sha(a.prompt)!==a.promptHash||typeof a.agent!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(a.agent)||typeof a.model!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\/[^\s\u0000-\u001f\u007f]{1,256}$/u.test(a.model))unavailable();
+   const names=["PATH","HOME","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_STATE_HOME","TMPDIR","INGENIUM_API_URL","INGENIUM_PROJECT","INGENIUM_PROJECT_ID","INGENIUM_ORGANIZATION_ID","INGENIUM_RUNTIME_ID","INGENIUM_RUNTIME_OWNER_ID","INGENIUM_WORKSPACE_ID","INGENIUM_STORAGE_MAPPING_HASH"];
+   const env=Object.fromEntries(names.filter(n=>environment[n]!==undefined).map(n=>[n,environment[n]]));
+-  Object.assign(env,{PWD:"/app",OPENCODE_CONFIG_DIR:"/home/appuser/.config/opencode/runtime",OPENCODE_CONFIG:"/usr/local/share/ingenium/opencode-managed/opencode.json",INGENIUM_WORKTREE:"/workspace",INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_RUNTIME_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId});
++  Object.assign(env,{PWD:"/app",OPENCODE_CONFIG_PROJECT_DISABLE:"1",OPENCODE_CONFIG_DIR:"/run/ingenium-runtime/job/config",OPENCODE_CONFIG:"/usr/local/share/ingenium/opencode-managed/job-opencode.json",INGENIUM_WORKTREE:"/workspace",INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_RUNTIME_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId});
+   const verifier=verifierFactory();
+   return await new Promise((resolve,reject)=>{
+    // Fixed binary/argv/cwd, no shell and no host/container selector from assignment or HTTP.

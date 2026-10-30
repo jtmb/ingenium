@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "classification": "official GitHub v2.0.11 source metadata/design evidence; not installed binary parity or native runtime qualification",
+  "releaseTarSha256": "59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13",
+  "binaryDownloaded": false,
+  "upstreamEdited": false,
+  "sourceFiles": [
+    {
+      "path": "packages/cli/src/server-process.ts",
+      "gitBlobSha1": "efb3ebae509c96d17e60574e1848befa3f2bbd14",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/cli/src/server-process.ts",
+      "lines": 207
+    },
+    {
+      "path": "packages/core/src/config.ts",
+      "gitBlobSha1": "a56c1119f91b028ee41acdb1d61b9ec5c8dd5c50",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/config.ts",
+      "lines": 375
+    },
+    {
+      "path": "packages/core/src/config/discovery.ts",
+      "gitBlobSha1": "71c0c03d9b79f2dc12708ac26c48b15493a013e6",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/config/discovery.ts",
+      "lines": 85
+    },
+    {
+      "path": "packages/core/src/config/plugin/agent.ts",
+      "gitBlobSha1": "7f96a3f22af57cac0a426bec7cf6094efb5baefd",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/config/plugin/agent.ts",
+      "lines": 213
+    },
+    {
+      "path": "packages/core/src/config/plugin/source.ts",
+      "gitBlobSha1": "ef1057abe82d7bf9b86037b9392418bfadfcbdc2",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/config/plugin/source.ts",
+      "lines": 198
+    },
+    {
+      "path": "packages/core/src/config/plugin/policy.ts",
+      "gitBlobSha1": "9e179d116e177e0341e9fe416256279a1423661e",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/config/plugin/policy.ts",
+      "lines": 46
+    },
+    {
+      "path": "packages/core/src/agent.ts",
+      "gitBlobSha1": "2130cb95d15b1e9917a23271fc93a405a8ee7671",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/agent.ts",
+      "lines": 135
+    },
+    {
+      "path": "packages/core/src/state.ts",
+      "gitBlobSha1": "eafee2696e5645a215c19fdc4db341d283715359",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/state.ts",
+      "lines": 253
+    },
+    {
+      "path": "packages/core/src/plugin/supervisor.ts",
+      "gitBlobSha1": "32de3582721a9df68cba2c2ab432ddc204700ce5",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/plugin/supervisor.ts",
+      "lines": 259
+    },
+    {
+      "path": "packages/core/src/plugin/internal.ts",
+      "gitBlobSha1": "d42a4d1d7e4ec92f6eeee491f6e75bc505369095",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/plugin/internal.ts",
+      "lines": 278
+    },
+    {
+      "path": "packages/core/src/plugin/hooks.ts",
+      "gitBlobSha1": "1325837f9d5864b2619b795c2cd1493d291786d1",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/core/src/plugin/hooks.ts",
+      "lines": 109
+    },
+    {
+      "path": "packages/plugin/src/promise/plugin.ts",
+      "gitBlobSha1": "ed94b0930201dcf33e09774303cfe44e95ed4e9a",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/plugin/src/promise/plugin.ts",
+      "lines": 66
+    },
+    {
+      "path": "packages/plugin/src/promise/agent.ts",
+      "gitBlobSha1": "b6b8e3bfd9d5a29151a7b27be0589b70fbd46702",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/plugin/src/promise/agent.ts",
+      "lines": 18
+    },
+    {
+      "path": "packages/plugin/src/promise/session.ts",
+      "gitBlobSha1": "ac3aa3888a5b7d16328f68673136044016a7c15f",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/plugin/src/promise/session.ts",
+      "lines": 171
+    },
+    {
+      "path": "packages/plugin/src/promise/mcp.ts",
+      "gitBlobSha1": "bffe93a89f889dd16ce6bf478afe7150783b1df2",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/plugin/src/promise/mcp.ts",
+      "lines": 18
+    },
+    {
+      "path": "packages/plugin/src/host.ts",
+      "gitBlobSha1": "80a2b03972cac37753cdb825cab1127aacb9e5d2",
+      "url": "https://github.com/anomalyco/opencode/blob/v2.0.11/packages/plugin/src/host.ts",
+      "lines": 49
+    }
+  ],
+  "entrypoint": {
+    "beforeSha256": "e0070f091e9500c6e13ef02822c1a56bb50285ab9974d0c6bae543465e7f0e23",
+    "afterSha256": "b1f815cc70bf60f75e2a42849ff2d47daa45d2cf956ae01401463c6124668fa1",
+    "patchSha256": "212b385e3bed713b8639ef6bb95ce7879fba764acac327d2f5a12ea723dfacf1",
+    "patchBytes": 1121,
+    "independentInMemoryHunkApplication": "PASS; exact Root raw preimage/output, no Root write",
+    "classification": "source proposal only; bootstrap wrapper/actual image/SDK qualification REQUIRED"
+  },
+  "childConfig": {
+    "beforeSha256": "00d1008145943107a90375fa3dd10040547d47d0a1e8986da9b0946136511942",
+    "afterSha256": "e1b3363867462e28b88a91d32e914e3fffd8cc25cd5d5267bb6188f5299c574d",
+    "patchSha256": "38000200e97c19f217d8998eeec395b2cd8aacb59d6164a9d8f366820ec359a7",
+    "patchBytes": 2544,
+    "independentInMemoryHunkApplication": "PASS; exact Root raw preimage/output, no Root write",
+    "classification": "source proposal only; preserves original model/argv/credential/result owners"
+  },
+  "linuxSpeechReadOnlyInputs": {
+    "durableOwner": "Root SAME Core128 original Voice owner; no helper DB writer",
+    "topology": "existing init -> Node API -> retained original subreaper -> Python3.12 CPU",
+    "classification": "source-only observation; not wheel/asset/runtime qualification",
+    "files": [
+      {
+        "origin": "APP read-only",
+        "path": "packages/veyra-voice/speech-worker/requirements-cpu.lock",
+        "sha256": "7ca60ceedc2c8d0800b9f2d6ed8c3dc7953d6d6fa7129b84c13e3078c0d0fb64",
+        "bytes": 31241
+      },
+      {
+        "origin": "APP read-only",
+        "path": "packages/veyra-voice/speech-worker/cpu_models.py",
+        "sha256": "656bf4f6969f71b1f2f19a4dd49bd962df5db551988008d8f1ea16e8802f9d1e",
+        "bytes": 9979
+      },
+      {
+        "origin": "APP read-only",
+        "path": "packages/veyra-voice/speech-worker/cpu_ownership.py",
+        "sha256": "4bd9c50bdd348fa5c4532c85389572f7032dab5949949d8c548f79b545cb621a",
+        "bytes": 12747
+      },
+      {
+        "origin": "APP read-only",
+        "path": "packages/veyra-voice/speech-worker/veyra_worker.py",
+        "sha256": "6c6b6f0e0d7f18257a3f13ca4fe706ff2baaa0a0f6ce3e06ad0c90ca7176bf26",
+        "bytes": 34834
+      },
+      {
+        "origin": "APP read-only",
+        "path": "packages/veyra-voice/speech-worker/model-manifest-cpu.example.json",
+        "sha256": "cf922e8e73c48d89f8a2805661efd680f3ad1b4229876d9c21d410335994f12c",
+        "bytes": 2135
+      },
+      {
+        "origin": "APP read-only",
+        "path": "services/ingenium-api/lib/voice-v2/cpu-ownership.mjs",
+        "sha256": "60a6bc1f135fafd239d48cf034806b3d70c0fdca91ada59484bcaea40cc6727c",
+        "bytes": 8525
+      },
+      {
+        "origin": "Native read-only compatibility limit; excluded from Linux Node/Python runtime",
+        "path": "apps/service/src/server.rs",
+        "sha256": "47f6decc7f8e6f3150f4aae3676bd6c7228101ae20d31148366322df3d5b2663",
+        "bytes": 8142
+      },
+      {
+        "origin": "Native read-only compatibility limit; excluded from Linux Node/Python runtime",
+        "path": "crates/adapters/src/speech/http_worker.rs",
+        "sha256": "efb3aefa6ce6f04636b5d84a078757d9a2c52a6174e19b85f95e8600d49fb49f",
+        "bytes": 21116
+      }
+    ]
+  }
+}
