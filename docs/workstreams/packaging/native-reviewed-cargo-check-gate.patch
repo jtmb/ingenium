@@ -1,0 +1,30 @@
+diff --git a/tools/feature-gate.mjs b/tools/feature-gate.mjs
+--- a/tools/feature-gate.mjs
++++ b/tools/feature-gate.mjs
+@@ -4,6 +4,7 @@
+ import { dirname, isAbsolute, relative, resolve } from 'node:path';
+ import { pathToFileURL } from 'node:url';
+ import { environment, root } from './process.mjs';
++import { hasReviewedCargoCheck, runReviewedCargoCheck } from './reviewed-cargo-check.mjs';
+ import { applyCompilerPathRemapping } from './compiler-path-remap.mjs';
+ import { browserBuildInputs, browserBuildTools } from './browser-build-inputs.mjs';
+
+@@ -101,6 +102,10 @@
+ const rust = ci || changed.some(file => /(^Cargo\.(toml|lock)$|^rust-toolchain|^(crates|apps\/service|apps\/desktop\/src-tauri)\/.*\.(rs|toml)$)/.test(file));
+ const web = ci || changed.some(file => /^(apps\/web|packages\/contracts)\/|^package(-lock)?\.json$/.test(file));
+ if (rust) {
++  if (mode === '--staged' && !ci && process.platform === 'win32' && await hasReviewedCargoCheck(environment)) {
++    run(process.execPath, ['tools/check-boundaries.mjs']);
++    await runReviewedCargoCheck(root, environment, tree, policy);
++  } else {
+   if (process.platform === 'win32') {
+     if (environment.VEYRA_BUILD_GUARD_MODULE) {
+       // An explicit native projection avoids executing unsigned scripts from a
+@@ -136,6 +141,7 @@
+   } finally {
+     if (compilerPaths) environment.CARGO_TARGET_DIR = compilerPaths.targetDirectory;
+   }
++  }
+ }
+ // This gate checks shipped Source. Run reviewed, focused behavioral selections
+ // separately under the incremental Windows beta plan. Native qualification

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "nativePreimageTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+  "preimages": [
+    {
+      "path": "tools/feature-gate.mjs",
+      "sha256": "80fca15c1d42a88a98197e1405133ba56537c92f36f359dbe1a226ca096d38bc"
+    },
+    {
+      "path": "tools/compiler-path-remap.mjs",
+      "sha256": "49c34110e95b2a75efcc2827552fe856745b0db7d510e36d279cc334e85c2033"
+    },
+    {
+      "path": "tools/build-storage-preflight.mjs",
+      "sha256": "44264ef0e6a54652bef115938afc0aa20a9cee4d1f18067289be00d30e61822b"
+    },
+    {
+      "path": "tools/check-windows-desktop-storage.ps1",
+      "sha256": "8b0214774f12d2c2983d58b360df65dca3e51d3c5b98ff1cd663ff72b34d07a0"
+    },
+    {
+      "path": "tools/windows-artifact-storage.ps1",
+      "sha256": "6dc3608c20d22527fbdeb876e32cad00b66c3d36b211db5cb360854b61966884"
+    },
+    {
+      "path": "tools/approved-native-task-storage.ps1",
+      "sha256": "8f56e44007bb4273b4cc6fd9ae092bd2f3cf393a8b90354a0b698dd6f19dfc71"
+    },
+    {
+      "path": "tools/existing-wsl-task-storage.ps1",
+      "sha256": "a52481506cd15b71c9fff0c6fa7480a9983c56ad149ea486f6d8d6933d45f72e"
+    },
+    {
+      "path": "tools/task-owned-allocation.mjs",
+      "sha256": "38817d1eeaa229a8f5cbe5276c4d2cfd222b9231837da195e5ff9d4ce860c25f"
+    }
+  ],
+  "gateAfterSha256": "57888b376c9a49c0694ab95cee3d08028323ccdf573c7dcccca2ab5f19173c6f",
+  "originalGenericBranchPreserved": true,
+  "patchSha256": "f2791606051cfca232691bbe58464d1d6c8be7d96828e4a9e9a23eb586d64725",
+  "patchBytes": 1571,
+  "canonicalEntrySource": "tools/veyra-release/native-reviewed-cargo-check.mjs",
+  "canonicalDestination": "tools/reviewed-cargo-check.mjs",
+  "canonicalEntrySha256": "e5addff789c056feafd4c188a641f2d8987e586be15cdc0e07672869150a18f6",
+  "syntaxCheck": "Node --check stdin PASS; no evaluation",
+  "applyCheck": "git apply --check --whitespace=error PASS; no mutation",
+  "compilerInvoked": false
+}
