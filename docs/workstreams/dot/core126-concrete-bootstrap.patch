@@ -1,0 +1,628 @@
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-original-authority.mjs
+@@ -0,0 +1,14 @@
++import {openSync,fstatSync,readFileSync,closeSync,constants,realpathSync} from "node:fs";
++export const JOB_CAPABILITY="/run/ingenium-runtime/capability";
++const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++export const jobDenied=()=>{throw Error("Original JobRun private authority unavailable");};
++export function readOriginalJobCapability(){let fd;try{if(realpathSync(JOB_CAPABILITY)!==JOB_CAPABILITY)jobDenied();fd=openSync(JOB_CAPABILITY,constants.O_RDONLY|constants.O_NOFOLLOW);const s=fstatSync(fd);if(!s.isFile()||s.nlink!==1||s.uid!==process.getuid?.()||(s.mode&0o777)!==0o600||s.size>256)jobDenied();const value=readFileSync(fd,"utf8").trim();if(!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(value))jobDenied();return value;}finally{if(fd!==undefined)closeSync(fd);}}
++export function createOriginalJobAuthority({environment=process.env,readCapability=readOriginalJobCapability,fetchImpl=fetch}={}){
++ const runId=environment.INGENIUM_JOB_RUN_ID,attemptId=environment.INGENIUM_JOB_ATTEMPT_ID;if(!uuid.test(runId??"")||!uuid.test(attemptId??""))jobDenied();const base=new URL(environment.INGENIUM_API_URL??"");if(base.protocol!=="http:"||base.username||base.password||base.pathname!=="/api/v1"||base.search||base.hash)jobDenied();
++ return Object.freeze({runId,attemptId,base:base.href,async request(operation,body){
++  if(!["assignment","bootstrap-assignment","result","withdraw"].includes(operation))jobDenied();
++  const url=new URL(base);url.pathname+=`/runtime/job-runs/${runId}/${operation}`;
++  const response=await fetchImpl(url,{method:body===undefined?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${readCapability()}`,"X-Ingenium-Audience":"job-run","X-Ingenium-Job-Attempt":attemptId,Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
++  if(!response.ok){await response.body?.cancel();jobDenied();}const reader=response.body?.getReader();if(!reader)jobDenied();let size=0;const chunks=[];try{while(true){const item=await reader.read();if(item.done)break;size+=item.value.byteLength;if(size>384*1024){await reader.cancel();jobDenied();}chunks.push(item.value);}}finally{reader.releaseLock();}let value;try{value=JSON.parse(Buffer.concat(chunks).toString("utf8"));}catch{jobDenied();}if(!value||typeof value!=="object"||!("data" in value))jobDenied();return value.data;
++ }});
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-original-authority.d.mts
+@@ -0,0 +1,3 @@
++export declare const JOB_CAPABILITY:"/run/ingenium-runtime/capability";
++export declare function readOriginalJobCapability():string;
++export declare function createOriginalJobAuthority(ports?:{environment?:NodeJS.ProcessEnv;readCapability?:()=>string;fetchImpl?:typeof fetch}):Readonly<{runId:string;attemptId:string;base:string;request(operation:"assignment"|"bootstrap-assignment"|"result"|"withdraw",body?:unknown):Promise<unknown>}>;
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs
+@@ -0,0 +1,12 @@
++export const MAX_JOB_FRAME_BYTES=384*1024+256;
++const deny=()=>{throw Error("Original JobRun manager frame unavailable");};
++/** Strict JSON, including duplicate decoded keys at every depth. No reviver or last-key-wins parsing. */
++export function parseStrictJobJson(bytes,maxBytes=MAX_JOB_FRAME_BYTES){
++ if(!(bytes instanceof Uint8Array)||bytes.byteLength>maxBytes)deny();let s;try{s=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{deny();}let at=0;
++ const ws=()=>{while(/[ \t\r\n]/.test(s[at]??"_")&&at<s.length)at++;};
++ const string=()=>{const begin=at++;while(at<s.length){const c=s[at++];if(c==='"'){try{return JSON.parse(s.slice(begin,at));}catch{deny();}}if(c==='\\')at++;}deny();};
++ function value(depth){if(depth>64)deny();ws();const c=s[at];if(c==='"')return string();if(c==='{'){at++;ws();const out={},keys=new Set();if(s[at]==='}'){at++;return out;}while(true){ws();if(s[at]!=='"')deny();const key=string();if(keys.has(key)||['__proto__','constructor','prototype'].includes(key))deny();keys.add(key);ws();if(s[at++]!==':')deny();out[key]=value(depth+1);ws();const sep=s[at++];if(sep==='}')return out;if(sep!==',')deny();}}if(c==='['){at++;ws();const out=[];if(s[at]===']'){at++;return out;}while(true){out.push(value(depth+1));ws();const sep=s[at++];if(sep===']')return out;if(sep!==',')deny();}}const match=/^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(s.slice(at));if(!match)deny();at+=match[0].length;const v=JSON.parse(match[0]);if(typeof v==='number'&&!Number.isFinite(v))deny();return v;}
++ const parsed=value(0);ws();if(at!==s.length)deny();return parsed;
++}
++export function parseOriginalJobFrame(bytes){if(bytes.at(-1)!==10)deny();const parsed=parseStrictJobJson(bytes);if(!parsed||typeof parsed!=="object"||Array.isArray(parsed)||Object.keys(parsed).sort().join('|')!=='agentMaterial|capability'||typeof parsed.capability!=='string'||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(parsed.capability))deny();return parsed;}
++export async function readOriginalJobFrame(stream){let size=0;const chunks=[];for await(const chunk of stream){const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>MAX_JOB_FRAME_BYTES)throw Error("Original JobRun manager frame unavailable");chunks.push(bytes);}return parseOriginalJobFrame(Buffer.concat(chunks));}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-private-control.mjs
+@@ -0,0 +1,36 @@
++import {timingSafeEqual} from "node:crypto";
++import {createServer,request as httpRequest} from "node:http";
++import {chmodSync,lstatSync,realpathSync} from "node:fs";
++import {parseStrictJobJson} from "./job-bootstrap-frame.mjs";
++export const JOB_CONTROL_SOCKET="/run/ingenium-runtime/job/control.sock";
++const deny=()=>{throw Error("Original JobRun private control denied");};
++export function createOriginalJobCustody({setTimer=setTimeout,clearTimer=clearTimeout}={}){
++ let proc,closed=false,latched=false,join,resolveJoin,stopping;
++ return Object.freeze({assertMaySpawn(){if(latched||proc)deny();},retain(child){if(latched||proc)deny();proc=child;join=new Promise(resolve=>{resolveJoin=resolve;});child.once("close",()=>{closed=true;resolveJoin();});},isWithdrawn:()=>latched,
++  withdraw(){latched=true;if(stopping)return stopping;stopping=(async()=>{if(!proc)return {leaderClosed:true,wholeContainerRetired:false};if(!closed){proc.kill("SIGTERM");const timer=setTimer(()=>{if(!closed)proc.kill("SIGKILL");},5000);try{await join;}finally{clearTimer(timer);}}return {leaderClosed:closed,wholeContainerRetired:false};})();return stopping;}
++ });
++}
++export function createOriginalJobControl({capability,identity,loadBinding,withdraw}){
++ let latched=false,withdrawal;
++ const authorized=header=>{if(typeof header!=="string"||!header.startsWith("Bearer "))deny();const a=Buffer.from(header.slice(7)),b=Buffer.from(capability);if(a.length!==b.length||!timingSafeEqual(a,b))deny();};
++ return Object.freeze({async dispatch({path,method,headers,body}){
++  authorized(headers.authorization);if(method!=="POST"||headers['x-ingenium-audience']!=="job-run"||headers['x-ingenium-job-attempt']!==identity.attemptId||headers.cookie!==undefined||headers.origin!==undefined||!body||typeof body!=="object"||Array.isArray(body)||body.runId!==identity.runId||body.attemptId!==identity.attemptId)deny();
++  if(path==='/binding'){if(latched||Object.keys(body).sort().join('|')!=='attemptId|runId')deny();return await loadBinding();}
++  if(path==='/withdraw'){if(Object.keys(body).sort().join('|')!=='attemptId|reason|runId'||!['CORE126_JOB_ENFORCEMENT_LOST','CORE126_JOB_PLUGIN_UNLOADED','CORE126_JOB_PARENT_STOP'].includes(body.reason))deny();latched=true;withdrawal??=Promise.resolve().then(()=>withdraw(body.reason));return await withdrawal;}
++  deny();
++ }});
++}
++/** Exact fixed Unix socket, same original capability; no inherited descriptor or new token authority. */
++export async function openOriginalJobControl(control){
++ const server=createServer(async(req,res)=>{try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>2048)deny();chunks.push(chunk);}const bodyText=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));
++  const body=parseStrictJobJson(Buffer.from(bodyText),2048);
++  const data=await control.dispatch({path:req.url,method:req.method,headers:req.headers,body});res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({data}));
++ }catch{res.writeHead(403,{'Content-Type':'application/json'}).end('{"error":{"code":"JOB_PRIVATE_CONTROL_DENIED"}}');}});
++ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(JOB_CONTROL_SOCKET,()=>{server.off('error',reject);resolve();});});
++ chmodSync(JOB_CONTROL_SOCKET,0o600);const socketStat=lstatSync(JOB_CONTROL_SOCKET);if(!socketStat.isSocket()||socketStat.uid!==process.getuid?.()||(socketStat.mode&0o777)!==0o600||realpathSync(JOB_CONTROL_SOCKET)!==JOB_CONTROL_SOCKET){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));deny();}
++ return {async close(){server.closeAllConnections();await new Promise(resolve=>server.close(()=>resolve()));}};
++}
++export async function requestOriginalJobControl({capability,identity,operation,reason}){
++ if(!['binding','withdraw'].includes(operation))deny();const socketStat=lstatSync(JOB_CONTROL_SOCKET);if(!socketStat.isSocket()||socketStat.uid!==process.getuid?.()||(socketStat.mode&0o777)!==0o600||realpathSync(JOB_CONTROL_SOCKET)!==JOB_CONTROL_SOCKET)deny();const body=JSON.stringify({...identity,...(reason===undefined?{}:{reason})});
++ return await new Promise((resolve,reject)=>{const req=httpRequest({socketPath:JOB_CONTROL_SOCKET,path:'/'+operation,method:'POST',headers:{Authorization:`Bearer ${capability}`,'X-Ingenium-Audience':'job-run','X-Ingenium-Job-Attempt':identity.attemptId,'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)},timeout:15000},res=>{let size=0;const chunks=[];res.on('data',chunk=>{size+=chunk.length;if(size>512*1024){res.destroy();reject(Error('Original JobRun private control denied'));}else chunks.push(chunk);});res.on('error',()=>reject(Error('Original JobRun private control denied')));res.on('end',()=>{if(res.statusCode!==200)return reject(Error('Original JobRun private control denied'));try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')).data);}catch{reject(Error('Original JobRun private control denied'));}});});req.on('timeout',()=>req.destroy(Error('Original JobRun private control denied')));req.on('error',()=>reject(Error('Original JobRun private control denied')));req.end(body);});
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-private-files.mjs
+@@ -0,0 +1,20 @@
++import * as fs from "node:fs";
++import {createHash} from "node:crypto";
++const ROOT="/run/ingenium-runtime",JOB=ROOT+"/job",CONFIG=JOB+"/config";
++const allowed=new Set([ROOT+"/capability",JOB+"/material.json",CONFIG+"/opencode.json"]);
++const deny=()=>{throw Error("Original JobRun private files unavailable");};
++export function assertJobPrivateTmpfs(io=fs){
++ if(process.getuid?.()!==1000)deny();const mount=io.readFileSync('/proc/self/mountinfo','utf8').split('\n').filter(line=>line.split(' ')[4]===ROOT);if(mount.length!==1||!mount[0].includes(' - tmpfs '))deny();
++ const st=io.lstatSync(ROOT);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==1000||(st.mode&0o777)!==0o700||io.realpathSync(ROOT)!==ROOT)deny();
++}
++function directory(path,io){if(!io.existsSync(path))io.mkdirSync(path,{mode:0o700});const s=io.lstatSync(path);if(!s.isDirectory()||s.isSymbolicLink()||s.uid!==1000||(s.mode&0o777)!==0o700||io.realpathSync(path)!==path)deny();}
++export function prepareJobPrivateDirectories(io=fs){assertJobPrivateTmpfs(io);directory(JOB,io);directory(CONFIG,io);if(io.readdirSync(JOB).some(p=>p!=="config")||io.readdirSync(CONFIG).length)deny();}
++export function writeOriginalJobPrivate(path,value,io=fs){
++ if(!allowed.has(path))deny();assertJobPrivateTmpfs(io);const parent=path.slice(0,path.lastIndexOf('/'));directory(parent,io);const bytes=Buffer.from(typeof value==='string'?value:JSON.stringify(value));if(bytes.length>384*1024)deny();let fd;
++ try{fd=io.openSync(path,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);io.writeFileSync(fd,bytes);io.fsyncSync(fd);const stat=io.fstatSync(fd),name=io.lstatSync(path);if(!stat.isFile()||stat.nlink!==1||stat.uid!==1000||(stat.mode&0o777)!==0o600||stat.ino!==name.ino||stat.dev!==name.dev||name.isSymbolicLink()||io.realpathSync(path)!==path)deny();}finally{if(fd!==undefined)io.closeSync(fd);}
++}
++export function assertOriginalJobStaticFiles(profile,expectedPaths,io=fs){
++ if(!profile||!/^sha256:[a-f0-9]{64}$/.test(profile.imageId)||!Array.isArray(profile.files)||profile.files.length!==expectedPaths.length||new Set(profile.files.map(f=>f.path)).size!==expectedPaths.length||expectedPaths.some(p=>!profile.files.some(f=>f.path===p)))deny();
++ for(const row of profile.files){if(!/^[a-f0-9]{64}$/.test(row.sha256)||!Number.isSafeInteger(row.bytes)||row.bytes<=0||io.realpathSync(row.path)!==row.path)deny();let fd;try{fd=io.openSync(row.path,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);const a=io.fstatSync(fd);if(!a.isFile()||a.uid!==0||a.gid!==0||a.nlink!==1||(a.mode&0o022)!==0||a.size!==row.bytes)deny();const hash=createHash('sha256'),buf=Buffer.alloc(65536);let total=0;while(true){const n=io.readSync(fd,buf,0,buf.length,null);if(!n)break;total+=n;if(total>row.bytes)deny();hash.update(buf.subarray(0,n));}const b=io.fstatSync(fd),name=io.lstatSync(row.path);if(total!==row.bytes||hash.digest('hex')!==row.sha256||a.ino!==b.ino||a.dev!==b.dev||a.size!==b.size||a.mtimeMs!==b.mtimeMs||a.ctimeMs!==b.ctimeMs||a.ino!==name.ino||a.dev!==name.dev||name.isSymbolicLink())deny();}finally{if(fd!==undefined)io.closeSync(fd);}}
++ return true;
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs
+@@ -0,0 +1,45 @@
++import {spawn as nodeSpawn} from "node:child_process";
++import {readFileSync} from "node:fs";
++import {createManagedJobChild} from "./managed-job-child.mjs";
++import {createOriginalJobAuthority,readOriginalJobCapability} from "./job-original-authority.mjs";
++import {readOriginalJobFrame} from "./job-bootstrap-frame.mjs";
++import {createOriginalJobCustody,createOriginalJobControl,openOriginalJobControl} from "./job-private-control.mjs";
++import {prepareJobPrivateDirectories,writeOriginalJobPrivate,assertOriginalJobStaticFiles} from "./job-private-files.mjs";
++import {bootstrapCore126Job,verifyCore126AgentMaterial,IMAGE_INPUTS,BROKER_PROFILE,JOB_CONFIG,JOB_CONFIG_DIRECTORY,core126ClosedJobConfig,hash,freeze} from "./job-bootstrap-facade.mjs";
++const deny=()=>{throw Error("Original JobRun bootstrap unavailable");};
++export function assertOriginalBootstrapAssignment(expected,environment){
++ const b=expected?.binding;if(!b||b.runId!==environment.INGENIUM_JOB_RUN_ID||b.attemptId!==environment.INGENIUM_JOB_ATTEMPT_ID||b.runtimeId!==environment.INGENIUM_RUNTIME_ID||b.projectId!==environment.INGENIUM_PROJECT_ID||b.organizationId!==environment.INGENIUM_ORGANIZATION_ID||b.ownerUserId!==environment.INGENIUM_RUNTIME_OWNER_ID||b.workspaceId!==environment.INGENIUM_WORKSPACE_ID||b.bindingHash!==environment.INGENIUM_STORAGE_MAPPING_HASH||expected.staticProfile?.imageId!==b.imageId||typeof expected.model!=="string"||!expected.model.includes('/'))deny();return expected;
++}
++/** Same immutable protected enforcer definition; guarded raw profile and enforcer hashes precede this read. */
++export function readOriginalProtectedBroker(readProfile=()=>readFileSync(BROKER_PROFILE,'utf8')){
++ const raw=readProfile(),end=raw.indexOf('\n---\n',4);if(!raw.startsWith('---\n')||end===-1)deny();
++ return {id:'ingenium-llm-broker',name:'ingenium-llm-broker',description:'Internal agent for Ingenium LLM broker — never invoke directly',mode:'subagent',hidden:true,system:raw.slice(end+5).trim(),permissions:[{action:'*',resource:'*',effect:'ask'},{action:'external_directory',resource:'/home/appuser/.local/share/opencode/tool-output/*',effect:'deny'},{action:'external_directory',resource:'/home/ingenium-opencode/.local/share/opencode/tool-output/*',effect:'deny'}]};
++}
++export async function runOriginalManagedJobBootstrap({validateOriginalProtectedDeployment,verifierFactory,environment=process.env,stdin=process.stdin,spawn=nodeSpawn}){
++ if(typeof validateOriginalProtectedDeployment!=='function'||typeof verifierFactory!=='function')deny();
++ const custody=createOriginalJobCustody(),authority=createOriginalJobAuthority({environment});let control,initial,material,broker;
++ const current=async()=>{const expected=assertOriginalBootstrapAssignment(await authority.request('bootstrap-assignment'),environment);if(initial&&(hash(expected.binding)!==hash(initial.binding)||hash(expected.staticProfile)!==hash(initial.staticProfile)||expected.agent!==initial.agent||expected.model!==initial.model))deny();if(material)verifyCore126AgentMaterial(material,expected.binding,expected.agent);assertOriginalJobStaticFiles(expected.staticProfile,IMAGE_INPUTS);return expected;};
++ const withdraw=async reason=>{
++  // Latch and retain local child custody first. Core withdrawal only narrows this original credential/run.
++  const stopping=custody.withdraw();const recorded=await authority.request('withdraw',{runId:authority.runId,attemptId:authority.attemptId,reason}).then(()=>true,()=>false);
++  void stopping.catch(()=>{});return {withdrawalRecorded:recorded,leaderStopRequested:true,wholeContainerRetired:false};
++ };
++ try{return await bootstrapCore126Job({
++  validateOriginalProtectedDeployment:async()=>{await validateOriginalProtectedDeployment();prepareJobPrivateDirectories();},
++  readOriginalJobFrame:async()=>{const frame=await readOriginalJobFrame(stdin);material=frame.agentMaterial;return frame;},
++  writeOriginalPrivateCapability:async(path,capability)=>writeOriginalJobPrivate(path,capability),
++  fetchOriginalAssignment:async()=>{initial=await current();return initial;},
++  writeOriginalPrivateJson:async(path,value)=>writeOriginalJobPrivate(path,value),
++  assertOriginalImageIsolation:async({config})=>{await current();if(hash(config)!==hash(core126ClosedJobConfig())||hash(JSON.parse(readFileSync(JOB_CONFIG,'utf8')))!==hash(config))deny();broker=readOriginalProtectedBroker();},
++  runOriginalChild:async()=>{
++   const frameCapability=readOriginalJobCapability();
++   const controller=createOriginalJobControl({capability:frameCapability,identity:{runId:authority.runId,attemptId:authority.attemptId},loadBinding:async()=>{
++    if(custody.isWithdrawn())deny();const expected=await current();return freeze({agentName:expected.agent,admission:{...expected.binding,model:expected.model},material,broker,mcpEnvironment:{PATH:'/usr/local/bin:/usr/bin:/bin',INGENIUM_API_URL:environment.INGENIUM_API_URL,INGENIUM_MCP_AUDIENCE:'job-run',INGENIUM_JOB_RUN_ID:authority.runId,INGENIUM_JOB_ATTEMPT_ID:authority.attemptId,INGENIUM_MCP_CREDENTIAL_FILE:'/run/ingenium-runtime/capability',INGENIUM_RUNTIME_CREDENTIAL_FILE:'/run/ingenium-runtime/capability'}});
++   },withdraw});
++   control=await openOriginalJobControl(controller);
++   const run=createManagedJobChild({environment:{...environment,OPENCODE_CONFIG_PROJECT_DISABLE:'1',OPENCODE_CONFIG_DIR:JOB_CONFIG_DIRECTORY,OPENCODE_CONFIG:JOB_CONFIG},spawn,verifierFactory,fetchAssignment:()=>authority.request('assignment'),reportResult:(_identity,result)=>authority.request('result',{attemptId:authority.attemptId,result}),beforeSpawn:()=>custody.assertMaySpawn(),retainChild:proc=>custody.retain(proc)});
++   return await run({runId:authority.runId,attemptId:authority.attemptId});
++  },
++ });}catch(error){await withdraw('CORE126_JOB_PARENT_STOP');throw error;}
++ finally{await custody.withdraw();await control?.close();}
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts
+@@ -0,0 +1,3 @@
++import type {spawn} from "node:child_process";
++import type {ResponseVerifier} from "./managed-job-contracts.mjs";
++export declare function runOriginalManagedJobBootstrap(ports:{validateOriginalProtectedDeployment():void|Promise<void>;verifierFactory():ResponseVerifier;environment?:NodeJS.ProcessEnv;stdin?:NodeJS.ReadableStream;spawn?:typeof spawn}):Promise<number>;
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-private-plugin.mjs
+@@ -0,0 +1,26 @@
++import {createOriginalJobAuthority,readOriginalJobCapability} from './job-original-authority.mjs';
++import {requestOriginalJobControl} from './job-private-control.mjs';
++import {assertOriginalJobStaticFiles,assertJobPrivateTmpfs} from './job-private-files.mjs';
++import {assertOriginalBootstrapAssignment,readOriginalProtectedBroker} from './job-bootstrap-runtime.mjs';
++import {verifyCore126AgentMaterial,IMAGE_INPUTS,hash,createCore126JobAgentPlugin} from './job-bootstrap-facade.mjs';
++/** Executed independently inside the real standalone server. No parent FD assumption. */
++export function createOriginalPrivateJobPorts({environment=process.env,authority=createOriginalJobAuthority({environment}),readCapability=readOriginalJobCapability,requestControl=requestOriginalJobControl,assertTmpfs=assertJobPrivateTmpfs,assertStatic=assertOriginalJobStaticFiles,readBroker=readOriginalProtectedBroker}={}){
++ const identity={runId:authority.runId,attemptId:authority.attemptId};let latest;
++ const independentlyCurrent=async snapshot=>{
++  const expected=assertOriginalBootstrapAssignment(await authority.request('bootstrap-assignment'),environment);
++  const {model,...binding}=snapshot.admission??{};if(hash(expected.binding)!==hash(binding)||model!==expected.model)throw Error('Original JobRun binding changed');
++  verifyCore126AgentMaterial(snapshot.material,expected.binding,expected.agent);assertTmpfs();assertStatic(expected.staticProfile,IMAGE_INPUTS);if(hash(snapshot.broker)!==hash(readBroker())||snapshot.mcpEnvironment?.INGENIUM_API_URL!==environment.INGENIUM_API_URL)throw Error('Original protected job plugin binding changed');latest=expected;
++ };
++ return {
++  async loadOriginalBinding(){const snapshot=await requestControl({capability:readCapability(),identity,operation:'binding'});await independentlyCurrent(snapshot);return snapshot;},
++  async assertOriginalIsolation(snapshot){await independentlyCurrent(snapshot);},
++  async assertStaticImageFiles(snapshot){if(!latest)throw Error('Original JobRun static profile unavailable');verifyCore126AgentMaterial(snapshot.material,latest.binding,latest.agent);assertStatic(latest.staticProfile,IMAGE_INPUTS);},
++  async revokeOriginalDispatch(_admission,reason){
++   // Direct original Core withdrawal is mandatory even if a same-UID socket were replaced.
++   const results=await Promise.allSettled([authority.request('withdraw',{...identity,reason}),requestControl({capability:readCapability(),identity,operation:'withdraw',reason})]);
++   if(results[0].status!=='fulfilled'||results[1].status!=='fulfilled')throw Error('Original JobRun withdrawal unconfirmed');
++  },
++ };
++}
++export function createOriginalPrivateJobPlugin(options){return createCore126JobAgentPlugin(createOriginalPrivateJobPorts(options));}
++
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs
+@@ -0,0 +1,4 @@
++export {bootstrapCore126Job} from "../../../../packages/veyra-operations/core126-job-bootstrap.mjs";
++export {verifyCore126AgentMaterial,BROKER_PLUGIN,BROKER_PROFILE,JOB_AGENT_PLUGIN,JOB_CONFIG} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
++export {JOB_CONFIG_DIRECTORY,core126ClosedJobConfig,createCore126JobAgentPlugin} from "../../../../packages/veyra-operations/core126-job-plugin.mjs";
++export {IMAGE_INPUTS,hash,freeze} from "../../../../packages/veyra-operations/core126-image-contract.mjs";
+--- /dev/null
++++ b/services/ingenium-api/scripts/runtime-job-bootstrap.ts
+@@ -0,0 +1,5 @@
++import {agents} from "ingenium-core";
++import {JobResponseVerification} from "../lib/job-response-verification.js";
++import {runOriginalManagedJobBootstrap} from "../lib/dot-v2/job-bootstrap-runtime.mjs";
++try{process.exitCode=await runOriginalManagedJobBootstrap({validateOriginalProtectedDeployment:()=>agents.validateProtectedOpenCodeDeployment(),verifierFactory:()=>new JobResponseVerification()});}
++catch{console.error("Managed JobRun bootstrap did not complete; original custody retained.");process.exitCode=1;}
+--- a/services/ingenium-api/scripts/runtime-job-child.ts
++++ b/services/ingenium-api/scripts/runtime-job-child.ts
+@@ -1,16 +1,7 @@
+-import { readFileSync, lstatSync } from "node:fs";
+-import { spawn } from "node:child_process";
+-import { createManagedJobChild } from "../lib/dot-v2/managed-job-child.mjs";
+-import { JobResponseVerification } from "../lib/job-response-verification.js";
+-const runId=process.env.INGENIUM_JOB_RUN_ID??"",attemptId=process.env.INGENIUM_JOB_ATTEMPT_ID??"";
+-const file="/run/ingenium-runtime/capability",stat=lstatSync(file);
+-if(!stat.isFile()||stat.isSymbolicLink()||(stat.mode&0o777)!==0o600||stat.uid!==process.getuid?.())throw Error("Original-run capability unavailable");
+-const token=readFileSync(file,"utf8").trim(),base=new URL(process.env.INGENIUM_API_URL??"");
+-if(!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token)||base.protocol!=="http:"||base.username||base.password||base.pathname!=="/api/v1"||base.search||base.hash)throw Error("Original-run API authority unavailable");
+-async function request(operation:string,body?:unknown){
+- const url=new URL(base);url.pathname+=`/runtime/job-runs/${encodeURIComponent(runId)}/${operation}`;
+- const response=await fetch(url,{method:body===undefined?"GET":"POST",redirect:"error",headers:{Authorization:`Bearer ${token}`,Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15_000)});
+- if(!response.ok){await response.body?.cancel();throw Error("Original-run API authority denied operation");}const json=await response.json() as {data:unknown};return json.data;
+-}
+-const run=createManagedJobChild({environment:process.env,spawn,verifierFactory:()=>new JobResponseVerification(),fetchAssignment:()=>request("assignment"),reportResult:(_identity:unknown,result:unknown)=>request("result",{attemptId,result})});
+-try{process.exitCode=await run({runId,attemptId});}catch{console.error("Managed JobRun did not complete; original ownership retained.");process.exitCode=1;}
++import {spawn} from "node:child_process";
++import {createManagedJobChild} from "../lib/dot-v2/managed-job-child.mjs";
++import {createOriginalJobAuthority} from "../lib/dot-v2/job-original-authority.mjs";
++import {JobResponseVerification} from "../lib/job-response-verification.js";
++const authority=createOriginalJobAuthority();
++const run=createManagedJobChild({environment:process.env,spawn,verifierFactory:()=>new JobResponseVerification(),fetchAssignment:()=>authority.request("assignment"),reportResult:(_identity,result)=>authority.request("result",{attemptId:authority.attemptId,result})});
++try{process.exitCode=await run({runId:authority.runId,attemptId:authority.attemptId});}catch{console.error("Managed JobRun did not complete; original ownership retained.");process.exitCode=1;}
+--- /dev/null
++++ b/services/ingenium-api/scripts/runtime-job-mcp.ts
+@@ -0,0 +1,7 @@
++export {};
++// Fixed bridge to the existing qualified extension transport; never falls back to generic launcher binding.
++if(process.env.INGENIUM_MCP_AUDIENCE!=="job-run")throw Error("Original JobRun MCP audience unavailable");
++const entry=new URL("file:///app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js");
++const candidate:unknown=await import(entry.href);
++if(!candidate||typeof candidate!=="object"||!("runJobRunMcpTransport" in candidate)||typeof candidate.runJobRunMcpTransport!=="function")throw Error("Original JobRun MCP transport unavailable");
++await (candidate as {runJobRunMcpTransport():Promise<void>}).runJobRunMcpTransport();
+--- a/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
++++ b/services/ingenium-api/lib/dot-v2/managed-job-child.mjs
+@@ -3,18 +3,20 @@
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+ const sha=s=>createHash("sha256").update(s).digest("hex");
+ const unavailable=()=>{throw Object.assign(Error("Managed JobRun profile unavailable"),{code:"MANAGED_JOB_PROFILE_UNAVAILABLE"});};
+-export function createManagedJobChild({fetchAssignment,reportResult,spawn,verifierFactory,environment}){
++export function createManagedJobChild({fetchAssignment,reportResult,spawn,verifierFactory,environment,beforeSpawn,retainChild}){
+  return async function run(identity){
+   if(!identity||Object.keys(identity).sort().join("|")!=="attemptId|runId"||![identity.runId,identity.attemptId].every(v=>uuid.test(v)))unavailable();
+   const a=await fetchAssignment(identity); // Reuses run-scoped credential and current original Core grants.
+   if(!a||a.runId!==identity.runId||a.attemptId!==identity.attemptId||a.workspaceId!==environment.INGENIUM_WORKSPACE_ID||a.bindingHash!==environment.INGENIUM_STORAGE_MAPPING_HASH||a.runtimeId!==environment.INGENIUM_RUNTIME_ID||a.projectId!==environment.INGENIUM_PROJECT_ID||a.organizationId!==environment.INGENIUM_ORGANIZATION_ID||a.ownerUserId!==environment.INGENIUM_RUNTIME_OWNER_ID||!a.profileQualified||a.executable!=="opencode"||a.cwd!=="/workspace"||!a.credentialBoundToOriginalRun||typeof a.prompt!=="string"||!a.prompt.length||a.prompt.length>16000||sha(a.prompt)!==a.promptHash||typeof a.agent!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(a.agent)||typeof a.model!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\/[^\s\u0000-\u001f\u007f]{1,256}$/u.test(a.model))unavailable();
+   const names=["PATH","HOME","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_STATE_HOME","TMPDIR","INGENIUM_API_URL","INGENIUM_PROJECT","INGENIUM_PROJECT_ID","INGENIUM_ORGANIZATION_ID","INGENIUM_RUNTIME_ID","INGENIUM_RUNTIME_OWNER_ID","INGENIUM_WORKSPACE_ID","INGENIUM_STORAGE_MAPPING_HASH"];
+   const env=Object.fromEntries(names.filter(n=>environment[n]!==undefined).map(n=>[n,environment[n]]));
+-  Object.assign(env,{PWD:"/app",OPENCODE_CONFIG_DIR:"/home/appuser/.config/opencode/runtime",OPENCODE_CONFIG:"/usr/local/share/ingenium/opencode-managed/opencode.json",INGENIUM_WORKTREE:"/workspace",INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_RUNTIME_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId});
++  Object.assign(env,{PWD:"/app",OPENCODE_CONFIG_PROJECT_DISABLE:"1",OPENCODE_CONFIG_DIR:"/run/ingenium-runtime/job/config",OPENCODE_CONFIG:"/usr/local/share/ingenium/opencode-managed/job-opencode.json",INGENIUM_WORKTREE:"/workspace",INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_RUNTIME_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId});
+   const verifier=verifierFactory();
+   return await new Promise((resolve,reject)=>{
+    // Fixed binary/argv/cwd, no shell and no host/container selector from assignment or HTTP.
++   beforeSpawn?.();
+    const proc=spawn("opencode",["run",a.prompt,"--agent",a.agent,"--model",a.model,"--auto","--standalone","--format","json"],{cwd:"/workspace",env,stdio:["ignore","pipe","pipe"],shell:false,detached:false});
++   retainChild?.(proc);
+    let done=false;proc.stdout?.on("data",value=>verifier.accept(value));proc.stderr?.on("data",()=>{});
+    proc.on("error",reject);proc.on("close",code=>{if(done)return;done=true;const result=verifier.finish();
+     // No raw output, prompt, transcript, credential or provider text is returned or logged.
+--- a/services/ingenium-api/lib/dot-v2/managed-job-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/managed-job-owner.mjs
+@@ -81,7 +81,7 @@
+     const started=await docker("POST",`/containers/${path(id)}/start`);
+     if(started.status!==204){await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
+     // Existing attach-only credential handoff; credential is scoped to this original run by Core.
+-    a=await fresh(a,"launch");await handoff(id,a,material.capability);a=await fresh(a,"launch");await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
++    a=await fresh(a,"launch");await handoff(id,a,material.capability,material.agentMaterial);a=await fresh(a,"launch");await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
+    }catch{await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
+   },
+   async inspect(runId){if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");try{return await settle(await admission(runId,"inspect"));}catch(e){return unknown(e.code??"MANAGED_JOB_INSPECTION_UNAVAILABLE");}},
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -1,3 +1,4 @@
++import {projectCore126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
+ import {createHash,randomUUID} from "node:crypto";
+ const sha=value=>createHash("sha256").update(typeof value==="string"?value:JSON.stringify(value)).digest("hex");
+ const fail=code=>{throw Object.assign(Error(code),{code,status:code.endsWith("UNAVAILABLE")?503:409});};
+@@ -90,10 +91,12 @@
+    const facts=base({runId,projectId:before.a.projectId,runtimeId:before.a.runtimeId,workspaceId:before.a.workspaceId});const profile=await profiles.qualify(facts);
+    if(!profile.qualified||profile.hash!==before.a.profileHash||profile.modelBindingHash!==before.a.modelBindingHash)fail("MANAGED_JOB_PROFILE_UNAVAILABLE");
+    manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch");if(r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
++    const finalFacts=base({runId,projectId:a.projectId,runtimeId:a.runtimeId,workspaceId:a.workspaceId});
++    const agentMaterial=projectCore126AgentMaterial({admission:a,agentName:finalFacts.job.agent,agentConfig:finalFacts.agentConfig},clock().getTime());
+     const credential=credentials.issueManagedJobCredential({runId,attemptId:a.attemptId});
+     const updated=cas(r,{credential_id:credential.id,material_consumed_at:clock().toISOString()});
+     const workspace=runtimes.getAuthorizedWorkspace(a.workspaceId);
+-    return {admission:updated,runId,attemptId:a.attemptId,credentialRunId:runId,profileQualified:true,capability:credential.token,provision:{runtimeId:a.runtimeId,backendName:"ingenium-runtime-"+a.runtimeId.replaceAll("-",""),organizationId:a.organizationId,projectId:a.projectId,projectName:a.projectName,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storagePath:workspace.storagePath,storageMappingHash:a.bindingHash,securityEpoch:a.bindingEpoch,revision:a.provisioningRevision,capability:credential.token,capabilityExpiresAt:credential.expiresAt,limits:a.limits}};
++    return {admission:updated,runId,attemptId:a.attemptId,credentialRunId:runId,profileQualified:true,agentMaterial,capability:credential.token,provision:{runtimeId:a.runtimeId,backendName:"ingenium-runtime-"+a.runtimeId.replaceAll("-",""),organizationId:a.organizationId,projectId:a.projectId,projectName:a.projectName,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storagePath:workspace.storagePath,storageMappingHash:a.bindingHash,securityEpoch:a.bindingEpoch,revision:a.provisioningRevision,capability:credential.token,capabilityExpiresAt:credential.expiresAt,limits:a.limits}};
+    });
+   },
+   closeNoCreate(runId,key,ctx){manager(ctx);return write(()=>{
+@@ -121,6 +124,7 @@
+   requireOriginalRetirementProof(runId,proof){const r=row(runId);if(!r?.retirement_proof||JSON.stringify(JSON.parse(r.retirement_proof))!==JSON.stringify(proof))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");},
+   requestCancel(runId,ctx){const c=read(runId),principal=ctx?.revalidate?.();if(!principal||!authorization.requireProjectPermission(principal,c.r.project_id,"jobs","write").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");const job=jobs.getJob(c.r.project_id,c.r.job_id);if(job.visibility==="private"&&(!["browser-user","user-token"].includes(principal.type)||principal.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");return write(()=>{const {r}=current(runId,"inspect");if(r.phase==="retired")return read(runId).a;return cas(r,{phase:"cancel_requested"});});},
+   assignment(runId,credential){const {r,a,run}=current(runId,"launch");if(!credential||credential.kind!=="job-run"||credential.audience!=="job-run"||credential.runId!==runId||credential.attemptId!==a.attemptId||credential.id!==r.credential_id||credential.projectId!==a.projectId||credential.organizationId!==a.organizationId||credential.ownerUserId!==a.ownerUserId||credential.workspaceId!==a.workspaceId||credential.storageMappingHash!==a.bindingHash||credential.securityEpoch!==a.bindingEpoch||credential.servicePrincipalId!==run.effective_service_principal_id||!["start_intent","running"].includes(r.phase))fail("MANAGED_JOB_CREDENTIAL_DENIED");const job=jobs.getJob(r.project_id,r.job_id);return {runId,attemptId:a.attemptId,workspaceId:a.workspaceId,bindingHash:a.bindingHash,runtimeId:a.runtimeId,projectId:a.projectId,organizationId:a.organizationId,ownerUserId:a.ownerUserId,profileQualified:true,executable:"opencode",cwd:"/workspace",credentialBoundToOriginalRun:true,agent:job.agent,prompt:job.prompt_template,promptHash:a.promptHash,model:a.model};},
++  bootstrapAssignment(runId,credential){const assignment=this.assignment(runId,credential),{a}=current(runId,"launch");const facts=base({runId,projectId:a.projectId,runtimeId:a.runtimeId,workspaceId:a.workspaceId});const binding=Object.fromEntries(["runId","attemptId","runtimeId","projectId","organizationId","ownerUserId","workspaceId","bindingHash","bindingEpoch","profileHash","imageId","agentHash","deadlineAt"].map(k=>[k,a[k]]));return {binding,agent:assignment.agent,model:a.model,staticProfile:profiles.describeOriginalJobBootstrap(a,facts)};},
+   result(runId,input,credential){const assignment=this.assignment(runId,credential);if(!input||Object.keys(input).sort().join("|")!=="attemptId|result"||input.attemptId!==assignment.attemptId||!input.result||Object.keys(input.result).some(k=>!["exitCode","events","verifiedResponse"].includes(k))||!Number.isInteger(input.result.exitCode)||!Array.isArray(input.result.events)||input.result.events.length>128||Buffer.byteLength(JSON.stringify(input.result.events))>65536)fail("MANAGED_JOB_RESULT_DENIED");
+    const verifier=verifierFactory();for(const event of input.result.events){if(typeof event!=="string")fail("MANAGED_JOB_RESULT_DENIED");verifier.accept(event+"\n");}const verified=verifier.finish().verified===true;
+    return write(()=>{const {r}=current(runId,"launch");if(r.result_json)fail("MANAGED_JOB_RESULT_CONFLICT");cas(r,{result_json:JSON.stringify({exitCode:input.result.exitCode,verified,receivedAt:clock().toISOString()})});return {recorded:true};});
+--- a/services/ingenium-api/lib/dot-v2/core126-http.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -21,11 +21,20 @@
+    if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
+   },
+   async runtime(request){
+-   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
++   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|bootstrap-assignment|withdraw|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
+    if(!match)return null;
+    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
++   if(match[2]==="withdraw"){
++    const body=request.body;
++    if(request.method!=="POST"||request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.cookie!==undefined||request.headers?.origin!==undefined||!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body).sort().join("|")!=="attemptId|reason|runId"||body.runId!==match[1]||request.headers?.["x-ingenium-job-attempt"]!==body.attemptId)throw Object.assign(Error("Original JobRun withdrawal denied"),{status:401});
++    const narrowed=credentials.withdrawManagedJobDispatch(token,body);if(!narrowed)throw Object.assign(Error("Original JobRun withdrawal denied"),{status:401});return {data:narrowed};
++   }
+    const credential=credentials.inspectManagedJobCredential(token,"job-run");
+    if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
++   if(match[2]==="bootstrap-assignment"&&request.method==="GET"){
++    if(request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.["x-ingenium-job-attempt"]!==credential.attemptId)throw Object.assign(Error("Original JobRun bootstrap denied"),{status:401});
++    return {data:owner.bootstrapAssignment(match[1],credential)};
++   }
+    if(match[2]==="assignment"&&request.method==="GET")return {data:owner.assignment(match[1],credential)};
+    if(match[2]==="result"&&request.method==="POST")return {data:owner.result(match[1],request.body,credential)};
+    if(match[2]==="mcp-tools"||match[3]){
+--- a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -51,6 +51,7 @@
+    return {...image,approvedScopes:[...image.approvedScopes],model,modelBindingHash:before,resourceAdmissionId:facts.run.id,
+     projectName,limits:{cpuMillis:facts.runtime.cpuMillis,memoryBytes:facts.runtime.memoryBytes,pidsLimit:facts.runtime.pidsLimit,diskBytes:facts.runtime.diskBytes,processLimit:facts.runtime.processLimit}};
+   },
++  describeOriginalJobBootstrap(admission:any,facts:any){return imageOwner.describeOriginalJobBootstrap(admission,facts);},
+   assertCurrent(admission:any,facts:any){
+    agents.validateProtectedOpenCodeDeployment();
+    requireCurrentParentScopes(facts.runtime.id,admission.approvedScopes);
+--- a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
++++ b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+@@ -1,3 +1,4 @@
++import type {Core126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
+ import type {ChildProcess} from "node:child_process";
+ import type {IncomingHttpHeaders} from "node:http";
+ import type {agents,authorization,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,mcpCredentials,mcpAuthorizationPolicy} from "ingenium-core";
+@@ -27,9 +28,9 @@
+ }
+ export interface ManagedLaunchMaterial {
+  admission:ManagedJobAdmission;runId:string;attemptId:string;credentialRunId:string;
+- profileQualified:true;capability:string;provision:RuntimeProvisionRequest;
++ profileQualified:true;agentMaterial:Core126AgentMaterial;capability:string;provision:RuntimeProvisionRequest;
+ }
+-export interface ManagedSpecMaterial {admission:ManagedJobAdmission;capability:string;spec:DockerContainerSpec}
++export interface ManagedSpecMaterial {admission:ManagedJobAdmission;capability:string;agentMaterial:Core126AgentMaterial;spec:DockerContainerSpec}
+ export interface JournalKey {attemptId:string;revision:number;specHash:string}
+ export type JournalAction="launch"|"inspect"|"cancel"|"cleanup";
+ export type EffectDecision={accepted:false}|{accepted:true;admission:ManagedJobAdmission};
+@@ -49,7 +50,7 @@
+ export interface ManagedJobContainerPorts {
+  core:ManagedJobCoreClient;docker:DockerOwnerRequest;
+  buildRuntimeSpec(admission:ManagedJobAdmission):Promise<ManagedSpecMaterial>;
+- handoff(containerId:string,admission:ManagedJobAdmission,capability:string):Promise<void>;
++ handoff(containerId:string,admission:ManagedJobAdmission,capability:string,agentMaterial:Core126AgentMaterial):Promise<void>;
+ }
+ export type ManagedObservation={state:"active"|"unknown";code:string}|{state:"settled";code:string;proof:ManagedRetirementProof};
+ export type ManagedCleanupObservation=ManagedObservation|{state:"removed";code:string};
+@@ -71,7 +72,7 @@
+  fetchAssignment(identity:ManagedJobIdentity):Promise<unknown>;
+  reportResult(identity:ManagedJobIdentity,result:ManagedChildResult):Promise<unknown>;
+  spawn(command:"opencode",args:string[],options:{cwd:"/workspace";env:NodeJS.ProcessEnv;stdio:["ignore","pipe","pipe"];shell:false;detached:false}):ChildProcess;
+- verifierFactory():ResponseVerifier;environment:NodeJS.ProcessEnv;
++ verifierFactory():ResponseVerifier;environment:NodeJS.ProcessEnv;beforeSpawn?():void;retainChild?(child:ChildProcess):void;
+ }
+ export interface ManagerContext {request:{headers:IncomingHttpHeaders}}
+ export interface CoreActorContext {revalidate():authorization.AuthorizationPrincipal|null|undefined}
+@@ -87,11 +88,12 @@
+  modelBindingHash:string;model:string;projectName:string;limits:runtimes.RuntimeLimits;
+ }
+ export interface Core126Profiles {
++ describeOriginalJobBootstrap(admission:ManagedJobAdmission,facts:Core126Facts):unknown;
+  qualify(facts:Core126Facts):Promise<QualifiedManagedProfile>;
+  assertCurrent(admission:ManagedJobAdmission,facts:Core126Facts):void;
+ }
+ export type ManagedJobCredential=mcpCredentials.ManagedJobCredential;
+-export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential">;
++export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential"|"withdrawManagedJobDispatch">;
+ export interface Core126OwnerPorts {
+  getDb:typeof getDb;execTransaction:typeof execTransaction;checkpointAfterWrite:typeof checkpointAfterWrite;
+  jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent"|"finishJobRun"|"cancelJobRun">;
+@@ -118,6 +120,7 @@
+  requestCancel(runId:string,context:CoreActorContext):ManagedJobAdmission;
+  readOriginalRun(runId:string,scope:DotScope,context:CoreActorContext):NonNullable<ReturnType<typeof jobs.getJobRun>>;
+  requireCancellationIntent(runId:string):void;requireOriginalRetirementProof(runId:string,proof:unknown):void;
++ bootstrapAssignment(runId:string,credential:ManagedJobCredential):unknown;
+  assignment(runId:string,credential:ManagedJobCredential):ManagedJobAssignment;
+  result(runId:string,input:unknown,credential:ManagedJobCredential):{recorded:true};
+ }
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -127,6 +127,12 @@
+     request.on("error", reject);
+     request.end(payload);
+   });
++}
++
++async function handoffOriginalJobFrame(container:string,capability:string,agentMaterial:unknown):Promise<void>{
++ const payload=Buffer.from(JSON.stringify({capability,agentMaterial})+"\n","utf8");
++ if(payload.length>384*1024+256)throw Error("Original JobRun frame exceeds its bound");
++ await dockerHijack(`/containers/${encodeURIComponent(container)}/attach?stream=1&stdin=1&stdout=0&stderr=0`,undefined,payload);
+ }
+ 
+ async function handoffRuntimeCapability(container: string, capability: string): Promise<void> {
+@@ -394,9 +400,10 @@
+       if(material.runId!==admission.runId||material.attemptId!==admission.attemptId||material.credentialRunId!==admission.runId||material.profileQualified!==true||input.capability!==material.capability
+         ||input.runtimeId!==admission.runtimeId||input.organizationId!==admission.organizationId||input.projectId!==admission.projectId||input.ownerUserId!==admission.ownerUserId||input.workspaceId!==admission.workspaceId||input.storageMappingHash!==admission.bindingHash||input.securityEpoch!==admission.bindingEpoch||input.revision!==admission.provisioningRevision)throw Error("Managed JobRun material binding changed");
+       const mapping=mappings.get(input.workspaceId);if(!mapping)throw Error("Managed JobRun workspace mapping unavailable");
+-      return {admission:material.admission,capability:material.capability,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
++      if(!material.agentMaterial)throw Error("Original JobRun agent material unavailable");
++      return {admission:material.admission,capability:material.capability,agentMaterial:material.agentMaterial,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
+     },
+-    handoff:(containerId,_admission,capability)=>handoffRuntimeCapability(containerId,capability),
++    handoff:(containerId,_admission,capability,agentMaterial)=>handoffOriginalJobFrame(containerId,capability,agentMaterial),
+   });
+   const port = Number(environment("INGENIUM_RUNTIME_MANAGER_PORT"));
+   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("Runtime manager port is invalid");
+--- a/packages/veyra-operations/core126-image-owner.mjs
++++ b/packages/veyra-operations/core126-image-owner.mjs
+@@ -66,6 +66,9 @@
+    return freeze({qualified:true,id:'core126-image:'+d.approval.manifestSha256,hash:profileHash,imageId:d.manifest.imageId,parentImageId:proof.parent.imageId,daemonId:proof.daemonId,provisioningRevision:proof.parent.provisioningRevision,
+     approvedScopes:[...d.manifest.approvedScopes],expiresAt:Math.min(d.approval.validUntil,Date.parse(f.runtime.absoluteExpiresAt)),agentHash:scope.agentHash,model:f.model,modelBindingHash:f.modelBindingHash,jobRunAudience:'job-run',transport:CORE126_PROTOCOL});
+   },
++  describeOriginalJobBootstrap(admission,f){
++   this.assertCurrentOriginalJobRole(admission,f);const {d}=current(f);return freeze({imageId:d.manifest.imageId,files:structuredClone(d.manifest.files)});
++  },
+   assertCurrentOriginalJobRole(admission,f){
+    const {scope,proof,d}=current(f);
+    const admittedScope=Object.fromEntries(Object.keys(scope).map(key=>[key,admission[key]]));
+--- a/packages/veyra-operations/core126-image-owner.d.mts
++++ b/packages/veyra-operations/core126-image-owner.d.mts
+@@ -29,6 +29,7 @@
+  runId:string;jobId:string;projectId:string;organizationId:string;ownerUserId:string;runtimeId:string;runtimeRevision:number;parentContainerId:string;workspaceId:string;bindingHash:string;bindingEpoch:number;limits:Core126Limits;agentHash:string;profileId:string;profileHash:string;imageId:string;daemonId:string;provisioningRevision:number;model:string;modelBindingHash:string;approvedScopes:readonly string[];deadlineAt:string;
+ }
+ export interface Core126ImageOwner {
++ describeOriginalJobBootstrap(admission:Core126ImageAdmission,facts:Core126Facts):Readonly<{imageId:string;files:readonly {path:string;sha256:string;bytes:number;uid:number;gid:number;mode:number;kind:string}[]}>;
+  /** Invoke outside DB transaction; original Core must reread facts inside its write. */
+  withFreshOriginalJobRole<T>(facts:Core126Facts,work:()=>T|Promise<T>):Promise<T>;
+  qualifyOriginalJobRole(facts:Core126Facts & {model:string;modelBindingHash:string}):Promise<Core126QualifiedImage>;
+--- a/packages/veyra-operations/core126-image-contract.mjs
++++ b/packages/veyra-operations/core126-image-contract.mjs
+@@ -1,7 +1,7 @@
+ import {createHash} from 'node:crypto';
+ export const CORE126_PROTOCOL='scoped-core126-mcp-v1';
+-export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts']);
+-export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js']);
++export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts','services/ingenium-api/lib/dot-v2/job-original-authority.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/job-private-control.mjs','services/ingenium-api/lib/dot-v2/job-private-files.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs','services/ingenium-api/lib/dot-v2/job-private-plugin.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs','services/ingenium-api/lib/dot-v2/core126-owner.mjs','packages/ingenium-core/lib/tools/mcp-credentials.ts','packages/ingenium-extension/scripts/job-run-mcp-transport.ts','packages/ingenium-extension/scripts/job-run-mcp-client.ts']);
++export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js','/app/services/ingenium-api/dist/lib/dot-v2/job-original-authority.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-control.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-files.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-runtime.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-facade.mjs','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-client.js']);
+ export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+ export const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+ export const imageId=v=>typeof v==='string'&&/^sha256:[a-f0-9]{64}$/.test(v);
+--- a/packages/veyra-operations/core126-job-bootstrap.mjs
++++ b/packages/veyra-operations/core126-job-bootstrap.mjs
+@@ -6,7 +6,7 @@
+ export async function bootstrapCore126Job(ports){
+  for(const name of ['readOriginalJobFrame','validateOriginalProtectedDeployment','writeOriginalPrivateCapability','fetchOriginalAssignment','writeOriginalPrivateJson','assertOriginalImageIsolation','runOriginalChild'])if(typeof ports?.[name]!=='function')unavailable('original job bootstrap producer missing');
+  await ports.validateOriginalProtectedDeployment();
+- const frame=await ports.readOriginalJobFrame({maxBytes:384*1024+62});
++ const frame=await ports.readOriginalJobFrame({maxBytes:384*1024+256});
+  if(!frame||typeof frame.capability!=='string'||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(frame.capability))unavailable('original job attach frame');
+  await ports.writeOriginalPrivateCapability('/run/ingenium-runtime/capability',frame.capability);
+  const expected=await ports.fetchOriginalAssignment();
+--- /dev/null
++++ b/config/opencode-managed/job-opencode.json
+@@ -0,0 +1,20 @@
++{
++  "plugins": [
++    "-*",
++    "opencode.models.dev",
++    "opencode.provider.opencode",
++    "opencode.config.policy",
++    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker",
++    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent"
++  ],
++  "permissions": [
++    {
++      "action": "*",
++      "resource": "*",
++      "effect": "deny"
++    }
++  ],
++  "mcp": {
++    "servers": {}
++  }
++}
+--- /dev/null
++++ b/config/opencode-managed/plugins/enforce-job-agent/index.mjs
+@@ -0,0 +1,3 @@
++// Immutable native plugin entry; original API private producers are copied in the same approved image closure.
++import {createOriginalPrivateJobPlugin} from "/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs";
++export default createOriginalPrivateJobPlugin();
+--- a/scripts/runtime-entrypoint.sh
++++ b/scripts/runtime-entrypoint.sh
+@@ -19,6 +19,18 @@
+   echo "ERROR: runtime state roots are invalid"
+   exit 1
+ fi
++
++case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
++  job)
++    export OPENCODE_CONFIG_PROJECT_DISABLE="1"
++    export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
++    export OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/job-opencode.json"
++    unset OPENCODE_CONFIG_CONTENT
++    exec node /app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js
++    ;;
++  runtime) ;;
++  *) echo "ERROR: runtime role unavailable"; exit 1 ;;
++esac
+ 
+ NODE_ENV=production node --input-type=module -e '
+   let core;
+@@ -105,10 +117,6 @@
+ chmod 0600 "$config_file"
+ 
+ case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
+-  job)
+-    if [ -z "${INGENIUM_JOB_RUN_ID:-}" ] || [ -z "${INGENIUM_JOB_ATTEMPT_ID:-}" ]; then echo "ERROR: original JobRun identity missing"; exit 1; fi
+-    exec node /app/services/ingenium-api/dist/scripts/runtime-job-child.js
+-    ;;
+   runtime)
+     export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
+     exec supervisord -c /app/runtime-supervisord.conf
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -280,8 +280,10 @@
+     find /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx \
+       ! -type l -perm /022 -exec chmod go-w {} + && \
+     chmod 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md && \
+-    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode && \
++    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent /etc/opencode && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
++    install -o root -g root -m 0444 /app/config/opencode-managed/job-opencode.json /usr/local/share/ingenium/opencode-managed/job-opencode.json && \
++    install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-job-agent/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs && \
+     install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md && \
+     ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json && \
+--- a/packages/ingenium-core/lib/tools/mcp-credentials.ts
++++ b/packages/ingenium-core/lib/tools/mcp-credentials.ts
+@@ -607,3 +607,25 @@
+ export function revokeManagedJobCredential(runId:string):void {
+   execTransaction(()=>getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("UPDATE job_run_mcp_credentials SET revoked_at=? WHERE run_id=? AND revoked_at IS NULL").run(new Date().toISOString(),runId));checkpointAfterWrite();
+ }
++
++/** Narrow self-withdrawal remains available after expiry/revocation. Never resolves an Auth principal. */
++export function withdrawManagedJobDispatch(token:string,input:{runId:string;attemptId:string;reason:string}):{withdrawalRecorded:true;wholeContainerRetired:false}|undefined {
++ if(!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token)||!input||Object.keys(input).sort().join("|")!=="attemptId|reason|runId"||!["CORE126_JOB_ENFORCEMENT_LOST","CORE126_JOB_PLUGIN_UNLOADED","CORE126_JOB_PARENT_STOP"].includes(input.reason))return undefined;
++ const result=execTransaction(()=>{
++  const db=getDb(process.env.INGENIUM_CORE_DB_PATH);
++  const row=db.prepare(`SELECT credential.id,credential.run_id,credential.attempt_id,ledger.project_id,ledger.phase
++   FROM job_run_mcp_credentials credential JOIN job_run_managed_execution ledger
++   ON ledger.run_id=credential.run_id AND ledger.attempt_id=credential.attempt_id AND ledger.credential_id=credential.id
++   JOIN job_runs run ON run.id=ledger.run_id AND run.project_id=ledger.project_id AND run.effective_service_principal_id=credential.service_principal_id
++   WHERE credential.token_hash=? AND credential.kind='job-run' AND credential.audience='job-run'
++    AND credential.run_id=? AND credential.attempt_id=?`).get(hashSecurityToken(token),input.runId,input.attemptId) as {id:string;run_id:string;attempt_id:string;project_id:string;phase:string}|undefined;
++  if(!row)return undefined;
++  const now=new Date().toISOString();
++  if(row.phase!=="retired"){
++   db.prepare("UPDATE job_run_managed_execution SET phase='cancel_requested',revision=revision+1,updated_at=? WHERE run_id=? AND attempt_id=? AND credential_id=? AND phase NOT IN ('retired','cancel_requested')").run(now,row.run_id,row.attempt_id,row.id);
++   db.prepare("UPDATE veyra_dot_records SET revision=revision+1,body=json_set(body,'$.state','cancel_requested','$.revision',revision+1,'$.updatedAt',?) WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.state') NOT IN ('cancel_requested','success','failed','cancelled','skipped')").run(now,row.run_id,row.project_id);
++  }
++  db.prepare("UPDATE job_run_mcp_credentials SET revoked_at=COALESCE(revoked_at,?) WHERE id=? AND run_id=? AND attempt_id=?").run(now,row.id,row.run_id,row.attempt_id);
++  return {withdrawalRecorded:true as const,wholeContainerRetired:false as const};
++ });if(result)checkpointAfterWrite();return result;
++}
+--- /dev/null
++++ b/services/ingenium-api/tests/veyra-dot-job-bootstrap-producers.test.mjs
+@@ -0,0 +1,57 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {pathToFileURL} from 'node:url';import {resolve} from 'node:path';import {stripTypeScriptTypes} from 'node:module';import {DatabaseSync} from 'node:sqlite';import {createHash} from 'node:crypto';import {EventEmitter} from 'node:events';
++const root=process.env.VEYRA_DOT_PROPOSAL_SOURCE_ROOT;if(!root)throw Error('Actual source root required');
++const actualSource=process.env.VEYRA_DOT_BOOTSTRAP_ACTUAL==='1';
++const files=new Map([['job-original-authority','job-original-authority.proposal.mjs'],['job-bootstrap-frame','job-bootstrap-frame.proposal.mjs'],['job-private-control','job-private-control.proposal.mjs'],['job-private-files','job-private-files.proposal.mjs'],['job-bootstrap-runtime','job-bootstrap-runtime.proposal.mjs'],['job-private-plugin','job-private-plugin.proposal.mjs'],['job-bootstrap-facade','job-bootstrap-facade.proposal.mjs'],['managed-job-child','managed-job-child-bootstrap.proposal.mjs']]);
++const urls=new Map(),asModule=s=>`data:text/javascript;base64,${Buffer.from(s).toString('base64')}`;
++function moduleUrl(name){if(actualSource)return pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2',name+'.mjs')).href;if(urls.has(name))return urls.get(name);const s=readFileSync(new URL('./'+files.get(name),import.meta.url),'utf8').replace(/(from |import\()(["'])([^"']+)\2/g,(all,b,q,spec)=>{if(spec.startsWith('node:'))return all;if(spec.startsWith('./')&&files.has(spec.slice(2,-4)))return b+q+moduleUrl(spec.slice(2,-4))+q;if(spec.startsWith('../../../../packages/'))return b+q+pathToFileURL(resolve(root,spec.slice(12))).href+q;throw Error('Unmapped reviewed import '+spec);});const u=asModule(s);urls.set(name,u);return u;}
++const frame=await import(moduleUrl('job-bootstrap-frame')),control=await import(moduleUrl('job-private-control')),authorityModule=await import(moduleUrl('job-original-authority')),privateFiles=await import(moduleUrl('job-private-files'));
++const capability='ing_'+('a'.repeat(12))+'_'+('b'.repeat(43));const id=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`,identity={runId:id(1),attemptId:id(2)};
++const bytes=m=>Buffer.from(JSON.stringify({capability,agentMaterial:m})+'\n');
++test('one bounded original manager frame; duplicate escaped/nested keys and trailing frames rejected',()=>{assert.deepEqual(frame.parseOriginalJobFrame(bytes({one:1})),{capability,agentMaterial:{one:1}});for(const text of [`{"capability":"${capability}","capability":"${capability}","agentMaterial":{}}\n`,`{"capability":"${capability}","agentMaterial":{"x":1,"\\u0078":2}}\n`,`{"capability":"${capability}","agentMaterial":{}}{}\n`,`{"capability":"${capability}","agentMaterial":{},"extra":1}\n`])assert.throws(()=>frame.parseOriginalJobFrame(Buffer.from(text)));assert.throws(()=>frame.parseOriginalJobFrame(Buffer.from([0xff,10])));assert.throws(()=>frame.parseOriginalJobFrame(bytes({}).subarray(0,-1)));});
++test('exact frame byte ceiling and full384KiB material envelope fit',()=>{const empty=bytes({padding:''}).length;assert.equal(frame.parseOriginalJobFrame(bytes({padding:'x'.repeat(frame.MAX_JOB_FRAME_BYTES-empty)})).agentMaterial.padding.length,frame.MAX_JOB_FRAME_BYTES-empty);assert.throws(()=>frame.parseOriginalJobFrame(bytes({padding:'x'.repeat(frame.MAX_JOB_FRAME_BYTES-empty+1)})));const material={padding:'x'.repeat(384*1024-JSON.stringify({padding:''}).length)};assert.equal(Buffer.byteLength(JSON.stringify(material)),384*1024);assert.ok(bytes(material).length<=frame.MAX_JOB_FRAME_BYTES);});
++test('stream frame waits for EOF and rejects over-limit/trailing data',async()=>{async function* stream(parts){yield*parts;}assert.deepEqual(await frame.readOriginalJobFrame(stream([bytes({one:1}).subarray(0,20),bytes({one:1}).subarray(20)])),{capability,agentMaterial:{one:1}});await assert.rejects(frame.readOriginalJobFrame(stream([bytes({}),bytes({})])));await assert.rejects(frame.readOriginalJobFrame(stream([Buffer.alloc(frame.MAX_JOB_FRAME_BYTES+1)])));});
++function request(path,body=identity){return {path,method:'POST',headers:{authorization:'Bearer '+capability,'x-ingenium-audience':'job-run','x-ingenium-job-attempt':identity.attemptId},body};}
++test('private parent channel binds original capability/run/attempt and latches before async withdrawal',async()=>{let calls=0,release;const pending=new Promise(r=>release=r);const c=control.createOriginalJobControl({capability,identity,loadBinding:async()=>({bound:true}),withdraw:async()=>{calls++;await pending;return {withdrawalRecorded:true,wholeContainerRetired:false};}});assert.deepEqual(await c.dispatch(request('/binding')),{bound:true});const body={...identity,reason:'CORE126_JOB_PLUGIN_UNLOADED'},first=c.dispatch(request('/withdraw',body));await assert.rejects(c.dispatch(request('/binding')));const second=c.dispatch(request('/withdraw',body));release();const [a,b]=await Promise.all([first,second]);assert.equal(calls,1);assert.deepEqual(a,b);assert.equal(a.wholeContainerRetired,false);});
++test('private parent channel rejects wrong token/attempt/origin/extra fields without invoking producers',async()=>{let called=0;const c=control.createOriginalJobControl({capability,identity,loadBinding:async()=>called++,withdraw:async()=>called++});for(const mutate of [r=>r.headers.authorization='Bearer other',r=>r.headers['x-ingenium-job-attempt']='other',r=>r.headers.cookie='s=x',r=>r.headers.origin='http://bad',r=>r.body={...identity,extra:true},r=>r.path='/other']){const r=request('/binding');mutate(r);await assert.rejects(c.dispatch(r));}assert.equal(called,0);});
++test('retained original child custody does not treat signal/leader state as whole-container proof',async()=>{let fire;const signals=[],c=control.createOriginalJobCustody({setTimer:fn=>(fire=fn,1),clearTimer:()=>{}}),child=new EventEmitter();child.kill=signal=>signals.push(signal);c.assertMaySpawn();c.retain(child);let done=false;const stopped=c.withdraw().then(v=>(done=true,v));await Promise.resolve();assert.equal(done,false);assert.throws(()=>c.assertMaySpawn());assert.deepEqual(signals,['SIGTERM']);fire();assert.deepEqual(signals,['SIGTERM','SIGKILL']);child.emit('close',143);assert.deepEqual(await stopped,{leaderClosed:true,wholeContainerRetired:false});assert.deepEqual(await c.withdraw(),{leaderClosed:true,wholeContainerRetired:false});});
++test('original assignment client carries job audience/attempt; no generic auth or retry',async()=>{const seen=[],a=authorityModule.createOriginalJobAuthority({environment:{INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId,INGENIUM_API_URL:'http://original.invalid/api/v1'},readCapability:()=>capability,fetchImpl:async(url,init)=>{seen.push({url:String(url),init});return Response.json({data:{bound:true}});}});assert.deepEqual(await a.request('bootstrap-assignment'),{bound:true});assert.equal(seen[0].url,`http://original.invalid/api/v1/runtime/job-runs/${identity.runId}/bootstrap-assignment`);assert.equal(seen[0].init.headers['X-Ingenium-Job-Attempt'],identity.attemptId);assert.equal(seen[0].init.redirect,'error');await assert.rejects(a.request('auth/preflight'));assert.equal(seen.length,1);});
++function privateIo(){let opened=0,closed=0,written;const stat={isFile:()=>true,isSymbolicLink:()=>false,isDirectory:()=>true,uid:1000,mode:0o600,nlink:1,ino:7,dev:9};const io={readFileSync:()=> '1 0 0:1 / /run/ingenium-runtime rw - tmpfs tmpfs rw',lstatSync:path=>path==='/run/ingenium-runtime'?{...stat,mode:0o700}:stat,realpathSync:p=>p,existsSync:()=>true,mkdirSync(){},openSync(path,flags,mode){opened++;assert.ok(flags&128);assert.equal(mode,0o600);return 10;},writeFileSync(_fd,v){written=v;},fsyncSync(){},fstatSync:()=>stat,closeSync(){closed++;}};return {io,stats:()=>({opened,closed,written})};}
++test('private writer uses exclusive descriptor, exact tmpfs path and close on failed preservation',()=>{const f=privateIo();f.io.lstatSync=path=>path.endsWith('/capability')?{isFile:()=>true,isSymbolicLink:()=>false,uid:1000,mode:0o600,nlink:1,ino:7,dev:9}:{isDirectory:()=>true,isSymbolicLink:()=>false,uid:1000,mode:0o700};privateFiles.writeOriginalJobPrivate('/run/ingenium-runtime/capability',capability,f.io);assert.equal(f.stats().written.toString(),capability);assert.equal(f.stats().closed,1);assert.throws(()=>privateFiles.writeOriginalJobPrivate('/tmp/escape',capability,f.io));f.io.fstatSync=()=>({isFile:()=>true,uid:1000,mode:0o644,nlink:1,ino:7,dev:9});assert.throws(()=>privateFiles.writeOriginalJobPrivate('/run/ingenium-runtime/capability',capability,f.io));assert.equal(f.stats().closed,2);});
++const hash=s=>createHash('sha256').update(s).digest('hex');
++function withdrawalDb(){const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE job_run_mcp_credentials(id TEXT,run_id TEXT,attempt_id TEXT,service_principal_id TEXT,token_hash TEXT,kind TEXT,audience TEXT,revoked_at TEXT,expires_at TEXT);CREATE TABLE job_run_managed_execution(run_id TEXT,attempt_id TEXT,credential_id TEXT,project_id TEXT,phase TEXT,revision INTEGER,updated_at TEXT);CREATE TABLE job_runs(id TEXT,project_id TEXT,effective_service_principal_id TEXT,status TEXT);CREATE TABLE veyra_dot_records(kind TEXT,revision INTEGER,body TEXT);`);db.prepare('INSERT INTO job_run_mcp_credentials VALUES(?,?,?,?,?,?,?,?,?)').run('credential',identity.runId,identity.attemptId,'principal',hash(capability),'job-run','job-run',null,'2000-01-01');db.prepare('INSERT INTO job_run_managed_execution VALUES(?,?,?,?,?,?,?)').run(identity.runId,identity.attemptId,'credential','project','running',3,'old');db.prepare('INSERT INTO job_runs VALUES(?,?,?,?)').run(identity.runId,'project','principal','running');db.prepare('INSERT INTO veyra_dot_records VALUES(?,?,?)').run('operation',1,JSON.stringify({runId:identity.runId,scope:{projectId:'project'},state:'running'}));const original=actualSource?readFileSync(resolve(root,'packages/ingenium-core/lib/tools/mcp-credentials.ts'),'utf8'):readFileSync(new URL('./job-withdraw-credential.append.ts',import.meta.url),'utf8');const start=original.indexOf('export function withdrawManagedJobDispatch(');assert.ok(start>=0);const end=original.indexOf('\n}',start)+2;const raw=stripTypeScriptTypes(original.slice(start,end)).replace('export function','function');let checkpoints=0;const fn=new Function('getDb','execTransaction','checkpointAfterWrite','hashSecurityToken',raw+';return withdrawManagedJobDispatch;')(()=>db,work=>{db.exec('BEGIN');try{const v=work();db.exec('COMMIT');return v;}catch(e){db.exec('ROLLBACK');throw e;}},()=>checkpoints++,hash);return {db,fn,checkpoints:()=>checkpoints};}
++test('original credential withdrawal self-narrows expired token atomically without terminal/quota completion',()=>{const f=withdrawalDb();try{assert.deepEqual(f.fn(capability,{...identity,reason:'CORE126_JOB_ENFORCEMENT_LOST'}),{withdrawalRecorded:true,wholeContainerRetired:false});assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'cancel_requested');assert.equal(f.db.prepare('SELECT status FROM job_runs').get().status,'running');assert.ok(f.db.prepare('SELECT revoked_at FROM job_run_mcp_credentials').get().revoked_at);assert.equal(JSON.parse(f.db.prepare('SELECT body FROM veyra_dot_records').get().body).state,'cancel_requested');const revision=f.db.prepare('SELECT revision FROM job_run_managed_execution').get().revision;assert.ok(f.fn(capability,{...identity,reason:'CORE126_JOB_PLUGIN_UNLOADED'}));assert.equal(f.db.prepare('SELECT revision FROM job_run_managed_execution').get().revision,revision);}finally{f.db.close();}});
++test('withdrawal cannot target another run/attempt/credential or revive a retired run',()=>{const f=withdrawalDb();try{for(const input of [{...identity,runId:id(8)},{...identity,attemptId:id(8)}])assert.equal(f.fn(capability,{...input,reason:'CORE126_JOB_ENFORCEMENT_LOST'}),undefined);assert.equal(f.fn('ing_'+('x'.repeat(12))+'_'+('y'.repeat(43)),{...identity,reason:'CORE126_JOB_ENFORCEMENT_LOST'}),undefined);f.db.exec("UPDATE job_run_managed_execution SET phase='retired';UPDATE job_runs SET status='success';");assert.ok(f.fn(capability,{...identity,reason:'CORE126_JOB_PLUGIN_UNLOADED'}));assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'retired');assert.equal(f.db.prepare('SELECT status FROM job_runs').get().status,'success');}finally{f.db.close();}});
++test('withdrawal rollback preserves original running ledger/credential when Dot write fails',()=>{const f=withdrawalDb();try{f.db.exec('DROP TABLE veyra_dot_records');assert.throws(()=>f.fn(capability,{...identity,reason:'CORE126_JOB_ENFORCEMENT_LOST'}));assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'running');assert.equal(f.db.prepare('SELECT revoked_at FROM job_run_mcp_credentials').get().revoked_at,null);assert.equal(f.checkpoints(),0);}finally{f.db.close();}});
++
++const runtime=await import(moduleUrl('job-bootstrap-runtime')),pluginProducer=await import(moduleUrl('job-private-plugin'));
++const materialModule=await import(pathToFileURL(resolve(root,'packages/veyra-operations/core126-agent-material.mjs')).href);
++function bindingFixture(){const config={description:'Private source fixture',mode:'primary',system:'Fixture only.',hidden:false,permissions:[{action:'*',resource:'*',effect:'deny'}]},binding={...identity,runtimeId:id(3),projectId:id(4),organizationId:id(5),ownerUserId:id(6),workspaceId:id(7),bindingHash:hash('workspace'),bindingEpoch:2,profileHash:hash('profile'),imageId:'sha256:'+hash('image'),agentHash:hash(JSON.stringify(config)),deadlineAt:new Date(Date.now()+60000).toISOString()},expected={binding,agent:'fixture',model:'opencode/fixture',staticProfile:{imageId:binding.imageId,files:[]}},material=materialModule.projectCore126AgentMaterial({admission:binding,agentName:'fixture',agentConfig:config}),broker={id:'ingenium-llm-broker',name:'ingenium-llm-broker',description:'protected',mode:'subagent',hidden:true,system:'protected fixture',permissions:[{action:'*',resource:'*',effect:'ask'}]},environment={INGENIUM_JOB_RUN_ID:identity.runId,INGENIUM_JOB_ATTEMPT_ID:identity.attemptId,INGENIUM_RUNTIME_ID:binding.runtimeId,INGENIUM_PROJECT_ID:binding.projectId,INGENIUM_ORGANIZATION_ID:binding.organizationId,INGENIUM_RUNTIME_OWNER_ID:binding.ownerUserId,INGENIUM_WORKSPACE_ID:binding.workspaceId,INGENIUM_STORAGE_MAPPING_HASH:binding.bindingHash,INGENIUM_API_URL:'http://original.invalid/api/v1'},snapshot={agentName:'fixture',admission:{...binding,model:expected.model},material,broker:structuredClone(broker),mcpEnvironment:{INGENIUM_API_URL:environment.INGENIUM_API_URL}};return {expected,snapshot,environment,broker};}
++test('standalone plugin private producers independently revalidate Core binding and original broker/API target',async()=>{
++ const f=bindingFixture();let coreReads=0,staticReads=0,parentReads=0;const authority={...identity,request:async operation=>{assert.equal(operation,'bootstrap-assignment');coreReads++;return structuredClone(f.expected);}};
++ const ports=pluginProducer.createOriginalPrivateJobPorts({environment:f.environment,authority,readCapability:()=>capability,requestControl:async()=>{parentReads++;return structuredClone(f.snapshot);},assertTmpfs:()=>{},assertStatic:()=>{staticReads++;},readBroker:()=>f.broker});
++ const snapshot=await ports.loadOriginalBinding();await ports.assertOriginalIsolation(snapshot);await ports.assertStaticImageFiles(snapshot);assert.equal(coreReads,2);assert.equal(parentReads,1);assert.equal(staticReads,3);
++ f.snapshot.broker.system='socket-forged';await assert.rejects(ports.loadOriginalBinding());f.snapshot.broker=f.broker;f.snapshot.mcpEnvironment.INGENIUM_API_URL='http://foreign.invalid/api/v1';await assert.rejects(ports.loadOriginalBinding());
++});
++test('standalone plugin withdrawal always directly calls original Core even if private socket fails',async()=>{
++ const f=bindingFixture();let direct=0,parent=0;const ports=pluginProducer.createOriginalPrivateJobPorts({environment:f.environment,authority:{...identity,request:async(operation,body)=>{assert.equal(operation,'withdraw');assert.deepEqual(body,{...identity,reason:'CORE126_JOB_PLUGIN_UNLOADED'});direct++;return {withdrawalRecorded:true,wholeContainerRetired:false};}},readCapability:()=>capability,requestControl:async()=>{parent++;throw Error('private socket missing');},assertTmpfs:()=>{},assertStatic:()=>{},readBroker:()=>f.broker});
++ await assert.rejects(ports.revokeOriginalDispatch(f.snapshot.admission,'CORE126_JOB_PLUGIN_UNLOADED'));assert.equal(direct,1);assert.equal(parent,1);
++});
++test('private original broker producer matches exact protected enforcer system and ordered permissions',()=>{
++ const raw=readFileSync(resolve(root,'config/opencode-managed/plugins/enforce-reserved-broker/index.mjs'),'utf8');const extract=name=>{const i=raw.indexOf('function '+name+'('),j=raw.indexOf('\n}',i)+2;assert.ok(i>=0&&j>i);return raw.slice(i,j);};const existing=new Function(extract('profileBody')+';'+extract('brokerPermissions')+';return {profileBody,brokerPermissions};')();const text='---\nname: ingenium-llm-broker\n---\nProtected fixture.\n';const actual=runtime.readOriginalProtectedBroker(()=>text);assert.equal(actual.system,existing.profileBody(text));assert.deepEqual(actual.permissions,existing.brokerPermissions());
++});
++test('approved static file guard reads exact raw digest with stable root-owned descriptors',()=>{
++ const value=Buffer.from('immutable'),row={path:'/fixed/image',sha256:hash(value),bytes:value.length},stat={isFile:()=>true,uid:0,gid:0,nlink:1,mode:0o444,size:value.length,ino:3,dev:4,mtimeMs:1,ctimeMs:1};let read=0,closed=0;const io={realpathSync:p=>p,openSync:()=>10,fstatSync:()=>stat,lstatSync:()=>({...stat,isSymbolicLink:()=>false}),readSync(_fd,buf){if(read++)return 0;value.copy(buf);return value.length;},closeSync(){closed++;}};
++ assert.equal(privateFiles.assertOriginalJobStaticFiles({imageId:'sha256:'+hash('image'),files:[row]},[row.path],io),true);assert.equal(closed,1);read=0;assert.throws(()=>privateFiles.assertOriginalJobStaticFiles({imageId:'sha256:'+hash('image'),files:[{...row,sha256:hash('changed')}]},[row.path],io));assert.equal(closed,2);
++});
++test('closed withdrawal route runs before ordinary current-credential resolution; bootstrap route binds attempt',async()=>{
++ const http=await import(actualSource?pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2/core126-http.mjs')).href:asModule(readFileSync(new URL('./core126-http-bootstrap.proposal.mjs',import.meta.url),'utf8')));let narrowed=0,assigned=0;const handlers=http.createCore126Handlers({owner:{bootstrapAssignment(){assigned++;return {privateBinding:true};}},managerGuard:{},credentials:{inspectManagedJobCredential:()=>({runId:identity.runId,attemptId:identity.attemptId}),withdrawManagedJobDispatch:(token,input)=>{assert.equal(token,capability);assert.deepEqual(input,{...identity,reason:'CORE126_JOB_ENFORCEMENT_LOST'});narrowed++;return {withdrawalRecorded:true,wholeContainerRetired:false};}}});
++ const r={path:`/runtime/job-runs/${identity.runId}/withdraw`,method:'POST',headers:{authorization:'Bearer '+capability,'x-ingenium-audience':'job-run','x-ingenium-job-attempt':identity.attemptId},body:{...identity,reason:'CORE126_JOB_ENFORCEMENT_LOST'}};assert.equal((await handlers.runtime(r)).data.wholeContainerRetired,false);assert.equal(narrowed,1);await handlers.runtime({...r,path:`/runtime/job-runs/${identity.runId}/bootstrap-assignment`,method:'GET',body:undefined});assert.equal(assigned,1);await assert.rejects(handlers.runtime({...r,headers:{...r.headers,'x-ingenium-job-attempt':id(9)}}));assert.equal(narrowed,1);
++});
++
++test('original child keeps model argv/private config and refuses spawn after parent latch',async()=>{
++ const {createManagedJobChild}=await import(moduleUrl('managed-job-child'));const f=bindingFixture(),binding=f.expected.binding,prompt='Fixture prompt';
++ const assignment={...identity,workspaceId:binding.workspaceId,bindingHash:binding.bindingHash,runtimeId:binding.runtimeId,projectId:binding.projectId,organizationId:binding.organizationId,ownerUserId:binding.ownerUserId,profileQualified:true,executable:'opencode',cwd:'/workspace',credentialBoundToOriginalRun:true,prompt,promptHash:hash(prompt),agent:f.expected.agent,model:f.expected.model};
++ let spawned=0,retained=0;const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>{};
++ const custody=control.createOriginalJobCustody();const ports={environment:f.environment,fetchAssignment:async()=>assignment,reportResult:async()=>{},verifierFactory:()=>({accept(){},finish:()=>({verified:true})}),beforeSpawn:()=>custody.assertMaySpawn(),retainChild:proc=>{retained++;custody.retain(proc);},spawn(command,args,options){spawned++;assert.equal(command,'opencode');assert.equal(args[args.indexOf('--model')+1],f.expected.model);assert.equal(options.env.OPENCODE_CONFIG_PROJECT_DISABLE,'1');assert.equal(options.env.OPENCODE_CONFIG_DIR,'/run/ingenium-runtime/job/config');assert.equal(options.env.OPENCODE_CONFIG,'/usr/local/share/ingenium/opencode-managed/job-opencode.json');queueMicrotask(()=>child.emit('close',0));return child;}};
++ assert.equal(await createManagedJobChild(ports)(identity),0);assert.equal(spawned,1);assert.equal(retained,1);await custody.withdraw();await assert.rejects(createManagedJobChild(ports)(identity));assert.equal(spawned,1);
++});

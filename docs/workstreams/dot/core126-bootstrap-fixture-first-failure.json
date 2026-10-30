@@ -1,0 +1,10 @@
+{
+  "test": "standalone plugin private producers independently revalidate Core binding and original broker/API target",
+  "firstExpandedRun": {
+    "pass": 15,
+    "fail": 1
+  },
+  "failure": "Missing expected rejection after test mutated snapshot.broker.system. Fixture snapshot.broker and independent readBroker source accidentally referenced the same object, so mutation also changed the expected source.",
+  "correction": "Snapshot broker now structuredClone(original fixture broker); no production guard was relaxed. Final17/17 pass.",
+  "evidenceClass": "source fixture bug, not native SDK/image/runtime qualification"
+}

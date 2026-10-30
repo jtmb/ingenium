@@ -1,0 +1,277 @@
+{
+  "state": "unapplied concrete source proposals; image approval remains closed",
+  "patchSha256": "649b2947288f24c86e62dc6dd7ba50acfe765aa14bfb2fd17b9c6553cefcf83c",
+  "targetCount": 29,
+  "preimages": {
+    "services/ingenium-api/lib/dot-v2/job-original-authority.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-original-authority.d.mts": null,
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-private-control.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-private-files.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts": null,
+    "services/ingenium-api/lib/dot-v2/job-private-plugin.mjs": null,
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs": null,
+    "services/ingenium-api/scripts/runtime-job-bootstrap.ts": null,
+    "services/ingenium-api/scripts/runtime-job-child.ts": "bb8322e867562dc44c04dd9acec797d978594096d6da54efb0659c0f2839d25a",
+    "services/ingenium-api/scripts/runtime-job-mcp.ts": null,
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": "00d1008145943107a90375fa3dd10040547d47d0a1e8986da9b0946136511942",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": "7bb13d31cf01fa0739f951616cdd89409eda5ee9182e5b49a6e695b18f802487",
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": "7164e39cade3bb892375625d12ff335c89661c1ad8e29c7f606b641ff6a88e00",
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "66c9c4b0bd5498fa9c446f5c6aa8b9e334112fd690cb417bb3246e959f4ee638",
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": "81044c11b514102f0ffa2c38bb03d725fbe86003124a6aba8b2224c51e2a9b85",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "8f608216ee7f54a5acf008ae84cbd6dc53a8b28ec726914b462b0758be64cf61",
+    "services/ingenium-api/scripts/runtime-manager.ts": "4a3ff852d1973885df0f13f0f395e3720d7da94a4014430b6b3ed3f506da6a16",
+    "packages/veyra-operations/core126-image-owner.mjs": "040e5e5b4d8118a1eb6cf5663181ed076a6f2ed9a264eee29245999f4901910b",
+    "packages/veyra-operations/core126-image-owner.d.mts": "261bfc82990e495d2a258204197ff643f8caf48486a80febd0cc2642cd1fcc69",
+    "packages/veyra-operations/core126-image-contract.mjs": "1147543c03a5292991db846aaca6f5fdad59ea1d421b59882da497bc579be191",
+    "packages/veyra-operations/core126-job-bootstrap.mjs": "3f2f096cb4ed3c2932172acf98d9a8bd1d726b7e5eb4bf8ad2848eeb0dc656eb",
+    "config/opencode-managed/job-opencode.json": null,
+    "config/opencode-managed/plugins/enforce-job-agent/index.mjs": null,
+    "scripts/runtime-entrypoint.sh": "e0070f091e9500c6e13ef02822c1a56bb50285ab9974d0c6bae543465e7f0e23",
+    "Dockerfile": "0dfbd44093e98f776ca9f214ae6447a85c605edf82941d11f1c2e0cae96b73d8",
+    "packages/ingenium-core/lib/tools/mcp-credentials.ts": "567af368a9efb131ed3027015cf9c2fea1dc39ae29bd583f1ca0c22220708c62",
+    "services/ingenium-api/tests/veyra-dot-job-bootstrap-producers.test.mjs": null
+  },
+  "postimages": {
+    "services/ingenium-api/lib/dot-v2/job-original-authority.mjs": "d18d5d892477eb5d5a9c501ee3194edf8314cf896997bdd0559aeabcc271400e",
+    "services/ingenium-api/lib/dot-v2/job-original-authority.d.mts": "626dc2bc8fa51020ef5aeb5a68c86d9db7e82e8ad57f6096307b615ad288af13",
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8",
+    "services/ingenium-api/lib/dot-v2/job-private-control.mjs": "3b9334dc6e32b27b1de2ad50443c63a05a7a48a3d1d78f6454b0baf6d8507b6a",
+    "services/ingenium-api/lib/dot-v2/job-private-files.mjs": "e45245d6923f37f17a2f5a8503be0a67852c50eeada2ba3d1fcd202b222e6631",
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs": "15fca1e2f55a70ea6e259949a44c2b948abf3870d3a4be2133d58ea5143bbd42",
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts": "37ded5725c5869d8d5f55ae75d60958e392ce57111444dff69f02e6574cc2794",
+    "services/ingenium-api/lib/dot-v2/job-private-plugin.mjs": "f0d26fa13b97b8879961c5e9e0956a744a34dc626275447fa6deb49b919c04d6",
+    "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs": "c98582e75fed3791aed7b8c5679ba30d67be6cc2034884fb488eef1f19e07226",
+    "services/ingenium-api/scripts/runtime-job-bootstrap.ts": "126f89bb908b7240b91841b9bc7b7e7dabb8f02a3c48097267535736e794e862",
+    "services/ingenium-api/scripts/runtime-job-child.ts": "dff0164eabb77d776736ac36db20211fdb327061c22807cdd68af35a0d581502",
+    "services/ingenium-api/scripts/runtime-job-mcp.ts": "6d22a7a97a5602fc66629a2bde3ff8513ea58cdfdd41ef400db8c18ccff04dcd",
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": "4c856c0a4d4df540b1f90a42ec5771870fae272e4851f12e43567d7225149e12",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923",
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": "e10260de3b5845807b27b122e15a9b183ad1daae565a92dbd95ecc1c5376b611",
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "fbdfffd05bd0c804ac67ea5ccd74c8f0112a96d0d7a329230a12e0a424e7eb38",
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": "019bedb59fe5f85cc3fb1163c2da5750ac52c61f315482e383e85313f22086ef",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "9f42d00f8d02c3e30bdb3cf8ded142048495a81dfa98ba3ba361aff1a284d84e",
+    "services/ingenium-api/scripts/runtime-manager.ts": "d2fb5db4cc7093c8b780863079076268707df2fb6695ec4995b520a3c81423d6",
+    "packages/veyra-operations/core126-image-owner.mjs": "c4948687cd6903bcd37836d524c282fd29c778806131a06ebda5e8d72972838c",
+    "packages/veyra-operations/core126-image-owner.d.mts": "8a263450672c0571b36939e73f157ccba20e232504a8aa7d0847acdc7c26e44b",
+    "packages/veyra-operations/core126-image-contract.mjs": "a904467322ad5ddcc0e0d9084b84c303a0d95eccc5511aa0b7539beb10e0fcdb",
+    "packages/veyra-operations/core126-job-bootstrap.mjs": "d685142d5c2c3ba5ced0c64d9fa2b100ed1979e662462bd493d9bd414cce3343",
+    "config/opencode-managed/job-opencode.json": "55a6797f6e2ce9d22278608bfe8757a7f2e1b439de8d324afa6410f9503f7b69",
+    "config/opencode-managed/plugins/enforce-job-agent/index.mjs": "25dd213fcceb449103f9103e20a3bd2b4e5c44a2761d7562005a0ea32cdad0a3",
+    "scripts/runtime-entrypoint.sh": "b1f815cc70bf60f75e2a42849ff2d47daa45d2cf956ae01401463c6124668fa1",
+    "Dockerfile": "1cbb6830060e9eeb9b6a3307b465c48fd1265fb1247ef042b2096ded10c108e7",
+    "packages/ingenium-core/lib/tools/mcp-credentials.ts": "3d59e328985cac1bce532d2de8e8dd65bb4a90a7f5e1013c3df06e767235e2a2",
+    "services/ingenium-api/tests/veyra-dot-job-bootstrap-producers.test.mjs": "559891e28b71278c4f543017946431206c3c1c27bb5afbc7fc5dc4babdc3c61e"
+  },
+  "tests": {
+    "pass": 17,
+    "fail": 0,
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --experimental-strip-types --test docs/workstreams/dot/core126-bootstrap-producers.cpu.mjs",
+    "outputSha256": "055ac22116552558d7c5cf880800e7b14154d88b71144d8b7694dbd811a2c7a8",
+    "limits": "In-memory SQLite/token/record/file/process/channel ports; no real UDS/native SDK/OpenCode/filesystem runtime/standalone/model/Docker exercised. Not zero-effect or whole-container proof."
+  },
+  "protectedRootChanges": [
+    "transaction-time profile assertion",
+    "actual child model validation/--model",
+    "Core127/128 concurrent work",
+    "original Docker whole-container retirement owner"
+  ],
+  "requiredRootWiring": [
+    "Apply narrow source delta against exact preimages; do not replace moving full files from proposals",
+    "bootstrap-assignment must run inside original fresh sealed image lease; withdraw must NOT require fresh image/current grants or original non-revoked credential resolver",
+    "Original image registry remains independently approved; expanded source/artifact closure requires new actual qualification",
+    "Root actual Core/API/extension checks and full parent manager/migration tests",
+    "Actual native metadata/standalone env/loader/config/negative effects/normal cleanup ordering qualification"
+  ],
+  "openGaps": [
+    "Pinned grouped transform throws disable enforcement; no proven session rejection primitive",
+    "Same-UID Unix channel is not independent authority: plugin revalidates Core and directly withdraws; socket receipt is never custody proof",
+    "Original manager Docker wait-join remains sole positive whole-container retirement producer",
+    "Normal plugin cleanup may precede child result and fail-closed cancel; no manufactured success exception",
+    "CLI-to-standalone required env/socket accessibility and actual filesystem/EOF must qualify",
+    "Plugin loss/defect/race cannot be approved by callback throw, source hook or fixture receipt"
+  ],
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "runtimeObjects": false,
+    "sharedWrites": false
+  },
+  "sourceRetention": "Durable proposals/minimal patch/types/tests consumed by Root review/apply; retire redundant reproducible derivatives only after that consumer, preserving unique source/failure evidence.",
+  "RootActualHarnessCommand": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes VEYRA_DOT_BOOTSTRAP_ACTUAL=1 /home/brajam/.local/bin/node --experimental-strip-types --test services/ingenium-api/tests/veyra-dot-job-bootstrap-producers.test.mjs",
+  "rootHeadAtProposal": "eecc62a034c61303c7a7107ac1772383d7919707",
+  "sourceInventory": [
+    {
+      "path": "docs/workstreams/dot/core126-image-owner-bootstrap.proposal.mjs",
+      "bytes": 12173,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-bootstrap-runtime.d.mts",
+      "bytes": 367,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-bootstrap-producers.cpu.mjs",
+      "bytes": 21436,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/runtime-job-child-authority.proposal.ts",
+      "bytes": 786,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-image-contract-bootstrap.proposal.mjs",
+      "bytes": 11290,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/runtime-manager-bootstrap.proposal.ts",
+      "bytes": 25511,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-concrete-bootstrap.md",
+      "bytes": 9710,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-factory-bootstrap.proposal.ts",
+      "bytes": 8536,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-http-bootstrap.proposal.mjs",
+      "bytes": 7181,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/managed-job-owner-bootstrap.proposal.mjs",
+      "bytes": 12169,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-withdraw-credential.append.ts",
+      "bytes": 2465,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-concrete-bootstrap.json",
+      "bytes": 9658,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/managed-job-child-bootstrap.proposal.mjs",
+      "bytes": 3577,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/runtime-entrypoint-bootstrap.proposal.sh",
+      "bytes": 4909,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/managed-job-contracts-bootstrap.d.mts",
+      "bytes": 11568,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-bootstrap-fixture-first-failure.json",
+      "bytes": 627,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-private-control.proposal.mjs",
+      "bytes": 5152,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-owner-bootstrap.proposal.mjs",
+      "bytes": 24328,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/mcp-credentials-bootstrap.proposal.ts",
+      "bytes": 38409,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/Dockerfile-job-bootstrap.proposal",
+      "bytes": 32402,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/runtime-job-bootstrap.proposal.ts",
+      "bytes": 515,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-job-bootstrap-bounded.proposal.mjs",
+      "bytes": 2286,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-original-authority.d.mts",
+      "bytes": 436,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-private-plugin.proposal.mjs",
+      "bytes": 2754,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/runtime-job-mcp-bootstrap.proposal.ts",
+      "bytes": 659,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-image-owner-bootstrap.d.mts",
+      "bytes": 5400,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-bootstrap-facade.proposal.mjs",
+      "bytes": 524,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-opencode.proposal.json",
+      "bytes": 418,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/core126-concrete-bootstrap.patch",
+      "bytes": 86689,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-bootstrap-runtime.proposal.mjs",
+      "bytes": 5845,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-bootstrap-frame.proposal.mjs",
+      "bytes": 2337,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-private-files.proposal.mjs",
+      "bytes": 3139,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-private-plugin-entry.proposal.mjs",
+      "bytes": 275,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    },
+    {
+      "path": "docs/workstreams/dot/job-original-authority.proposal.mjs",
+      "bytes": 2471,
+      "retention": "source/type/test/patch/minimal receipt required for Root review/apply"
+    }
+  ]
+}
