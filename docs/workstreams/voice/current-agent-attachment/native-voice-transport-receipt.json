@@ -1,0 +1,153 @@
+{
+  "kind": "current-native-voice-ui-transport-contract-proposal-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "7b846bdd2f2ac8b1b8c9b1f22706441d1d7e68f4",
+  "applied": false,
+  "runtimeQualified": false,
+  "compiled": false,
+  "testsAuthored": 5,
+  "testsExecuted": 0,
+  "nativeRoot": "real-gmail-ui/veyra-phase-1/windows-source",
+  "nativeSourceInputs": [
+    {
+      "path": "apps/web/src/features/workbench/VoiceWorkspace.tsx",
+      "bytes": 3497,
+      "sha256": "8136fa240e76b1ad3df65b8d358ebe6a13727934b8c7611a60a8af12910af59c"
+    },
+    {
+      "path": "apps/web/src/features/workbench/VoiceChat.tsx",
+      "bytes": 51655,
+      "sha256": "266a921de3e448f67c69cba66892534c137cc327da3bde3485e8156985ab24c0"
+    },
+    {
+      "path": "apps/web/src/features/workbench/SpeechControls.tsx",
+      "bytes": 18619,
+      "sha256": "5196821fa7487eb6f78556ff898cbc3018c3abade7ef8120a4c1630840c461a6"
+    },
+    {
+      "path": "apps/web/src/features/workbench/Workbench.tsx",
+      "bytes": 304232,
+      "sha256": "95d49cdd93ca1e5f0f901894c8dcd76ef9665af89cd127ba7af0250d738a54cb"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/capabilities.ts",
+      "bytes": 7458,
+      "sha256": "cde966a79e0274295363b9d5d503b5cea5bd4ebe0580b53ec725a2c6f838bdbb"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/call-presentation.mjs",
+      "bytes": 2862,
+      "sha256": "334f9f26330ecccdb4984af8da0ffbd324125f9605afa6fd98e7119ac164ee8e"
+    },
+    {
+      "path": "apps/web/src/platform/gateway.ts",
+      "bytes": 89750,
+      "sha256": "4f2e547a2ac059292e32fbddba91d20b6de328dfc1c405e77417341a6943e419"
+    },
+    {
+      "path": "apps/web/src/app/App.tsx",
+      "bytes": 125075,
+      "sha256": "4e7b983da86f8de0f0cb2253d02b96904b532fbd97b613864cc9d26b74a873a4"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "bytes": 45316,
+      "sha256": "792818c0e8a6ca51f4d84a387c67fc179a3a7d9ded55053e0c715510ec03bb1c"
+    },
+    {
+      "path": "apps/service/src/routes/voice.rs",
+      "bytes": 13294,
+      "sha256": "547ed84ba4a10eba011071aee1e9c6ce1188bd871a3b1739109fe3cd026a665f"
+    },
+    {
+      "path": "apps/service/src/routes/speech.rs",
+      "bytes": 4772,
+      "sha256": "c10b497295eceacacd434aff1e7bf36432d64fcfb5509682fd268d966c8aeaee"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/voice.rs",
+      "bytes": 10804,
+      "sha256": "fabb41a7ea2f0c07fa92565db0b82fdf0008039ec9179a0a6f2cbe3374e7bfa6"
+    },
+    {
+      "path": "crates/adapters/src/voice.rs",
+      "bytes": 56136,
+      "sha256": "513bd681c87757d10b554a9b826ec0c149b877af27f07b07daec1ba81c4527b3"
+    },
+    {
+      "path": "crates/contracts/src/voice_controls.rs",
+      "bytes": 880,
+      "sha256": "9a5124e55d97ddd0d7a0bd0ba4640cf75557188d504599d789d94bd75223c802"
+    }
+  ],
+  "apiRoot": "real-gmail-ui/prd-ui-fixes",
+  "apiSourceInputs": [
+    {
+      "path": "services/ingenium-api/scripts/api-server.ts",
+      "bytes": 21548,
+      "sha256": "5d355e752fb79174154f879e05e6a81fc748c0198efc4a36bdaeb76c9f289c88"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/http.mjs",
+      "bytes": 5357,
+      "sha256": "f30f8050842eb0ccb87e99e810d69c9787d94822e43c135a70275d49b60c4002"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/service.mjs",
+      "bytes": 18771,
+      "sha256": "739a795d003d0f1861c0c4ee74e1267708258c575929f0251455db1eb2f71347"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "native-voice-transport.mjs",
+      "bytes": 5274,
+      "sha256": "0ac296ccb21db5f72af3eb89545cbf732ecff18ffb52c17436afb6dfc3076845"
+    },
+    {
+      "path": "native-voice-transport.d.mts",
+      "bytes": 537,
+      "sha256": "458664fd8924bb732e54182e5059a4009a118ed561b978ec3f026ed6716cb2cf"
+    },
+    {
+      "path": "native-voice-transport.test.mjs",
+      "bytes": 4251,
+      "sha256": "44cd0426c9d9f37df15f5d06528e8ec18aa7a4bca752832131cd3038f811a8d2"
+    },
+    {
+      "path": "native-voice-transport-splices.json",
+      "bytes": 1727,
+      "sha256": "123b8cd2dd71a2f4ebf6e339d488cdf4ff0da484d0f915b2e079f1f8f2d8ce27"
+    },
+    {
+      "path": "native-voice-transport-review.md",
+      "bytes": 7626,
+      "sha256": "92a1973094b152082fc7bd35c33b8151fc5c153bad2ca215c30bcd9950e7bcce"
+    }
+  ],
+  "nativeProposedPostimageSha256": "02f3c0c5c62270882d3302cce82f0c4801d97efb39aab4f44b588f4c9866f1a4",
+  "validation": [
+    "Current actual Native preimage and exact4span in-memory postimage verified",
+    "Unexecuted toolV8 MJSbody syntax parse",
+    "JSON/source hashes/manifest and gitdiffchecks"
+  ],
+  "unchanged": [
+    "All Workbench/Gateway/App/Web toggle/currentchat/agent/model/queues source",
+    "Original Native owner/operation/playback/retirement authorities",
+    "Node routes/HTTP wire/service and unavailable observation constructor",
+    "Prior13Native drafts"
+  ],
+  "blockers": [
+    "Node createVoiceHttp not mounted/authenticated in current api-server",
+    "Native WAVbase64 JSONjobs/poll/playback versus Node PCM/header/NDJSON/binary are incompatible",
+    "Native End/barge-in may interrupt owned agent prompt; attachment owns speech/subscription only",
+    "Workbench busy/queue constraints belong to legacy turn owner; cannot drop them before separate actualattachment",
+    "Genuine call/plan/Core134/restore/audio and full native acceptance unresolved"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "generatedRuntimeArtifacts": [],
+    "retained": "Minimal source/helper/tests/pinnedrecipe/review for Root actual semantic integration consumer; no broad historical records copied"
+  }
+}

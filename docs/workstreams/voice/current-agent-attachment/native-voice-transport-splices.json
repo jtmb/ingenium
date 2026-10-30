@@ -1,0 +1,41 @@
+{
+  "kind": "native-current-voice-request-contract-splices-v1",
+  "applied": false,
+  "runtimeQualified": false,
+  "nativeRoot": "real-gmail-ui/veyra-phase-1/windows-source",
+  "source": "apps/web/src/features/workbench/VoiceWorkspace.tsx",
+  "preimageSha256": "8136fa240e76b1ad3df65b8d358ebe6a13727934b8c7611a60a8af12910af59c",
+  "postimageSha256": "02f3c0c5c62270882d3302cce82f0c4801d97efb39aab4f44b588f4c9866f1a4",
+  "newSources": [
+    "native-voice-transport.mjs -> apps/web/src/features/voice-ui/native-voice-transport.mjs",
+    "native-voice-transport.d.mts -> apps/web/src/features/voice-ui/native-voice-transport.d.mts"
+  ],
+  "encoding": "UTF8; UTF16codeunit offsets; exact descending preimage checks",
+  "edits": [
+    {
+      "name": "native-current-request-binding-1",
+      "offset": 222,
+      "before": "import { VoiceChat } from \"./VoiceChat\";",
+      "after": "import { VoiceChat } from \"./VoiceChat\";"
+    },
+    {
+      "name": "native-current-request-binding-2",
+      "offset": 2367,
+      "before": "  return <section className=\"wb-voice-workspace\"",
+      "after": "  const nativeRequests = useMemo(() => bindNativeVoiceRequests(guarded), [guarded]);"
+    },
+    {
+      "name": "native-current-request-binding-3",
+      "offset": 2921,
+      "before": "<SpeechControls request={guarded}",
+      "after": "<SpeechControls request={nativeRequests.dictation}"
+    },
+    {
+      "name": "native-current-request-binding-4",
+      "offset": 3220,
+      "before": "<VoiceChat request={guarded}",
+      "after": "<VoiceChat request={nativeRequests.ownedVoice}"
+    }
+  ],
+  "scope": "Existing Native JSON contracts only. No Node route alias, attached-call readiness or Workbench/gateway/state edits."
+}

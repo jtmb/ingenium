@@ -69,9 +69,39 @@
       "sha256": "b8de66975f5673bbd2a6ff590a5ce69a4906493f5d5b2b5b2826587d51d542b8"
     },
     {
+      "path": "native-voice-transport-receipt.json",
+      "bytes": 5632,
+      "sha256": "a9ef8dd5ded72b8348fe6ca0aa4857e6ccaf184e7333570ebc8446edda9c2958"
+    },
+    {
+      "path": "native-voice-transport-review.md",
+      "bytes": 7626,
+      "sha256": "92a1973094b152082fc7bd35c33b8151fc5c153bad2ca215c30bcd9950e7bcce"
+    },
+    {
+      "path": "native-voice-transport-splices.json",
+      "bytes": 1727,
+      "sha256": "123b8cd2dd71a2f4ebf6e339d488cdf4ff0da484d0f915b2e079f1f8f2d8ce27"
+    },
+    {
+      "path": "native-voice-transport.d.mts",
+      "bytes": 537,
+      "sha256": "458664fd8924bb732e54182e5059a4009a118ed561b978ec3f026ed6716cb2cf"
+    },
+    {
+      "path": "native-voice-transport.mjs",
+      "bytes": 5274,
+      "sha256": "0ac296ccb21db5f72af3eb89545cbf732ecff18ffb52c17436afb6dfc3076845"
+    },
+    {
+      "path": "native-voice-transport.test.mjs",
+      "bytes": 4251,
+      "sha256": "44cd0426c9d9f37df15f5d06528e8ec18aa7a4bca752832131cd3038f811a8d2"
+    },
+    {
       "path": "ownership.json",
-      "bytes": 1489,
-      "sha256": "32e561bdbf6d589a6b1fbfff41364d6dd347351247ab5a66bfeaa3962ae10d82"
+      "bytes": 1426,
+      "sha256": "543ef79855c229cb3580bc05c4c3b50c3d9551bc3b517f65ebc592259acd159e"
     },
     {
       "path": "raw-assistant-client-negative.test.ts",
@@ -204,5 +234,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 217354
+  "totalContentBytes": 242338
 }
