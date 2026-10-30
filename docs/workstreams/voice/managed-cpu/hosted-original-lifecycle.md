@@ -28,10 +28,14 @@ neither projection alone is treated as an exhaustive raw-schema copy. Their
 prompt, interrupt, active, inbox and experimental wait shapes corroborate the
 pinned protocol. The private evidence receipt records exact installed source hashes.
 
-The existing API client's `streamRequest` has no AbortSignal input and its fetch
-omits signal; `opencodeClient.streamEvents` exposes no cancellation during header
-acquisition. Cancelling an eventual reader does not prove that a pending original
-fetch has returned. The original response reader, fetch, callback delivery and
+The inspected API client snapshot recorded in the evidence had no AbortSignal
+input on `streamRequest`; its fetch omitted signal and `streamEvents` exposed no
+cancellation during header acquisition. Root has since added optional AbortSignal
+forwarding, the initial abort check inside try, and error-response body cancellation.
+Those changes were observed read-only; Root owns their actual pending-header/body
+cancellation validation. This worker did not duplicate the transport change.
+Cancelling an eventual reader does not prove that a pending original fetch has
+returned. The original response reader, fetch, callback delivery and
 control promises would all need retained cancellation and positive joins before
 local observation cleanup could be reported. Even completing those local joins
 would not prove remote original execution retirement.

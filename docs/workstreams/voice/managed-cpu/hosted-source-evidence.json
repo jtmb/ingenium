@@ -75,5 +75,12 @@
   "liveSessionRead": false,
   "upstreamWritten": false,
   "runtimeQualified": false,
+  "installedSourcesAreInspectionSnapshots": true,
+  "rootTransportFollowOn": {
+    "optionalAbortSignalSourceObserved": true,
+    "actualCancellationValidationOwner": "Root",
+    "originalExecutionSettlementGapUnchanged": true,
+    "workerTransportChanges": false
+  },
   "remoteSourceCopiesRetained": false
 }
