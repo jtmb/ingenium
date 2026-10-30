@@ -1,0 +1,33 @@
+{
+  "scope": "unintegrated semantic/source proposal only; no production diff or DDL",
+  "checks": {
+    "unchanged_64MiB_payload_limit": true,
+    "reservation_before_actual_allocation": true,
+    "fixed_allocation_no_vec_growth": true,
+    "allocation_failure_returns_refusal": true,
+    "mutable_storage_drops_before_charge": true,
+    "immutable_storage_drops_before_charge": true,
+    "charge_owned_by_shared_allocation": true,
+    "span_and_cursor_share_actual_allocation": true,
+    "only_reservation_drop_releases_counter": true,
+    "no_terminal_slot_uncharge_api": true,
+    "five_meaningful_fixtures_supplied": true,
+    "metadata_RSS_and_production_integration_not_claimed": true,
+    "before_any_DDL_review_boundary": true,
+    "private_history_and_no_replay_retained": true
+  },
+  "passed": 14,
+  "rust_fixtures_supplied": 5,
+  "rust_fixtures_run": false,
+  "compiler_run": false,
+  "runtime_run": false,
+  "activation": false,
+  "prototype_sha256": "1e1ff22cedcd32694b89b2ac83c1396fdb4628dbb10ca59ff1545575a7332482",
+  "remaining": [
+    "Root semantic/migration review",
+    "actual Runtime intake/source/request/outcome/response/replay integration",
+    "bounded charged parser/path/SQLite/HTTP/bookkeeping overhead",
+    "incremental BLOB lifetime/hash/forget handling",
+    "whole64MiB/20MiB real qualification"
+  ]
+}
