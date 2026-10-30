@@ -8,6 +8,8 @@ const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repository = path.resolve(apiRoot, '../..');
 const domains = ['projects-v2', 'memory-v2', 'customize-v2', 'dot-v2', 'voice-v2'];
 const shared = ['veyra-projects', 'veyra-memory', 'veyra-automation', 'veyra-voice', 'veyra-operations'];
+// Reviewed singleton only: never discover or copy the release-tools directory.
+const singletonTools = [{ source: 'tools/veyra-release/core126-candidate-intent.mjs', target: 'veyra-tools/veyra-release/core126-candidate-intent.mjs' }];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const within = (root, candidate) => candidate === root || candidate.startsWith(root + path.sep);
 
@@ -33,9 +35,34 @@ export function planDomainRuntime({ sourceRoot = repository, destination = path.
     }
   }
   for (const root of roots) add(root.source, root);
+  const sourceOwner = fs.statSync(sourceRoot).uid;
+  const checkSingleton = stat => {
+    if (!stat.isFile() || stat.isSymbolicLink?.() || stat.nlink !== 1 || !Number.isSafeInteger(sourceOwner) || stat.uid !== sourceOwner || !Number.isSafeInteger(stat.size) || stat.size < 1 || stat.size > 65536) throw new Error('Unsafe reviewed runtime singleton');
+  };
+  const readSingleton = entry => {
+    let fd;
+    try {
+      if (fs.realpathSync(entry.source) !== entry.source) throw new Error('Runtime singleton aliases another source');
+      fd = fs.openSync(entry.source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      const first = fs.fstatSync(fd); checkSingleton(first);
+      const raw = fs.readFileSync(fd), last = fs.fstatSync(fd), current = fs.lstatSync(entry.source);
+      checkSingleton(last); checkSingleton(current);
+      if (raw.length !== first.size || fs.realpathSync(entry.source) !== entry.source || ['dev','ino','size','mtimeMs','uid','gid','mode','nlink'].some(key => first[key] !== last[key] || first[key] !== current[key])) throw new Error('Runtime singleton changed during read');
+      return raw;
+    } finally { if (fd !== undefined) fs.closeSync(fd); }
+  };
+  for (const item of singletonTools) {
+    const source = path.join(sourceRoot, ...item.source.split('/'));
+    let stat;
+    try { stat = fs.lstatSync(source); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    checkSingleton(stat);
+    const canonical = fs.realpathSync(source);
+    if (canonical !== source || !within(sourceRoot, canonical)) throw new Error('Runtime singleton escaped reviewed source');
+    files.set(canonical, { source: canonical, target: path.join(destination, ...item.target.split('/')), singleton: true });
+  }
   const planned = [];
   for (const entry of files.values()) {
-    const raw = fs.readFileSync(entry.source);
+    const raw = entry.singleton ? readSingleton(entry) : fs.readFileSync(entry.source);
     const text = raw.toString('utf8');
     const syntax = ts.createSourceFile(entry.source, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     const replacements = [];

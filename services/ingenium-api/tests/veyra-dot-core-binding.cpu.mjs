@@ -127,3 +127,16 @@ test("capability expansion without a Job revision cannot claim a run",async t=>{
 test("capability expansion after commit aborts the new claim before launch",async t=>{
  const f=fixture();t.after(()=>f.db.close());f.approve();f.broadenAfterCommit();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);assert.equal(f.launches.length,0);const op=f.runtime.service.page(f.actor,f.scope,"operation").data[0];assert.equal(op.state,"cancelled");assert.equal(op.code,"DOT_LAUNCH_NOT_STARTED");
 });
+
+test("persistent transport failure cannot starve a later original operation in the same page",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);
+ const healthy=f.runtime.service.page(f.actor,f.scope,"operation").data[0],run={...f.readRun(healthy.runId),id:"unavailable-run"};
+ f.db.prepare("INSERT INTO fixture_core_runs VALUES(?,?)").run(run.id,JSON.stringify(run));
+ insertOperation(f,{...healthy,id:"000-unavailable",runId:run.id});
+ const attempts=[];const inspect=f.execution.inspectOwnedRun;
+ f.execution.inspectOwnedRun=(scope,run)=>{attempts.push(run.id);if(run.id==="unavailable-run")throw Object.assign(Error("original runtime unavailable"),{status:503});return inspect(scope,run);};
+ assert.throws(()=>f.runtime.recoverOperations(100),/runtime unavailable/);assert.equal(f.runtime.recoverOperations(100),1);
+ assert.throws(()=>f.runtime.recoverOperations(100),/runtime unavailable/);assert.equal(f.runtime.recoverOperations(100),1);
+ assert.deepEqual(attempts,["unavailable-run",healthy.runId,"unavailable-run",healthy.runId]);
+ assert.equal(f.runtime.service.get(f.actor,f.scope,"operation",healthy.id).state,"running");assert.equal(f.launches.length,1);
+});

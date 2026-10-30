@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import type { Actor, Authorization, DotScope, Followup, Operation } from "../../../../packages/veyra-automation/contracts.js";
 import { DotRepository, scopeKey, type Database } from "./repository.js";
 import { DotService, DotError, type BoundJob } from "./service.js";
@@ -8,6 +9,7 @@ export interface CoreJob {
   revision:number;schedule_revision:number;enabled:boolean;schedule_cron?:string|null;
 }
 export interface CoreRun {
+  authorization_revision?:number;trigger?:string;created_at?:string;
   id:string;job_id:string;project_id:string;organization_id:string;
   effective_service_principal_id:string;job_revision:number;schedule_revision?:number|null;
   scheduled_for?:string|null;status:"queued"|"running"|"success"|"failed"|"timeout"|"cancelled";
@@ -39,6 +41,7 @@ export interface AsyncCoreDotExecution {
   inspectOwnedRun(scope:DotScope,run:CoreRun):Promise<"running"|"success"|"failed"|"cancelled"|"unknown">;
 }
 export interface CoreDotOptions {
+  managedDispatch?:"core126-original-v1"|"core126-candidate-original-v1";
   asyncExecution?:AsyncCoreDotExecution;
   nestedCheckpointPolicy:"deferred-by-core-v1";
   now():string;id():string;
@@ -101,7 +104,14 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       const {job:current}=readJob(receipt.actor,bound.scope,bound.id,"dispatch");
       if(current.revision!==bound.revision||current.schedule_revision!==bound.scheduleRevision)throw new DotError("DOT_JOB_BINDING_CHANGED");
       const claim=core.jobs.startJobRun(current.project_id,current.id,"cron",{scheduledFor,expectedScheduleRevision:bound.scheduleRevision});
-      if("id" in claim)return {runId:claim.id};
+      if("id" in claim){
+        if(options.managedDispatch){
+          if(!["core126-original-v1","core126-candidate-original-v1"].includes(options.managedDispatch)||!Number.isInteger(claim.authorization_revision)||claim.trigger!=="cron"||typeof claim.created_at!=="string"||!Number.isFinite(Date.parse(claim.created_at)))throw new DotError("DOT_ORIGINAL_RUN_IDENTITY_UNAVAILABLE");
+          const runIdentityHash=createHash("sha256").update(JSON.stringify([claim.id,claim.job_id,claim.project_id,claim.organization_id,claim.effective_service_principal_id,claim.job_revision,claim.schedule_revision??null,claim.authorization_revision,claim.trigger,claim.scheduled_for??null,claim.created_at])).digest("hex");
+          return {runId:claim.id,managedDispatch:{protocol:options.managedDispatch,fence:"not-admitted-v1" as const,runIdentityHash}};
+        }
+        return {runId:claim.id};
+      }
       return {blocked:claim.reason,retryable:["Job already has a running or queued run","Automation concurrency quota is full"].includes(claim.reason)};
     },
     requestCancellation(scope,id){if(options.asyncExecution)throw new DotError("DOT_ASYNC_RECOVERY_REQUIRED");const run=knownRun(scope,id);binding.authorizeRun(actorFor(scope),scope,run,"cancel");execution.requestCancellation(scope,run);},
@@ -136,6 +146,7 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       binding.authorizeRun(actorFor(scope),scope,knownRun(scope,id),"read");return result;
     },
   };
+  const activeDispatches=new Set<string>();
   let recoveryCursor="";
   const recoveryDiagnostics=new Map<string,string>();
   const recoverableDenials=new Set(["DOT_FORBIDDEN","DOT_MEMORY_DISABLED","DOT_SOURCE_REVOKED","DOT_RUN_AUTHORIZATION_REVOKED","DOT_JOB_BINDING_CHANGED","DOT_RUN_BINDING_CHANGED","DOT_PROJECTLESS_UNBOUND","DOT_NOT_FOUND"]);
@@ -148,6 +159,9 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       const followup=followupForJob(projectId,id);if(!followup)return;
       const actor=actorFor(followup.scope);
       const result=service.reconcile(actor,followup.scope,followup.id);
+      // Local in-flight bookkeeping is not persisted authority. Recovery must not
+      // close a new claim while this same owner is still preparing it.
+      for(const op of result.operations)if(op.state==="claimed"&&op.runId)activeDispatches.add(op.runId);
       // reconcile returned only after the same-connection core and Dot writes committed.
       for(const op of result.operations){
         if(op.state!=="claimed"||!op.runId){notify(op.scope,op.id);continue;}
@@ -172,10 +186,11 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
             const current=repository.get<Operation>("operation",op.id,op.scope);
             if(current&&current.runId===run.id)repository.put("operation",{...current,state:confirmed?.status==="cancelled"?"cancelled":"unknown",code:"DOT_LAUNCH_NOT_STARTED",revision:current.revision+1,updatedAt:options.now()},current.revision);
           }catch(abortError){options.onDiagnostic({phase:"pre-launch-abort",code:"DOT_UNLAUNCHED_RUN_UNRESOLVED",runId:op.runId,error:abortError});}
-          continue;
+          activeDispatches.delete(op.runId);continue;
         }
         try{await execution.executeJobRun(op.runId,job,job.prompt_template);}
         catch(error){markUnknown(op,error);notify(op.scope,op.id);}
+        finally{activeDispatches.delete(op.runId);}
       }
     },
     recoverOperations(limit=100){
@@ -184,9 +199,12 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
       let rows=page();
       if(!rows.length && recoveryCursor){recoveryCursor="";rows=page();}
-      if(rows.length)recoveryCursor=rows[rows.length-1]!.id;
+      // Advance per attempted item: a failing original runtime must not starve
+      // the rest of its page when the next scheduler cycle resumes.
       for(const row of rows){
+        recoveryCursor=row.id;
         const op=JSON.parse(row.body) as Operation;
+        if(op.runId&&activeDispatches.has(op.runId))continue;
         try{
           service.recoverOperation(actorFor(op.scope),op.scope,op.id);
           recoveryDiagnostics.delete(op.id);
@@ -213,9 +231,12 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
       const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
       let rows=page();
       if(!rows.length && recoveryCursor){recoveryCursor="";rows=page();}
-      if(rows.length)recoveryCursor=rows[rows.length-1]!.id;
+      // Advance per attempted item: a failing original runtime must not starve
+      // the rest of its page when the next scheduler cycle resumes.
       for(const row of rows){
+        recoveryCursor=row.id;
         const op=JSON.parse(row.body) as Operation;
+        if(op.runId&&activeDispatches.has(op.runId))continue;
         try{
           await service.recoverOperationAsync(actorFor(op.scope),op.scope,op.id,asyncJobs);
           recoveryDiagnostics.delete(op.id);

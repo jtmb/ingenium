@@ -75,6 +75,11 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
 
 export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
+  // Dot's request-local service rechecks each command's original private source,
+  // jobs write/execute and capability policy. This outer read admission is never a command grant.
+  const dotRead=req.method==="GET"&&/^\/api\/v1\/dot\/(?:(?:suggestions|followups|operations|notifications)(?:\/[^/]+)?|queue|job-policy\/[^/]+)$/.test(req.path);
+  if(dotRead||req.method==="POST"&&req.path==="/api/v1/dot/commands")return {action:"jobs.dot."+(dotRead?"read":"command"),resource:"jobs",permission:"read",target:"project",sensitive:true};
+
   const nativePairing = req.method === "POST" && /^\/api\/v1\/native-customize\/pairings(?:\/[^/]+\/(?:inspect|quiesce|retire))?$/.test(req.path)
     || req.method === "GET" && /^\/api\/v1\/native-customize\/pairings\/[^/]+$/.test(req.path);
   if(nativePairing)return {action:"native-pairing."+permissionFor(req as Request),resource:"vault",permission:permissionFor(req as Request),target:"native-governance",browserSessionOnly:true,sensitive:req.method==="POST"};

@@ -840,7 +840,7 @@ export function recoverInterruptedJobRuns(): number {
     const db = getDb(dbPath());
     const finishedAt = new Date().toISOString();
     const managedGuard=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_run_managed_execution'").get()
-      ? "AND NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=job_runs.id)" : "";
+      ? "AND NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=job_runs.id) AND NOT EXISTS(SELECT 1 FROM veyra_dot_records d WHERE d.kind='operation' AND json_extract(d.body,'$.runId')=job_runs.id AND json_type(d.body,'$.managedDispatch') IS NOT NULL)" : "";
     return db.prepare(
       `UPDATE job_runs
        SET status = 'failed', finished_at = ?, exit_code = -1

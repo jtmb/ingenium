@@ -17,6 +17,7 @@ export interface CoreNoCreateProof {
 }
 export type ManagedRetirementProof=OriginalContainerRetirementProof|CoreNoCreateProof;
 export interface ManagedJobAdmission {
+ dotDelegation?:import("./dot-original-context.js").OriginalDotDeclaration;
  runId:string;jobId:string;projectId:string;organizationId:string;ownerUserId:string;attemptId:string;
  runtimeId:string;runtimeRevision:number;provisioningRevision:number;parentContainerId:string;
  workspaceId:string;bindingHash:string;bindingEpoch:number;jobRevision:number;scheduleRevision:number;
@@ -75,7 +76,7 @@ export interface ManagedChildPorts {
  verifierFactory():ResponseVerifier;environment:NodeJS.ProcessEnv;beforeSpawn?():void;retainChild?(child:ChildProcess):void;
 }
 export interface ManagerContext {request:{headers:IncomingHttpHeaders}}
-export interface CoreActorContext {revalidate():authorization.AuthorizationPrincipal|null|undefined}
+export interface CoreActorContext {revalidate?():authorization.AuthorizationPrincipal|null|undefined}
 export interface Core126Selection {runId:string;projectId:string;runtimeId:string;workspaceId:string}
 export interface Core126Facts {
  run:NonNullable<ReturnType<typeof jobs.getJobRun>>;job:NonNullable<ReturnType<typeof jobs.getJob>>;
@@ -95,6 +96,7 @@ export interface Core126Profiles {
 export type ManagedJobCredential=mcpCredentials.ManagedJobCredential;
 export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential"|"withdrawManagedJobDispatch">;
 export interface Core126OwnerPorts {
+ approvedDot?:{authorize(context:unknown,selection:Core126Selection,action:"execute"|"read"|"cancel"):boolean;describe(context:unknown,selection:Core126Selection):import("./dot-original-context.js").OriginalDotDeclaration|undefined;assertCurrent(admission:ManagedJobAdmission,selection:Core126Selection):void};
  getDb:typeof getDb;execTransaction:typeof execTransaction;checkpointAfterWrite:typeof checkpointAfterWrite;
  jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent"|"finishJobRun"|"cancelJobRun">;
  runtimes:Pick<typeof runtimes,"getAuthorizedWorkspace"|"resolveRuntimePreflightScope">;

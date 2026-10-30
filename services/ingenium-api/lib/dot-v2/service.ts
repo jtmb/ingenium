@@ -10,7 +10,7 @@ export interface BoundJob {
 }
 export interface JobAuthority {
   readAuthorizedJob(actor: Actor, scope: DotScope, jobId: string): BoundJob;
-  claim(job: BoundJob, scheduledFor: string, toolPolicy: "existing-grants-only"): { runId: string } | { blocked: string; retryable?: boolean };
+  claim(job: BoundJob, scheduledFor: string, toolPolicy: "existing-grants-only"): { runId: string; managedDispatch?:Operation["managedDispatch"] } | { blocked: string; retryable?: boolean };
   requestCancellation(scope: DotScope, runId: string): void;
   inspect(scope: DotScope, runId: string): "running" | "success" | "failed" | "cancelled" | "unknown";
 }
@@ -178,7 +178,7 @@ export class DotService {
         if (prior && !(prior.state === "blocked" && prior.code?.startsWith("WAIT_CAPACITY:"))) continue;
         // claim() must use the same API transaction/connection and never start a process here.
         const claim = this.jobs.claim(job,scheduledFor,"existing-grants-only");
-        const operation: Operation = { id,revision:prior ? prior.revision+1 : 0,followupId:f.id,scope,scheduledFor,state:"runId" in claim ? "claimed" : "blocked",runId:"runId" in claim ? claim.runId : null,code:"blocked" in claim ? (claim.retryable ? "WAIT_CAPACITY:" : "")+claim.blocked : null,updatedAt:now };
+        const operation: Operation = { ...("runId" in claim && claim.managedDispatch ? {managedDispatch:claim.managedDispatch} : {}),id,revision:prior ? prior.revision+1 : 0,followupId:f.id,scope,scheduledFor,state:"runId" in claim ? "claimed" : "blocked",runId:"runId" in claim ? claim.runId : null,code:"blocked" in claim ? (claim.retryable ? "WAIT_CAPACITY:" : "")+claim.blocked : null,updatedAt:now };
         this.repository.put("operation",operation,prior?.revision ?? null);
         operations.push(operation);
         if ("blocked" in claim && claim.retryable) through = f.cursor;

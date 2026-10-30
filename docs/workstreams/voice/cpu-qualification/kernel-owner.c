@@ -214,5 +214,7 @@ int main(int argc,char **argv) {
   retained_leaf=-1;retained_killer=-1;
   if(unlinkat(parent,name,AT_REMOVEDIR)){fprintf(stderr,"empty original leaf cleanup failed; retain %s; no retry\n",name);return 70;}close(parent);
   fprintf(stderr,"\n{\"qualificationKernelOwner\":1,\"runId\":\"%s\",\"bootId\":\"%s\",\"namespaceInode\":%llu,\"device\":%llu,\"inode\":%llu,\"childStartTicks\":%llu,\"memoryPeakBytes\":%llu,\"leaderMaxRssBytes\":%llu,\"pidsPeak\":%llu,\"memoryMaxBytes\":%llu,\"pidsMax\":%llu,\"cpuQuotaUsec\":%llu,\"cpuPeriodUsec\":%llu,\"waited\":true,\"populated\":false,\"stdoutEOF\":true,\"stderrEOF\":true,\"leafRemoved\":true,\"deadlineKilled\":%s}\n",argv[1],boot,(unsigned long long)ns_before.st_ino,(unsigned long long)original.st_dev,(unsigned long long)original.st_ino,(unsigned long long)started,(unsigned long long)peak,(unsigned long long)usage.ru_maxrss*1024ULL,(unsigned long long)tasks,(unsigned long long)memory,(unsigned long long)pids,(unsigned long long)quota,(unsigned long long)period,killed?"true":"false");
-  return !killed&&WIFEXITED(status)&&WEXITSTATUS(status)==0?0:76;
+  /* An output refusal or cancel observed during the last drain cannot become
+   * success merely because leader/EOF/empty joins finished in that iteration. */
+  return !killed&&!cancelled&&WIFEXITED(status)&&WEXITSTATUS(status)==0?0:76;
 }

@@ -1,4 +1,4 @@
-import type { CoreDotRuntime } from "./dot-v2/core-binding.js";
+import type { DotSchedulerRuntime } from "./dot-v2/installed-dot-scheduler.js";
 import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
 import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
 import { getUsageSyncInterval, syncUsageFromOpenCode } from "./usage-sync.js";
@@ -43,7 +43,7 @@ const EVENT_JOB_CLAIMS_PER_CYCLE = 4;
 const EVENT_JOB_TICK_MS = 10_000;
 
 let schedulerRunning = false;
-let dotRuntime: CoreDotRuntime | undefined;
+let dotRuntime: DotSchedulerRuntime | undefined;
 let schedulerGeneration = 0;
 const scheduledTimeouts = new Set<ReturnType<typeof setTimeout>>();
 const renewalIntervals = new Set<ReturnType<typeof setInterval>>();
@@ -508,7 +508,7 @@ function scheduleLockCleanup(generation: number): void {
   });
 }
 
-export function startScheduler(port: number, dot?: CoreDotRuntime): void {
+export function startScheduler(port: number, dot?: DotSchedulerRuntime): void {
   if (schedulerRunning) {
     logger.warn("scheduler", "Scheduler start ignored because it is already running");
     return;

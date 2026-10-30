@@ -1,0 +1,2 @@
+import type {getDb,jobs,agents,jobProviders} from "ingenium-core";
+export declare function createOriginalDotJobPolicy(ports:{getDb:typeof getDb;jobs:Pick<typeof jobs,"getJob">;agents:Pick<typeof agents,"getJobAgentConfig">;jobProviders:Pick<typeof jobProviders,"getJobProvider">}):Readonly<{describe(projectId:string,jobId:string,ownerUserId:string):Readonly<{jobId:string;descriptor:string}>;require(projectId:string,ownerUserId:string,descriptor:string):string}>;

@@ -86,3 +86,5 @@ export type { VoiceOperationAuthorities } from "./tools/voice-operation-owner.js
 export type { CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, CpuResultFingerprint, VoiceControl } from "./tools/voice-operation-contract.js";
 
 export {assertNativeGovernanceLifecycleClear} from "./tools/node-native-lifecycle.js";
+
+export * as dotExecutionDelegation from "./tools/dot-execution-delegation.js";

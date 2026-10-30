@@ -14,8 +14,8 @@
     },
     {
       "path": "kernel-owner.c",
-      "bytes": 17752,
-      "sha256": "a62dd094615c506846cbfcf93ed11125c91ad0754c32faa5a801c2ca22927eda"
+      "bytes": 17924,
+      "sha256": "1275dd230f10756d1f651e650f5b9f7195712ae836492bfe92c0cdf766f147d3"
     },
     {
       "path": "kernel-prerequisites.json",

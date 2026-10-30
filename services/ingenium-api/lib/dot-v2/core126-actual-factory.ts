@@ -1,12 +1,14 @@
 import {agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault} from "ingenium-core";
 import {createHash} from "node:crypto";
+import {originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
+import {createOriginalManagedProviderResolution} from "./core126-provider-resolution.js";
 import type {Core126ImageOwner} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
 import type {Core126Facts,Core126Handlers} from "./managed-job-contracts.mjs";
 import {createCore126Owner} from "./core126-owner.mjs";
 import {createCore126ManagerGuard,createCore126ToolAuthorizer,createCore126Handlers,createCore126WithdrawalHandler} from "./core126-http.mjs";
 import {loadManagerToken} from "../runtime-manager-auth.js";
 import {JobResponseVerification} from "../job-response-verification.js";
-import {resolveJobProviderModel} from "../job-native-provider.js";
+
 import {createActualCore126Broker,actualManagedJobToolCatalog} from "./core126-broker.js";
 const hash=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
 /** imageOwner is Root's qualified immutable image/placement/profile owner, not labels or caller JSON.
@@ -16,6 +18,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
  const toolCatalog=actualManagedJobToolCatalog;
  let dispatchExistingTool:ReturnType<typeof createActualCore126Broker>["dispatch"];
  const managerGuard=createCore126ManagerGuard({loadToken:loadManagerToken});
+ const providerResolution=createOriginalManagedProviderResolution();
  const binding=(provider:any)=>hash([provider.connectionId,provider.providerKey,provider.authentication,provider.config]);
  const requireCurrentParentScopes=(runtimeId:string,approvedScopes:readonly string[])=>{
   const row=getDb().prepare(`SELECT credential.scopes_json FROM runtime_capability_bindings binding
@@ -33,15 +36,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
   async qualify(facts:any){
    if(typeof toolCatalog?.getTool!=="function"||typeof dispatchExistingTool!=="function")throw Error("Managed JobRun protected broker transport unavailable");
    agents.validateProtectedOpenCodeDeployment();
-   let provider=vault.resolveJobProviderRuntime(facts.job.project_id,facts.job.id,facts.run.id);
-   const before=binding(provider);let model:string;
-   try{
-    // Actual paid-provider secret projection is not yet part of this qualified job-role image contract.
-    if(provider.authentication!=="anonymous"||provider.providerKey!=="opencode")throw Error("Managed JobRun provider secret handoff unavailable");
-    model=await resolveJobProviderModel(provider);
-   }finally{provider.release();}
-   provider=vault.resolveJobProviderRuntime(facts.job.project_id,facts.job.id,facts.run.id);
-   try{if(binding(provider)!==before)throw Error("Managed JobRun provider changed");}finally{provider.release();}
+   const resolved=providerResolution.current(facts),before=resolved.bindingHash,model=resolved.model;
    const image=await imageOwner?.qualifyOriginalJobRole({run:facts.run,job:facts.job,runtime:facts.runtime,workspace:facts.workspace,agentConfig:facts.agentConfig,model,modelBindingHash:before});
    if(!image?.qualified||image.jobRunAudience!=="job-run"||image.transport!=="scoped-core126-mcp-v1"||image.model!==model||image.modelBindingHash!==before||!Array.isArray(image.approvedScopes))throw Error("Managed JobRun image/profile unavailable");
    requireCurrentParentScopes(facts.runtime.id,image.approvedScopes);
@@ -60,7 +55,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    try{if(binding(provider)!==admission.modelBindingHash)throw Error("Managed JobRun provider changed");}finally{provider.release();}
   },
  };
- const owner=createCore126Owner({getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
+ const owner=createCore126Owner({approvedDot:originalDotContextAuthority,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
  const authorizeTool=createCore126ToolAuthorizer({credentials:mcpCredentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog});
  const broker=createActualCore126Broker(owner,authorizeTool);
  dispatchExistingTool=broker.dispatch;
@@ -79,7 +74,9 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    managerGuard.context(request); // Authenticate BEFORE original Core lookup or manager observations.
    const needsImage=operation==="admission"&&request.query?.action==="launch"||["launch-material","effect-intent","created","started"].includes(operation??"");
    if(needsImage)requireProductionPurpose(runId);
-   return needsImage?withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.internal(request)):rawHandlers.internal(request);
+   if(!needsImage)return rawHandlers.internal(request);
+   const work=()=>withPersistedApprovedDotOperation(runId,()=>withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.internal(request)));
+   return operation==="launch-material"?providerResolution.withResolved(owner.factsForOriginalImageCheck(runId),work):work();
   },
   async runtime(request){
    const narrowed=await withdrawOriginal(request);if(narrowed)return narrowed;
@@ -88,12 +85,12 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    const header=request.headers.authorization,credential=mcpCredentials.inspectManagedJobCredential(typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"","job-run");
    if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.runId!==runId)throw Object.assign(Error("Original JobRun credential required"),{status:401});
    requireProductionPurpose(runId);
-   return withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.runtime(request));
+   return withPersistedApprovedDotOperation(runId,()=>withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.runtime(request)));
   },
  };
  return {owner,managerGuard,executionPorts(context:any,selection:any){return {
    inTransaction:()=>getDb().inTransaction,
-   prepareManagedExecution(runId:string,job:any,prompt:string){if(job.prompt_template!==prompt)throw Error("Original JobRun prompt changed");const selected={runId,projectId:job.project_id,runtimeId:selection.runtimeId,workspaceId:selection.workspaceId};return withImage(owner.factsForImagePreparation(selected,context),()=>owner.prepare(selected,context));},
+   prepareManagedExecution(runId:string,job:any,prompt:string){if(job.prompt_template!==prompt)throw Error("Original JobRun prompt changed");const selected={runId,projectId:job.project_id,runtimeId:selection.runtimeId,workspaceId:selection.workspaceId};return refreshOriginalApprovedDotContext(context,selected,fresh=>providerResolution.withResolved(owner.factsForImagePreparation(selected,fresh),()=>refreshOriginalApprovedDotContext(fresh,selected,current=>withImage(owner.factsForImagePreparation(selected,current),()=>owner.prepare(selected,current))))); },
    requireOriginalRun:(scope:any,runId:string)=>owner.readOriginalRun(runId,scope,context),
    requireCancellationIntent:(_scope:any,runId:string)=>owner.requireCancellationIntent(runId),
    requireOriginalRetirementProof:(runId:string,proof:any)=>owner.requireOriginalRetirementProof(runId,proof),

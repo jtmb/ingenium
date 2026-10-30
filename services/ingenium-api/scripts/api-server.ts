@@ -1,3 +1,5 @@
+import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
+import {installedDotSchedulerRuntime} from "../lib/dot-v2/installed-dot-scheduler.js";
 import express from "express";
 import {createCore126Ingress} from "../lib/dot-v2/core126-ingress.js";
 import {actualManagedJobHandlers,installActualManagedJobOwner} from "../lib/dot-v2/core126-runtime.js";
@@ -222,6 +224,7 @@ app.use("/api/v1/logs", logsRouter);
 app.use("/api/v1/opencode", runtimeOpenCodeContext, opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
+app.use("/api/v1/dot",createInstalledDotRouter());
 
 app.use("/api/v1/services/cloudflare", cloudflareRouter);
 app.use("/api/v1/services", servicesRouter);
@@ -296,7 +299,7 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   });
 
   if (shouldStartBackgroundSchedulers()) {
-    startScheduler(config.port);
+    startScheduler(config.port,installedDotSchedulerRuntime);
     startBackupScheduler();
   } else {
     logger.info("api", "Background schedulers disabled by API test/maintenance mode");

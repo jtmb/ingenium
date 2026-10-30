@@ -32,7 +32,11 @@ export interface Followup {
   state: "active" | "paused" | "cancelled"; notificationPolicy: "meaningful" | "failures" | "silent";
   capabilities: string[];
 }
+export interface OriginalManagedDispatch {
+  protocol:"core126-original-v1"|"core126-candidate-original-v1";fence:"not-admitted-v1"|"core-owner-admitted-v1"|"closed-unadmitted-v1";runIdentityHash:string;
+}
 export interface Operation {
+  managedDispatch?:OriginalManagedDispatch;
   id: string; revision: number; followupId: string; scope: DotScope; scheduledFor: string;
   state: "claimed" | "running" | "success" | "failed" | "cancel_requested" | "cancelled" | "unknown" | "skipped" | "blocked";
   runId: string | null; code: string | null; updatedAt: string;
