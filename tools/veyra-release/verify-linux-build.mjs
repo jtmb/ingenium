@@ -39,7 +39,8 @@ export function verifyLinuxBuild({ lock, lockSha256, sourceManifest, source, bui
     && new Set(browser.artifacts.map(row => row.name)).size === 3
     && expectedNames.every(name => {
       const expected = lock.browser.artifacts.find(row => row.name === name), actual = browser.artifacts.find(row => row.name === name);
-      return expected && /^[0-9a-f]{64}$/.test(expected.sha256 ?? '') && actual && actual.sha256 === expected.sha256 && actual.revision === expected.revision;
+      return expected && /^[0-9a-f]{64}$/.test(expected.sha256 ?? '') && actual && actual.sha256 === expected.sha256 && actual.revision === expected.revision
+        && ['sha256-archive', 'sha256-tree-manifest-v1'].includes(expected.hashKind) && actual.hashKind === expected.hashKind;
     });
   return { schemaVersion: 1, revision: source.revision, sourceSha256: source.sourceSha256, lockSha256,
     status: browserReady ? 'inputs-verified' : 'incomplete', packageCounts,

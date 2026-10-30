@@ -115,7 +115,7 @@ test('all candidate/source/OS/browser identities bind before build-input verific
 
 test('unqualified browser payloads remain an explicit gate, including missing headless/ffmpeg', async () => {
   for (const mutate of [value => { value.browser = undefined; }, value => { value.lock.browser.artifacts[0].sha256 = null; },
-    value => { value.browser.artifacts.pop(); }, value => { value.browser.artifacts[2].sha256 = '0'.repeat(64); }]) {
+    value => { value.browser.artifacts.pop(); }, value => { value.browser.artifacts[2].sha256 = '0'.repeat(64); }, value => { value.browser.artifacts[1].hashKind = 'binary-only'; }]) {
     const { verifyLinuxBuild, values } = await provenanceFixture(); mutate(values);
     assert.equal(verifyLinuxBuild(values).status, 'incomplete');
   }

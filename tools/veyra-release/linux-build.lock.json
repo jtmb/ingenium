@@ -54,17 +54,20 @@
       {
         "revision": "1232",
         "sha256": null,
-        "name": "chromium"
+        "name": "chromium",
+        "hashKind": "sha256-archive"
       },
       {
         "revision": "1232",
         "sha256": null,
-        "name": "chromium-headless-shell"
+        "name": "chromium-headless-shell",
+        "hashKind": "sha256-archive"
       },
       {
         "revision": "1011",
         "sha256": null,
-        "name": "ffmpeg"
+        "name": "ffmpeg",
+        "hashKind": "sha256-archive"
       }
     ]
   },
