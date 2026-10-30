@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "command": "--check live-acceptance.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": [],
+      "stderr": ""
+    },
+    {
+      "command": "--test live-acceptance.test.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "1f54b546fbc359a1b1e5b98c3efa7e04f7133c718c904b492f0dd7175a1424d6",
+      "summary": [
+        "# tests 9",
+        "# pass 9",
+        "# fail 0",
+        "# skipped 0"
+      ],
+      "stderr": ""
+    }
+  ],
+  "actualSourcePreimages": 31,
+  "liveRuntime": "UNRUN; source-only worker. Root owns Windows DPAPI, actual TLS/login/custody/restore/executor acceptance.",
+  "newGeneratedScratch": [],
+  "removedPaths": [],
+  "compactedHistoricalDuplicate": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/customize/docs/workstreams/customize/native-hosted-transport/native-owner-proposal.patch",
+    "beforeBytes": 110240,
+    "afterBytes": 703,
+    "reducedBytes": 109537,
+    "losslessSource": "9e505aa3d95a675ba7d55d231c5bccc455fdc833:docs/workstreams/customize/native-hosted-transport/native-owner-proposal.patch"
+  },
+  "retained": "Source, reviewed contract, pure tests, exact historical Git reference and minimal verification; Root application/runtime acceptance is remaining consumer."
+}

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Read-only reviewed actual route preimages. No patch or runtime success assertion.",
+  "sources": [
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/scripts/api-server.ts",
+      "lfSha256": "3ffbb929802883bda600dbc40394780180ee024383ace2a3011c944363942166"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "lfSha256": "851570c5389c248a1d450c74e188536f44f528adf074ac4a1d361e52ac6e7210"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "lfSha256": "1c828afe0abb663d04998729bbadad47a6480e4a4bbf153d1293be3015884a42"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/middleware/auth.ts",
+      "lfSha256": "a62e7b82011525b14c15c2f54c2cab423c3145f2fc11ca328fd52ca53d6a158e"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/middleware/csrf.ts",
+      "lfSha256": "3a56cce5eb0730328eec56e7b45c435530948b36ed6e7168c9356ec0f4e70840"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/middleware/pre-auth-csrf.ts",
+      "lfSha256": "72cfe8d24ae7811a0f55dd35c675a259a5a9c86e35f358cae185abac71a7c23c"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/customize.ts",
+      "lfSha256": "0bfea4c1d821a083f477563d99977a55130bf89077b9b016c83fdce57271e441"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/projects.ts",
+      "lfSha256": "8742778ec4d7429660a18577407e12993ccd6d579376349867a9cfcb94c29e99"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/skills.ts",
+      "lfSha256": "424883739147c27b45060ed0e1a384dda491965e21dd91ffd4156988c75613fa"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/plugins.ts",
+      "lfSha256": "c957d2be7779f2383e85688e6d9e8b30cdb0ac305150cf1acb38c18a561f5b0b"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/synthesis.ts",
+      "lfSha256": "223739540ce1bd7c09f00d1ad67702b5ec63befa5978be008094e05dfb0daa5c"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/native-customize.ts",
+      "lfSha256": "a80c160c36bc64d1f30feda6a5e2efda7517d3acd7788d2b50fe2d97d9245b53"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "lfSha256": "6dcf60b1be4c4e79a53dbaf5dad2b10e0c5eb3578072ac1150468b8141b26969"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "lfSha256": "50c980fcd06f72cffc4e5a2bc7bfa6ba663e83aaa338c6442740ab3a8cc36305"
+    },
+    {
+      "owner": "app",
+      "path": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "lfSha256": "c09d4338bbf98ca0876b5c72e8c27f99016298c63551aed3279806e66484235a"
+    },
+    {
+      "owner": "app",
+      "path": "packages/ingenium-core/lib/tools/bootstrap.ts",
+      "lfSha256": "06e0c64990e687f7a516d964cdbd0701fd4ae048e3d0725e74fc0dadd9f37f94"
+    },
+    {
+      "owner": "app",
+      "path": "packages/ingenium-core/lib/tools/authentication.ts",
+      "lfSha256": "6614b9124326ea5dac21fb0f9da9f1f07378126c61e8a4e670978b5cfc25306f"
+    },
+    {
+      "owner": "app",
+      "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+      "lfSha256": "9f00ed991d31334cab788b63834d52b1d485af0887171b18441be46fe9aba241"
+    },
+    {
+      "owner": "native",
+      "path": "apps/service/src/routes.rs",
+      "lfSha256": "792818c0e8a6ca51f4d84a387c67fc179a3a7d9ded55053e0c715510ec03bb1c"
+    },
+    {
+      "owner": "native",
+      "path": "apps/service/src/routes/accounts.rs",
+      "lfSha256": "9bbb0b1fe84268896e01bc9cdaa6e59af24557165a0b43ede0c50718eae7626f"
+    },
+    {
+      "owner": "native",
+      "path": "apps/service/src/routes/remote_control/owned.rs",
+      "lfSha256": "dbf758826f0fc0d5e6706e52bd80aa455028be15ad9f5cf5de3cb6656534d4e0"
+    },
+    {
+      "owner": "native",
+      "path": "apps/service/src/routes/remote_control/hosted_governance.rs",
+      "lfSha256": "2984f6464bdd5a1e81add943e2887dbcd55d48dd994b8ea862b554be5778cee9"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/account_vault.rs",
+      "lfSha256": "f90e045cfe3e3cdb48103efc9d78e108da2698046a0ebcc4c9f4a29748a3b1f1"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/account_vault/node_hosted.rs",
+      "lfSha256": "607d1434f100380dac09a56895d243b77379bb577738f77b8e66cb351d0b240a"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/remote_control/hosted.rs",
+      "lfSha256": "431b5c14399f74608418d7719382be645b22ef0c16a1fc5862e2fc701694891d"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/remote_control/hosted/ceremony.rs",
+      "lfSha256": "68d587a2bc3eca431b62dab36af70d9a1484dfca08008cc61219244d4f71fc17"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/remote_control/hosted/attestation.rs",
+      "lfSha256": "7663d24dff8f24a26fde9fc2dfe98131765d8710083f33c09aaef39f6bcb7781"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/remote_control/hosted/lifecycle.rs",
+      "lfSha256": "717cc423191f89c7ff9e7a2d2d06a7a3fb9f3cb6da12d180bcfbe81fe8889de8"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/remote_control/hosted/wire.rs",
+      "lfSha256": "1d26d023a11db20bf3197559b0ce1fad616191500c075427e0e3b6409f4bd3b7"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/utility_operations.rs",
+      "lfSha256": "9b401acfa0b51b68c7b14ba0f7f9dcb9bc219d9787f6c6b18d491f4ec22a4713"
+    },
+    {
+      "owner": "native",
+      "path": "crates/adapters/src/utility_operations/hosted.rs",
+      "lfSha256": "8ead94dc90ea4a2577ad3c7651a1efd7c2652b7621749f931daeda9fc7a20a9f"
+    }
+  ]
+}
