@@ -1,0 +1,121 @@
+{
+  "kind": "attached-assistant-speech-source-contract-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "4a6aa278d407d42723510e006710456162b8376e",
+  "status": "Nonactivating design; Root semantic review required; no source authority implemented",
+  "migrationReserved": 134,
+  "applied": false,
+  "runtimeQualified": false,
+  "compiled": false,
+  "testsExecuted": 0,
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
+      "bytes": 23879,
+      "sha256": "b4c2ace194e9b3e2912034897ae68824c435b6f78dd0b3664e6ab2264a8b405a"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-cpu.ts",
+      "bytes": 17074,
+      "sha256": "af2ba23aa5f520c3870a80346d7af0fb41aab92fa380134c1b0de279389f1022"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
+      "bytes": 785,
+      "sha256": "ab4bf2954113c8878b854476941fad999d0cdf4c7b01f542d0a6f4e016e462c1"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/128_voice_operations.sql",
+      "bytes": 9339,
+      "sha256": "e9056961e84020a797165babb189e8ba1469a1f630561ae793b2884c395be55e"
+    },
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "bytes": 93818,
+      "sha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "bytes": 13972,
+      "sha256": "fcee2630d751296df3efb4bf9f45e7d3176187d0102041f9432ef8853d9bbd46"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/service.mjs",
+      "bytes": 18771,
+      "sha256": "739a795d003d0f1861c0c4ee74e1267708258c575929f0251455db1eb2f71347"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-cpu-speech.mjs",
+      "bytes": 4115,
+      "sha256": "726745274af68847b723f665ce4599a1f6317c65457c265b4e59b6fa4271dfe9"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "bytes": 34898,
+      "sha256": "2cedc1b257fa92f84f6f1ae7b8bdf7c26766e97fb8a469d6be83d749442b1f68"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/cpu-ownership.mjs",
+      "bytes": 8780,
+      "sha256": "8bc554446028d0630443f0aff6f5f28459e73242694208940f1f472049ff3f7e"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/core-operations.mjs",
+      "bytes": 6453,
+      "sha256": "cb508d4e1bf4b390da505e5b6e7bca9a87719e076e71552bfc2d3c324e2e8fb5"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/attachment.mjs",
+      "bytes": 17211,
+      "sha256": "c033338361bc1630d5d8c5e74de21a7206a4e32a7320cf5ef880918c87a83dbb"
+    },
+    {
+      "path": "packages/veyra-voice/segments.mjs",
+      "bytes": 4535,
+      "sha256": "d0ae5a426309b624c5998fb6a98471097b26b5d4166483c958699a40ee47881a"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "assistant-speech-source.contract.ts",
+      "bytes": 3616,
+      "sha256": "9e12e88acdd4464382d647d69ec5617b1bda7e69e74578d14d4190d13c2656e1"
+    },
+    {
+      "path": "assistant-speech-source-review.md",
+      "bytes": 11416,
+      "sha256": "46461e0b0341dfc31ac85fa3758b19c4a59b9a4a14567116099f1976af2775b7"
+    },
+    {
+      "path": "assistant-speech-source-splices.json",
+      "bytes": 8707,
+      "sha256": "68f8d14effeaa156f0926a4b7354673efc1822f301e759f905634e883e2cdc76"
+    }
+  ],
+  "proposedCorePostimageSha256": "a9cfa580bb8a6ac3e02333853f7a7fb8ed4f6c9764de571d8353159f841be76b",
+  "validation": [
+    "Exact13actualsource metadata/hash inventory",
+    "Six exact typed design splices composed in memory with pre/post hash validation",
+    "Legacy agent parent guard retained verbatim in composed design",
+    "JSON/manifest and git diff checks"
+  ],
+  "readersReviewed": [
+    "Core ledger metadata reads original_json; optional tag absent preserves old hash shape",
+    "CoreCPUextension and Coreowner have no parentOperationId/parent_operation_id query",
+    "ManagedSupervisor control linkage/recovery and16session membership inspected",
+    "CoreVoiceOperations agent-only path stays unchanged; new attachment needs separate source path"
+  ],
+  "blockers": [
+    "Bounded original raw engine reader and fixed private observation/plan owner",
+    "Actual Core134 source/claim/tombstone immutable SQL+insert guards+schema verification",
+    "End-to-end private call/generation/speech wire; no VoiceService agentCompleted shortcut",
+    "Original restore capsule/preflight/tombstone union/invalidate surviving handles",
+    "Actual legacy/source/SQL/original-CPU/audio acceptance"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "generatedRuntimeArtifacts": [],
+    "retained": "Minimal contract/source facts and design spans for Root Core134/private owner integration; protected13Native drafts untouched"
+  }
+}

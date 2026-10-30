@@ -1,0 +1,55 @@
+{
+  "kind": "assistant-speech-source-minimal-typed-splice-design-v1",
+  "status": "DO NOT APPLY OR ACTIVATE: Root semantic review and original authorities/schema/caller/recovery gates unresolved",
+  "source": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
+  "preimageSha256": "b4c2ace194e9b3e2912034897ae68824c435b6f78dd0b3664e6ab2264a8b405a",
+  "postimageSha256": "a9cfa580bb8a6ac3e02333853f7a7fb8ed4f6c9764de571d8353159f841be76b",
+  "encoding": "UTF8; UTF16codeunit offsets; exact descending splice checks",
+  "requiredNewTypeSource": "assistant-speech-source.contract.ts -> Core lib/tools/assistant-speech-source-contract.ts",
+  "requiredMigration": 134,
+  "edits": [
+    {
+      "name": "type-only-source-tag",
+      "offset": 0,
+      "before": "import { createHash } from \"node:crypto\";",
+      "after": "import { createHash } from \"node:crypto\";\nimport type {AssistantSpeechSourceTag,AttachedSpeechOriginal} from \"./assistant-speech-source-contract.js\";"
+    },
+    {
+      "name": "optional-tag-absent-preserves-legacy-bytes",
+      "offset": 1267,
+      "before": "control:VoiceControl|null;deadlineAt:number;cpuIdentity:CpuIdentity|null}",
+      "after": "control:VoiceControl|null;deadlineAt:number;cpuIdentity:CpuIdentity|null;assistantSpeechSource?:AssistantSpeechSourceTag}"
+    },
+    {
+      "name": "fixed-original-observation-assertion-port-no-positive-proof",
+      "offset": 2891,
+      "before": "  verifyRetirement(context:C,operation:Readonly<VoiceMetadata>,proof:unknown):VoiceRetirement;",
+      "after": "  verifyRetirement(context:C,operation:Readonly<VoiceMetadata>,proof:unknown):VoiceRetirement;\n  /** Production binds ONLY original private observation owner; missing refuses new branch. */\n  requireObservedSpeechSource?(context:C,original:Readonly<AttachedSpeechOriginal>,owner:Readonly<VoiceOwner>):void;"
+    },
+    {
+      "name": "closed-original-new-shape",
+      "offset": 6595,
+      "before": "  exact(value,[\"operationId\",\"requestId\",\"kind\",\"scope\",\"turnGeneration\",\"inputSha256\",\"parentOperationId\",\"controlOperationId\",\"control\",\"deadlineAt\",\"cpuIdentity\"]);",
+      "after": "  exact(value,[\"operationId\",\"requestId\",\"kind\",\"scope\",\"turnGeneration\",\"inputSha256\",\"parentOperationId\",\"controlOperationId\",\"control\",\"deadlineAt\",\"cpuIdentity\"],[\"assistantSpeechSource\"]);"
+    },
+    {
+      "name": "new-tag-validation-no-null-fallback",
+      "offset": 8366,
+      "before": "  return Object.freeze({...value,scope,cpuIdentity:cpu}) as VoiceOriginal;",
+      "after": "  if(Object.hasOwn(value,\"assistantSpeechSource\")) {\n    const tag=value.assistantSpeechSource;\n    exact(tag,[\"version\",\"kind\",\"sourceId\",\"sourceHash\",\"callId\",\"callGeneration\",\"planHash\",\"profileDigest\",\"voiceId\",\"segmentIndex\",\"segmentCount\",\"segmentSha256\",\"cpuInputSha256\"]);\n    if(tag.version!==1||tag.kind!==\"assistant-content-observation\"||!uuid(tag.sourceId)||!hash(tag.sourceHash)||!text(tag.callId,128)\n      ||!integer(tag.callGeneration)||!hash(tag.planHash)||!hash(tag.profileDigest)||!text(tag.voiceId,64)\n      ||!integer(tag.segmentIndex)||!integer(tag.segmentCount)||tag.segmentCount<1||tag.segmentCount>512||tag.segmentIndex>=tag.segmentCount\n      ||!hash(tag.segmentSha256)||!hash(tag.cpuInputSha256)||value.kind!==\"voice-speech-tts\"||cpu?.kind!==\"synthesize\"\n      ||value.parentOperationId===null||value.parentOperationId!==value.controlOperationId||tag.cpuInputSha256!==value.inputSha256)return fail(\"VOICE_ASSISTANT_SOURCE_INVALID\",422);\n    return Object.freeze({...value,scope,cpuIdentity:cpu,assistantSpeechSource:Object.freeze({...tag})}) as VoiceOriginal;\n  }\n  return Object.freeze({...value,scope,cpuIdentity:cpu}) as VoiceOriginal;"
+    },
+    {
+      "name": "new-explicit-control-source-branch-legacy-block-verbatim",
+      "offset": 17453,
+      "before": "        if(original.parentOperationId){\n          const parent=get(original.parentOperationId);\n          if(!parent||parent.scope_hash!==digest(original.scope)||parent.turn_generation!==original.turnGeneration||parent.kind!==\"voice-agent-turn\"||parent.deadline_at<=ports.now()\n            ||(original.kind===\"voice-speech-tts\"?parent.state!==\"terminal\"||parent.outcome!==\"completed\"||!parent.result_fingerprint:parent.state!==\"running\"))return fail(\"VOICE_PARENT_UNAVAILABLE\",403);\n        }",
+      "after": "        if(original.assistantSpeechSource) {\n          const tag=original.assistantSpeechSource;\n          if(original.kind!==\"voice-speech-tts\"||original.parentOperationId!==original.controlOperationId||!original.controlOperationId\n            ||typeof ports.requireObservedSpeechSource!==\"function\")return fail(\"VOICE_ASSISTANT_ORIGINAL_REQUIRED\",403);\n          // Actual fixed API owner resolves module-private original payload/plan;\n          // a tag, SQL row or callback returning true is never that authority.\n          if(ports.requireObservedSpeechSource(context,original as AttachedSpeechOriginal,originalOwner)!==undefined)return fail(\"VOICE_ASSISTANT_ORIGINAL_REQUIRED\",403);\n          const source=ports.db().prepare(\"SELECT * FROM veyra_voice_assistant_speech_sources WHERE source_id=?\").get(tag.sourceId);\n          const control=get(original.controlOperationId);\n          if(!source||!control||control.kind!==\"voice-cpu-supervisor\"||control.state!==\"running\"||control.resource_retired!==0\n            ||control.scope_hash!==digest(original.scope)||!equal(JSON.parse(control.owner_json),originalOwner)\n            ||JSON.parse(control.control_json).profileDigest!==tag.profileDigest\n            ||source.metadata_hash!==tag.sourceHash||digest(JSON.parse(source.metadata_json))!==tag.sourceHash\n            ||source.scope_hash!==digest(original.scope)||source.control_operation_id!==original.controlOperationId\n            ||source.control_owner_hash!==digest(originalOwner)||source.call_id!==tag.callId||source.call_generation!==tag.callGeneration\n            ||source.turn_generation!==original.turnGeneration||source.deadline_at<original.deadlineAt||source.deadline_at<=ports.now()\n            ||source.user_epoch!==current.userSecurityEpoch||source.workspace_epoch!==current.workspaceSecurityEpoch||source.runtime_epoch!==current.runtimeSecurityEpoch\n            ||ports.db().prepare(\"SELECT 1 FROM veyra_voice_assistant_speech_tombstones WHERE source_id=?\").get(tag.sourceId))return fail(\"VOICE_ASSISTANT_SOURCE_UNAVAILABLE\",403);\n          const priorPlan=ports.db().prepare(\"SELECT plan_hash,profile_digest,voice_id,segment_count FROM veyra_voice_assistant_speech_claims WHERE source_id=? LIMIT 1\").get(tag.sourceId);\n          if(priorPlan&&(priorPlan.plan_hash!==tag.planHash||priorPlan.profile_digest!==tag.profileDigest||priorPlan.voice_id!==tag.voiceId||priorPlan.segment_count!==tag.segmentCount))return fail(\"VOICE_ASSISTANT_PLAN_CONFLICT\");\n          // Same original Core write transaction; source/control guards and\n          // immutable unique claims in migration134 are REQUIRED before activation.\n          if(ports.db().prepare(\"SELECT 1 FROM veyra_voice_assistant_speech_claims WHERE source_id=? AND segment_index=?\").get(tag.sourceId,tag.segmentIndex))return fail(\"VOICE_ASSISTANT_SEGMENT_SPENT\");\n          ports.db().prepare(\"INSERT INTO veyra_voice_assistant_speech_claims(source_id,segment_index,segment_count,plan_hash,profile_digest,voice_id,segment_sha256,input_sha256,operation_id) VALUES(?,?,?,?,?,?,?,?,?)\")\n            .run(tag.sourceId,tag.segmentIndex,tag.segmentCount,tag.planHash,tag.profileDigest,tag.voiceId,tag.segmentSha256,original.inputSha256,original.operationId);\n        } else\n        if(original.parentOperationId){\n          const parent=get(original.parentOperationId);\n          if(!parent||parent.scope_hash!==digest(original.scope)||parent.turn_generation!==original.turnGeneration||parent.kind!==\"voice-agent-turn\"||parent.deadline_at<=ports.now()\n            ||(original.kind===\"voice-speech-tts\"?parent.state!==\"terminal\"||parent.outcome!==\"completed\"||!parent.result_fingerprint:parent.state!==\"running\"))return fail(\"VOICE_PARENT_UNAVAILABLE\",403);\n        }"
+    }
+  ],
+  "missing": [
+    "Bounded original raw engine reader and fixed private observation/plan owner",
+    "Actual Core134 source/claim/tombstone immutable SQL+insert guards+schema verification",
+    "End-to-end private call/generation/speech wire; no VoiceService agentCompleted shortcut",
+    "Original restore capsule/preflight/tombstone union/invalidate surviving handles",
+    "Actual legacy/source/SQL/original-CPU/audio acceptance"
+  ]
+}

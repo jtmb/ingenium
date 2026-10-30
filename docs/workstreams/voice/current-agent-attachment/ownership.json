@@ -3,7 +3,7 @@
   "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
   "physicalVolume": "Existing C-backed Ubuntu ext4 VHDX, paired C volume EE22980A",
   "output": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/current-agent-attachment",
-  "sourceOutputLimitBytes": 172032,
+  "sourceOutputLimitBytes": 196608,
   "scope": "Bounded attachment source/interface proposal and model-free tests only",
   "protected": [
     "Original agent/goal/chat queue, canonical persistence and model selection",
@@ -15,5 +15,5 @@
   "effects": "No builds, tests, models, runtime, devices, CU or shared writes",
   "cleanup": "Remove proven reproducible inactive generated outputs after consumer; this worker creates no bulk/temp outputs",
   "productionApproval": false,
-  "followOnBudget": "Root-authorized admission/constructor audit and metadata-only Core restore-ledger source/tests/three-splice proposal; amended before restore generation to <=172032 bytes retained source, within original64MiB source allowance, same existing root/drive/combined20GiB ceiling, no generated runtime outputs"
+  "followOnBudget": "Root-authorized admission/restore and attached assistant speech-source contract/typed splice proposal; amended before speech-contract generation to <=196608 bytes retained source, within original64MiB source allowance, same existing root/drive/combined20GiB ceiling, no generated runtime outputs"
 }

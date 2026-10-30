@@ -9,6 +9,26 @@
       "sha256": "d999f021b0df7f69ab289a7ab4cc9477bca2ac16498dfdfd94eeaa4b528a8877"
     },
     {
+      "path": "assistant-speech-source-receipt.json",
+      "bytes": 4842,
+      "sha256": "a5303d94c227fa510e9fdeb16ba7a851d1c28009e577b8731b3c7ace6d35b8a1"
+    },
+    {
+      "path": "assistant-speech-source-review.md",
+      "bytes": 11416,
+      "sha256": "46461e0b0341dfc31ac85fa3758b19c4a59b9a4a14567116099f1976af2775b7"
+    },
+    {
+      "path": "assistant-speech-source-splices.json",
+      "bytes": 8707,
+      "sha256": "68f8d14effeaa156f0926a4b7354673efc1822f301e759f905634e883e2cdc76"
+    },
+    {
+      "path": "assistant-speech-source.contract.ts",
+      "bytes": 3616,
+      "sha256": "9e12e88acdd4464382d647d69ec5617b1bda7e69e74578d14d4190d13c2656e1"
+    },
+    {
       "path": "attachment.mjs",
       "bytes": 17211,
       "sha256": "c033338361bc1630d5d8c5e74de21a7206a4e32a7320cf5ef880918c87a83dbb"
@@ -50,8 +70,8 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1491,
-      "sha256": "4d8d842a2d4c50b6e36a8995719815d6c1e144da67da44f3bc4c6d4c3e764b1d"
+      "bytes": 1484,
+      "sha256": "fe3cc671825fbf4a8de11a2e72440d7c8a2b2122cafb446e12c245a807cc352e"
     },
     {
       "path": "README.md",
@@ -139,5 +159,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 138261
+  "totalContentBytes": 166835
 }
