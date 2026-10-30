@@ -1,0 +1,43 @@
+{
+  "sourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "head": "bd951ce1653a8e96da63e3354956c29e907f2858",
+  "inputs": [
+    {
+      "path": "packages/ingenium-core/lib/tools/runtimes.ts",
+      "sha256": "594f771d8b0e0ccf63a7695daa02292b46e66a6ce3388f7f6b10372deccbd719"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "sha256": "a900896af67a97ea153183324b199542f3e84062dc340bbce8c4a5f36cac01a4"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "sha256": "24d56e1853162d94a2254bf3ba2766097e552b144162a78d8c4369fb21f3b8b6"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "sha256": "0e3c8514ca4ba2df0eab9dae653019f81766701f3dbc33dd58afee4e8b1ba32a"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "sha256": "c99b550d70a5bfa6213fa6e7e018f78a2a1f2d2cdfe3433448ad7e450d62c5d3"
+    }
+  ],
+  "consumer": [
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "sha256": "db23b41232c82301299503fd87aa158deeb09629858bf83d9745ae3c39e3cb78"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "sha256": "e1b447963e8f9848b34eddf8ced79b40186bda8c3be42c8f43548286d220acc9"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.d.mts",
+      "sha256": "e6f308d4121936dcef60b2f06e7c8a962d28a853c45dc037ea3b138ad0c5d882"
+    }
+  ],
+  "sharedWritten": false,
+  "ddlAllocation": 127,
+  "ddlOwner": "Root applies/registers/publishes; worker proposal only"
+}

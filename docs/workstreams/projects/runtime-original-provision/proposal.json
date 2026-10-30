@@ -1,0 +1,47 @@
+{
+  "sourceHead": "bd951ce1653a8e96da63e3354956c29e907f2858",
+  "existingInputs": [
+    {
+      "path": "packages/ingenium-core/lib/tools/runtimes.ts",
+      "baseSha256": "594f771d8b0e0ccf63a7695daa02292b46e66a6ce3388f7f6b10372deccbd719",
+      "proposedSha256": "48d458bee13691495e92548f51ae60af3b6579f0885a71fa86be6d35e38329b0"
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "baseSha256": "a900896af67a97ea153183324b199542f3e84062dc340bbce8c4a5f36cac01a4",
+      "proposedSha256": "bd68e7e52b502423b8361d4d7562adbcb298732571f8f235cf3c56bb139eaa70"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "baseSha256": "24d56e1853162d94a2254bf3ba2766097e552b144162a78d8c4369fb21f3b8b6",
+      "proposedSha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "baseSha256": "0e3c8514ca4ba2df0eab9dae653019f81766701f3dbc33dd58afee4e8b1ba32a",
+      "proposedSha256": "269192d80beff8e1bc69198e15f0f2da3fe0e50d6f548156a89c8733d25c2e0a"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "baseSha256": "c99b550d70a5bfa6213fa6e7e018f78a2a1f2d2cdfe3433448ad7e450d62c5d3",
+      "proposedSha256": "48394a7d3f701ed28b8c383f17d7b133550bbbab9fb3d3ee95ed39da87f5d118"
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+      "bytes": 17982,
+      "sha256": "2d231a2015739bee169f92c4bc2a3037f9eb3524772efe2903790fe184e870c7"
+    }
+  ],
+  "patchSha256": "a99db142749b34cc26dc4e68624c3bc0ac638ff1513b805dc0edebd0f67ce966",
+  "ddlAllocation": 127,
+  "ddlSha256": "1d23e11154fb08c885e738d5e8d6c1323a252a7c8164cd37b2d4dc6d0ae1ef28",
+  "ddlRegisteredOrApplied": false,
+  "sharedWritten": false,
+  "compiled": false,
+  "runtimeOrDockerInvoked": false,
+  "originalReadExport": "runtimes.getRuntimeOriginalProvision(runtimeId)",
+  "metadataReadIsQualification": false,
+  "freshHealthyQualificationOwner": "existing Core126 image owner; Root adds imageId/startIdentity equality"
+}

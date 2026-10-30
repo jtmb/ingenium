@@ -1,0 +1,19 @@
+{
+  "owner": "01a18934-fe43-76a0-940e-6766d96f5770",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "existing authorized C-backed Ubuntu VHDX",
+  "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/runtime-original-provision",
+  "receipts": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/projects",
+  "expectedPeak": "<2MiB source and current in-place CPU TAP; SQLite in memory; no build/dependency/download/runtime/model outputs",
+  "generatedPaths": [
+    "sources/ canonical NEW files",
+    "integration.patch",
+    "DDL127.sql",
+    "prepare-proposal.py",
+    "README.md",
+    "inputs.json",
+    "proposal.json"
+  ],
+  "regeneration": "python3 -B prepare-proposal.py --core-source-root exact frozen source; existing Node --experimental-strip-types/--experimental-sqlite tests",
+  "protected": "all shared Core/Native source/index, runtime data, credentials, user roots, existing models and locks; no actual migration file edits"
+}
