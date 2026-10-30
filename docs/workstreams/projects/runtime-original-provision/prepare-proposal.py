@@ -24,6 +24,7 @@ export type {RuntimeOriginalProvision,StoredRuntimeOriginalProvision,PublicProvi
 export function getRuntimeOriginalProvision(id:string):StoredRuntimeOriginalProvision|undefined{
  return readRuntimeOriginalProvision(getDb(process.env.INGENIUM_CORE_DB_PATH),id);
 }""")
+replace(rel,'  state: RuntimeState; revision: number; lease_expires_at: string | null; idle_expires_at: string | null;', '  state: RuntimeState; revision: number; lease_owner_hash: string | null; lease_expires_at: string | null; idle_expires_at: string | null;')
 replace(rel,'  backendContainerId?: string | null; idleExpiresAt?: Date | null; absoluteExpiresAt?: Date | null; maxActiveRuntimes?: number;', '  backendContainerId?: string | null; idleExpiresAt?: Date | null; absoluteExpiresAt?: Date | null; maxActiveRuntimes?: number;\n  originalProvision?: RuntimeOriginalProvision;')
 replace(rel,'    const revoked = input.toState === "REVOKED";', '    insertRuntimeOriginalProvision(db,current,input,timestamp); // same original STARTING transaction\n    const revoked = input.toState === "REVOKED";')
 rel='services/ingenium-api/lib/runtime-manager-contract.ts'
