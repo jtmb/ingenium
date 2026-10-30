@@ -1,0 +1,22 @@
+{
+  "crates/adapters/src/local_execution/windows_web_read/native.rs": {
+    "preimage_sha256": "9640d1e6a8cf6a1bce9b34b2c6c01e5bc1e2656945c60dabadd2d55cfc272de0",
+    "proposed_sha256": "bd9902d889d4183a10123162673e62c49d4b77a90b3a6a966cf43eb9bea99c0d"
+  },
+  "crates/adapters/src/local_execution/windows_web_read.rs": {
+    "preimage_sha256": "e5c5e9e47016cf0464ff4b4fb2fb113767083f146da9d3d611e27c86a8505a8e",
+    "proposed_sha256": "cd41afdd673d89c5b86bfbe890d7ffb6b7f691e7c69e19eb2a0f1a862031803a"
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs": {
+    "preimage_sha256": "bbdd38c7348b2d1ea43b3de1faff938a457bedc86b898fbcc8f741c1781d48a0",
+    "proposed_sha256": "4675ac958e8b9da9e9a7183404a2b0da3088a36c03ce8d7c82e5a25ca4647119"
+  },
+  "crates/adapters/src/native_web_payload.rs": {
+    "preimage_sha256": "1589a353b09f5bdf03cba026d44b3cc58885fa309497653ddd9cd287ef7d8337",
+    "proposed_sha256": "8453861a21465e2d43136b8c97564c1299bfb99d19846dd4d83a1f3d22a57b15"
+  },
+  "crates/adapters/src/projects/local_web_originals.rs": {
+    "preimage_sha256": "4df8b7fe2ff43dd5d61930da42cd421c04217e2838f01892cd4840587dd8ce04",
+    "proposed_sha256": "63b161fe38507075a144ac47b0e8c00b8da46416ff4cebd6c84b65656a08e1b1"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "scope": "unapplied finite source composition only",
+  "checks": {
+    "five_exact_followon_paths": true,
+    "source_buffer_charged": true,
+    "source_pool_from_actual_original": true,
+    "reserve_before_real_file_read": true,
+    "enroll_actual_source_before_read": true,
+    "source_no_read_to_end_vec": true,
+    "source_actual_size_verified": true,
+    "source_failures_keep_actual_owner": true,
+    "decode_destination_before_decode": true,
+    "blob_bind_borrows_actual_charged_bytes": true,
+    "source_map_shares_owner_not_vec": true,
+    "rust_lifetime_brake_removed": true,
+    "unknown_original_fence_preserved": true,
+    "no_new_counter_release": true
+  },
+  "passed": 14,
+  "compiler_or_runtime_run": false,
+  "ddl_or_dependency_change": false,
+  "memory_or_20MiB_qualified": false,
+  "patch_bytes": 6420,
+  "patch_sha256": "85d2d7db676f60275fdf726d18d6671e722347231faeebf5a2aaa3b25dae611b"
+}

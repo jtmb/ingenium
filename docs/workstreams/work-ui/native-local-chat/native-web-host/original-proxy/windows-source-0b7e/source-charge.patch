@@ -1,0 +1,72 @@
+--- a/crates/adapters/src/local_execution/windows_web_read/native.rs
++++ b/crates/adapters/src/local_execution/windows_web_read/native.rs
+@@ -9 +9 @@
+-pub(crate) struct Source{pub(crate) bytes:Vec<u8>,pub(crate) mime:String,pub(crate) absolute:String}
++pub(crate) struct Source{pub(crate) bytes:crate::native_web_payload::Buffer,pub(crate) mime:String,pub(crate) absolute:String}
+@@ -38 +38 @@
+- pub(super) fn capture(&mut self,binding:&LocalWorkspaceBinding,files:&[String],batch_limit:usize,current:&dyn Fn()->Result<(),String>)->Result<(),String>{
++ pub(super) fn capture(&mut self,binding:&LocalWorkspaceBinding,files:&[String],batch_limit:usize,pool:&std::sync::Arc<crate::native_web_payload::Pool>,current:&dyn Fn()->Result<(),String>)->Result<(),String>{
+@@ -69,3 +69,13 @@
+-   let mut bytes=Vec::new();file.take(remaining as u64+1).read_to_end(&mut bytes).map_err(|_|"held source read refused")?;
+-   total=total.checked_add(bytes.len()).filter(|n|*n<=batch_limit).ok_or("source bound exceeded")?;
+-   let (mime,_)=crate::attachments::sniff_for_prompt(&bytes).map_err(|_|"source MIME unsupported by current native policy")?;
++   let expected=usize::try_from(node.stamp.as_ref().ok_or("source identity missing")?.size).map_err(|_|"source size unsupported")?;
++   let capacity=expected.checked_add(1).ok_or("source capacity overflow")?;
++   let bytes=pool.allocate(capacity).map_err(|_|"original resident source budget retained")?;
++   self.sources.push(Source{bytes,mime:String::new(),absolute:absolute.clone()});
++   let source=self.sources.last_mut().ok_or("actual source owner missing")?;
++   let mut input=file.take(capacity as u64);
++   loop{current()?;let count=source.bytes.read_once(&mut input,8192).map_err(|_|"held source read refused; prefix retained")?;
++    if source.bytes.len()>expected{return Err("held source grew; original prefix retained".into())}if count==0{break}
++   }
++   if source.bytes.len()!=expected{return Err("held source length changed; original prefix retained".into())}
++   total=total.checked_add(source.bytes.len()).filter(|n|*n<=batch_limit).ok_or("source bound exceeded")?;
++   let (mime,_)=crate::attachments::sniff_for_prompt(source.bytes.as_ref()).map_err(|_|"source MIME unsupported by current native policy")?;
++   source.mime=mime.into();
+@@ -73 +83 @@
+-   self.sources.push(Source{bytes,mime:mime.into(),absolute:absolute.clone()});
++
+--- a/crates/adapters/src/local_execution/windows_web_read.rs
++++ b/crates/adapters/src/local_execution/windows_web_read.rs
+@@ -26 +26 @@
+- pub(crate) fn capture(&self,binding:&LocalWorkspaceBinding,absolute_files:&[String],inline_bytes:usize,current:&dyn Fn()->Result<(),String>)->Result<(),String>{
++ pub(crate) fn capture(&self,binding:&LocalWorkspaceBinding,absolute_files:&[String],inline_bytes:usize,pool:&std::sync::Arc<crate::native_web_payload::Pool>,current:&dyn Fn()->Result<(),String>)->Result<(),String>{
+@@ -31,2 +31,2 @@
+-  #[cfg(windows)]let result=state.native.capture(binding,absolute_files,crate::attachments::MAX_BATCH_BYTES-inline_bytes,&||{if Instant::now()>=self.deadline{return Err("original acquisition deadline".into());}current()});
+-  #[cfg(not(windows))]let result={let _=(absolute_files,inline_bytes);Err("Windows original unavailable".into())};
++  #[cfg(windows)]let result=state.native.capture(binding,absolute_files,crate::attachments::MAX_BATCH_BYTES-inline_bytes,pool,&||{if Instant::now()>=self.deadline{return Err("original acquisition deadline".into());}current()});
++  #[cfg(not(windows))]let result={let _=(absolute_files,inline_bytes,pool);Err("Windows original unavailable".into())};
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs
+@@ -53 +53 @@
+-   held.capture(&lease.binding,&inputs.absolute_files,inputs.inline_bytes,current).map_err(|_|local_error())?;
++   held.capture(&lease.binding,&inputs.absolute_files,inputs.inline_bytes,original.body_owner().pool(),current).map_err(|_|local_error())?;
+--- a/crates/adapters/src/native_web_payload.rs
++++ b/crates/adapters/src/native_web_payload.rs
+@@ -34,0 +35,4 @@
++ }
++ pub(crate) fn refill_dynamic<E>(&mut self,fill:impl FnOnce(&mut[u8])->Result<usize,E>)->Result<(),Option<E>>{
++  let actual=Arc::get_mut(&mut self.allocation).ok_or(None)?;self.length=0;
++  let length=fill(&mut actual.bytes).map_err(Some)?;if length>actual.bytes.len(){return Err(None)}self.length=length;Ok(())
+--- a/crates/adapters/src/projects/local_web_originals.rs
++++ b/crates/adapters/src/projects/local_web_originals.rs
+@@ -200 +200 @@
+-        let mut sources=std::collections::BTreeMap::<String,Vec<u8>>::new();
++        let mut sources=std::collections::BTreeMap::<String,crate::native_web_payload::Payload>::new();
+@@ -210 +210,4 @@
+-                let bytes=STANDARD.decode(&encoded).map_err(|_|StoreError::Invalid)?;
++                let capacity=base64::decoded_len_estimate(encoded.len()).max(1);
++                let mut bytes=original.body_owner().pool().allocate(capacity).map_err(|_|StoreError::Conflict)?;
++                bytes.refill_dynamic(|dst|STANDARD.decode_slice(encoded.as_bytes(),dst)).map_err(|_|StoreError::Invalid)?;
++                let bytes=bytes.freeze();
+@@ -212,2 +215,2 @@
+-                if format!("{:x}",Sha256::digest(&bytes))!=source_hash||STANDARD.encode(&bytes)!=encoded{return Err(StoreError::Conflict);}
+-                if let Some(previous)=sources.insert(source_hash.clone(),bytes.clone()){if previous!=bytes{return Err(StoreError::Conflict);}}
++                if format!("{:x}",Sha256::digest(bytes.as_ref()))!=source_hash||STANDARD.encode(bytes.as_ref())!=encoded{return Err(StoreError::Conflict);}
++                if let Some(previous)=sources.insert(source_hash.clone(),bytes.clone()){if previous.as_ref()!=bytes.as_ref(){return Err(StoreError::Conflict);}}
+@@ -228,2 +230,0 @@
+-        let count:i64=tx.query_row("SELECT count(*) FROM local_workspace_operations",[],|r|r.get(0))?;
+-        if count>=4096{return Err(StoreError::Invalid);}
+@@ -237 +238 @@
+-        for (hash,bytes) in sources{tx.execute("INSERT INTO local_web_original_sources VALUES(?,?,?)",params![original.operation_id(),hash,bytes])?;}
++        for (hash,bytes) in sources{tx.execute("INSERT INTO local_web_original_sources VALUES(?,?,?)",params![original.operation_id(),hash,bytes.as_ref()])?;}
