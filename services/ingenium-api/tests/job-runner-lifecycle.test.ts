@@ -1,16 +1,55 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolveJobProviderModel } from "../lib/job-native-provider.js";
 import { EventEmitter } from "node:events";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import type { JobProcessIdentity, JobProcessInspector, ProcfsAccessForTesting } from "../lib/job-runner.js";
 
 const childHarness = vi.hoisted(() => ({
   next: null as ChildProcess | null,
 }));
+
+// Model-free lifecycle cases use fake credentials/process identities. Keep all
+// generated files in the caller's declared task root. Only the tmpfs capability
+// observation is mocked for these fixtures; production still checks real tmpfs.
+const fixtureFilesystem = vi.hoisted(() => ({ roots: new Set<string>(), removed: [] as { path: string; bytes: number }[] }));
+vi.mock("node:fs", async (original) => {
+  const actual = await original<typeof import("node:fs")>();
+  return { ...actual, rmSync: (path: import("node:fs").PathLike, options?: import("node:fs").RmOptions) => {
+    const target = String(path);
+    const owner = [...fixtureFilesystem.roots].find(root => target === root || target.startsWith(root + "/"));
+    if (!owner || actual.realpathSync(owner) !== owner || actual.lstatSync(owner).isSymbolicLink()) throw new Error("Fixture deletion outside original owned root");
+    const measure = (entry: string): number => {
+      const stat = actual.lstatSync(entry);
+      return stat.isDirectory() && !stat.isSymbolicLink()
+        ? actual.readdirSync(entry).reduce((sum, name) => sum + measure(entry + "/" + name), 0) : stat.size;
+    };
+    const bytes = actual.existsSync(target) ? measure(target) : 0;
+    actual.rmSync(path, options);
+    fixtureFilesystem.removed.push({ path: target, bytes });
+  }, statfsSync: (path: import("node:fs").PathLike, options?: { bigint?: boolean }) => {
+    const result = actual.statfsSync(path, options as { bigint?: false });
+    return fixtureFilesystem.roots.has(String(path)) ? { ...result, type: 0x01021994 } : result;
+  } };
+});
+
+function fixtureDirectory(prefix: string): string {
+  const declared = process.env.INGENIUM_TEST_GENERATED_OUTPUT_ROOT;
+  if (!declared || !isAbsolute(declared) || resolve(declared) !== declared) throw new Error("Explicit task-owned test output root required");
+  if (realpathSync(declared) !== declared || lstatSync(declared).isSymbolicLink()) throw new Error("Redirected task root refused");
+  const base = join(declared, "real-gmail-ui/veyra-phase-1/coordination/job-runner-lifecycle");
+  const contained = relative(declared, base);
+  if (contained.startsWith("..") || isAbsolute(contained)) throw new Error("Fixture root escaped declared ownership");
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  if (realpathSync(base) !== base || lstatSync(base).isSymbolicLink()) throw new Error("Redirected fixture root refused");
+  const root = mkdtempSync(join(base, prefix));
+  chmodSync(root, 0o700);
+  fixtureFilesystem.roots.add(root);
+  return root;
+}
 
 const core = vi.hoisted(() => ({
   logger: {
@@ -97,6 +136,7 @@ import {
   recoverExpiredEventAttempt,
   recoverVaultSecretRunDirectories,
   inspectLinuxProcessGroupForTesting,
+  inspectOwnedJobRun,
   resetJobRunnerForTesting,
   runningProcesses,
   stopAllJobRuns,
@@ -237,7 +277,7 @@ beforeEach(() => {
     credential: Buffer.from("provider-credential"),
     release: vi.fn(),
   }));
-  runtimeSourcesDirectory = mkdtempSync("/dev/shm/ingenium-opencode-runtime-");
+  runtimeSourcesDirectory = fixtureDirectory("opencode-runtime-");
   chmodSync(runtimeSourcesDirectory, 0o700);
   const config = join(runtimeSourcesDirectory, "opencode.jsonc");
   const auth = join(runtimeSourcesDirectory, "auth.json");
@@ -262,12 +302,20 @@ afterEach(async () => {
   if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
   runtimeRoot = "";
   resetJobRunnerForTesting();
+  fixtureFilesystem.roots.clear();
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
 const vaultItemId = "22222222-2222-4222-8222-222222222222";
+
+afterAll(() => {
+  const receipt = process.env.VEYRA_JOB_RUNNER_TEST_RECEIPT;
+  const declared = process.env.INGENIUM_TEST_GENERATED_OUTPUT_ROOT;
+  if (!receipt || !declared || !receipt.startsWith(declared + "/")) throw new Error("Owned cleanup receipt path required");
+  writeFileSync(receipt, JSON.stringify({ evidenceClass: "Model-free runner lifecycle fixtures; tmpfs capability and processes mocked, production checks unchanged", removed: fixtureFilesystem.removed, removedLogicalBytes: fixtureFilesystem.removed.reduce((sum, row) => sum + row.bytes, 0), windowsRecoveryClaimed: false }, null, 2), { flag: "wx" });
+});
 
 function vaultResolution(secret: string, deadlineAt = Date.now() + 60_000) {
   const value = Buffer.from(secret, "utf8");
@@ -280,7 +328,7 @@ function vaultResolution(secret: string, deadlineAt = Date.now() + 60_000) {
 }
 
 function vaultRoot(): string {
-  const root = mkdtempSync("/dev/shm/ingenium-job-secrets-");
+  const root = fixtureDirectory("job-secrets-");
   chmodSync(root, 0o700);
   return root;
 }
@@ -593,7 +641,7 @@ describe("job-runner process lifecycle", () => {
   });
 
   it("fails closed before spawn for an unsafe root and leaves no plaintext Buffer", async () => {
-    const root = mkdtempSync(join("/tmp", "ingenium-job-secrets-"));
+    const root = fixtureDirectory("unsafe-job-secrets-");
     chmodSync(root, 0o755);
     const resolved = vaultResolution("root-failure-canary");
     restoreRuntime = configureJobRunnerRuntimeForTesting({ vaultSecretRoot: root });
@@ -1253,5 +1301,42 @@ describe("native Job admission and response outcomes", () => {
     expect(vi.mocked(spawn)).not.toHaveBeenCalled();
     expect(core.jobs.finishJobRun).toHaveBeenCalledWith("project-id", runId, "failed", -1);
     expect(existsSync(join(runtimeRoot, runId))).toBe(false);
+  });
+});
+
+describe("authorized caller's original owned-run settlement evidence", () => {
+  it("distinguishes a live exact run, positive retirement and restart uncertainty", async () => {
+    const runId = "20000000-0000-4000-8000-000000000001";
+    const child = fakeChild();
+    const proc = processHarness([identity(101, "settlement-leader")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
+    core.jobs.getJobRun.mockReturnValue(Object.assign({ status: "running" }, { id: runId, project_id: job.project_id, job_id: job.id }));
+    await startRun(runId, child);
+    expect(inspectOwnedJobRun(job.project_id, runId)).toEqual({ state: "active", reason: "owned-group-active" });
+    expect(inspectOwnedJobRun("foreign-project", runId).state).toBe("unknown");
+    expect(inspectOwnedJobRun(job.project_id, "missing").state).toBe("unknown");
+    proc.members.clear();
+    closeChild(child, 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inspectOwnedJobRun(job.project_id, runId)).toEqual({ state: "settled", reason: "owned-group-retired" });
+    resetJobRunnerForTesting();
+    expect(inspectOwnedJobRun(job.project_id, runId).state).toBe("unknown");
+  });
+
+  it("retains a live descendant after leader close until original verified recovery", async () => {
+    const runId = "20000000-0000-4000-8000-000000000002";
+    const child = fakeChild();
+    const proc = processHarness([identity(101, "settlement-parent")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
+    core.jobs.getJobRun.mockReturnValue(Object.assign({ status: "running" }, { id: runId, project_id: job.project_id, job_id: job.id }));
+    await startRun(runId, child);
+    proc.members.delete(101);
+    proc.members.set(102, identity(102, "settlement-descendant"));
+    closeChild(child, 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inspectOwnedJobRun(job.project_id, runId)).toEqual({ state: "unknown", reason: "lifecycle-pending" });
+    proc.members.clear();
+    await vi.advanceTimersByTimeAsync(JOB_TERMINATION_GRACE_MS + 10_000);
+    expect(inspectOwnedJobRun(job.project_id, runId).state).toBe("settled");
   });
 });

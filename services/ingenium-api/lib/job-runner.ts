@@ -162,6 +162,10 @@ interface ProcessTrackingEvent {
 }
 
 interface OwnedDetachedRun {
+  projectId: string;
+  jobId: string;
+  /** Set only after the existing verifier positively observes an empty owned group. */
+  retiredAt?: number;
   runId: string;
   runNonceHash: string;
   processGroupId: number;
@@ -210,6 +214,71 @@ export interface OwnedDetachedRunDiagnostic {
 
 const ownedDetachedRuns = new Map<string, OwnedDetachedRun>();
 
+/** Only unresolved entries participate in signalling, recovery and pending tests. */
+function pendingDetachedRun(runId: string): OwnedDetachedRun | undefined {
+  const tracked = ownedDetachedRuns.get(runId);
+  return tracked?.retiredAt === undefined ? tracked : undefined;
+}
+
+const MAX_OWNED_RUN_RETIREMENT_RECEIPTS = 256;
+
+/** Called only by the existing complete, identity-bound empty-group verifier. */
+function retireOwnedGroup(tracked: OwnedDetachedRun): void {
+  if (ownedDetachedRuns.get(tracked.runId) !== tracked || !tracked.leader || tracked.retiredAt !== undefined) return;
+  recordTrackingEvent(tracked, "teardown-verified", "owned-group-empty");
+  clearGroupRecoveryTimer(tracked.runId);
+  tracked.retiredAt = Date.now();
+  // Keep the captured leader/nonce identity and project/run/job binding only.
+  tracked.initialGroupMembers = [];
+  tracked.lastObservedGroupMembers = [];
+  tracked.knownMembers.clear();
+  tracked.events = [];
+  // Reinsert at retirement time; remove only old positive receipts, never pending ownership.
+  ownedDetachedRuns.delete(tracked.runId);
+  ownedDetachedRuns.set(tracked.runId, tracked);
+  let retired = 0;
+  for (const entry of ownedDetachedRuns.values()) if (entry.retiredAt !== undefined) retired++;
+  for (const [id, entry] of ownedDetachedRuns) {
+    if (retired <= MAX_OWNED_RUN_RETIREMENT_RECEIPTS) break;
+    if (entry.retiredAt === undefined || ownedRunLifecyclePending(id)) continue;
+    ownedDetachedRuns.delete(id);
+    retired--;
+  }
+  finalizeVaultRunAfterVerifiedTeardown(tracked.runId);
+}
+
+function ownedRunLifecyclePending(runId: string): boolean {
+  return forceKillTimers.has(runId) || terminationCompletions.has(runId)
+    || resolveEscalations.has(runId) || teardownAttempts.has(runId)
+    || runningProcesses.has(runId) || closePromises.has(runId) || groupRecoveryTimers.has(runId);
+}
+
+export type OwnedJobRunInspection = Readonly<{
+  state: "active" | "settled" | "unknown";
+  reason: "owned-group-active" | "owned-group-retired" | "ownership-unavailable" | "lifecycle-pending" | "group-unverified";
+}>;
+
+/** Process settlement evidence only; callers must independently authorize the request. */
+export function inspectOwnedJobRun(projectId: string, runId: string): OwnedJobRunInspection {
+  const unknown = (reason: OwnedJobRunInspection["reason"] = "ownership-unavailable"): OwnedJobRunInspection => ({ state: "unknown", reason });
+  if (!supportsOwnedProcessGroups) return unknown();
+  const tracked = ownedDetachedRuns.get(runId);
+  if (!tracked || tracked.projectId !== projectId || tracked.runId !== runId || !tracked.leader) return unknown();
+  let run: ReturnType<typeof jobs.getJobRun>;
+  try { run = jobs.getJobRun(projectId, runId); } catch { return unknown(); }
+  if (!run || run.id !== runId || run.project_id !== projectId || run.job_id !== tracked.jobId) return unknown();
+  if (runProjects.has(runId) && runProjects.get(runId) !== projectId) return unknown();
+  if (forceKillTimers.has(runId) || terminationCompletions.has(runId) || resolveEscalations.has(runId) || teardownAttempts.has(runId)) return unknown("lifecycle-pending");
+  if (tracked.retiredAt !== undefined) {
+    // Absence of these handles is a gate, never the source of positive proof.
+    if (ownedRunLifecyclePending(runId)) return unknown("lifecycle-pending");
+    return { state: "settled", reason: "owned-group-retired" };
+  }
+  const verification = revalidateOwnedGroup(tracked);
+  if (verification.status === "trusted") return { state: "active", reason: "owned-group-active" };
+  // Read-side observation never retires a group, cleans files or initiates teardown.
+  return unknown("group-unverified");
+}
 function cloneIdentity(identity: JobProcessIdentity): JobProcessIdentity {
   return { ...identity };
 }
@@ -860,7 +929,7 @@ function cleanupVaultSecretRun(runId: string): boolean {
 
 /** Return immutable tracking evidence for a run while teardown remains unverified. */
 export function getOwnedDetachedRunDiagnosticForTesting(runId: string): OwnedDetachedRunDiagnostic | undefined {
-  const tracked = ownedDetachedRuns.get(runId);
+  const tracked = pendingDetachedRun(runId);
   if (!tracked) return undefined;
   return {
     runId: tracked.runId,
@@ -982,11 +1051,11 @@ function revalidateOwnedGroup(tracked: OwnedDetachedRun): OwnedGroupVerification
 }
 
 function scheduleGroupRecovery(tracked: OwnedDetachedRun): void {
-  if (groupRecoveryTimers.has(tracked.runId)) return;
+  if (tracked.retiredAt !== undefined || groupRecoveryTimers.has(tracked.runId)) return;
 
   const timer = setTimeout(() => {
     groupRecoveryTimers.delete(tracked.runId);
-    const current = ownedDetachedRuns.get(tracked.runId);
+    const current = pendingDetachedRun(tracked.runId);
     if (!current) return;
     if (!verifyOwnedGroupTeardown(current)) scheduleGroupRecovery(current);
   }, JOB_GROUP_RECOVERY_INTERVAL_MS);
@@ -1002,12 +1071,10 @@ function scheduleGroupRecovery(tracked: OwnedDetachedRun): void {
  * touched by this runner.
  */
 function verifyOwnedGroupTeardown(tracked: OwnedDetachedRun): boolean {
+  if (tracked.retiredAt !== undefined) return true;
   const verification = revalidateOwnedGroup(tracked);
   if (verification.status === "empty") {
-    recordTrackingEvent(tracked, "teardown-verified", "owned-group-empty");
-    clearGroupRecoveryTimer(tracked.runId);
-    ownedDetachedRuns.delete(tracked.runId);
-    finalizeVaultRunAfterVerifiedTeardown(tracked.runId);
+    retireOwnedGroup(tracked);
     return true;
   }
 
@@ -1019,11 +1086,13 @@ function verifyOwnedGroupTeardown(tracked: OwnedDetachedRun): boolean {
   return false;
 }
 
-function trackDetachedProcess(runId: string, processId: number, runNonce: string): void {
+function trackDetachedProcess(projectId: string, jobId: string, runId: string, processId: number, runNonce: string): void {
   const leader = jobRunnerRuntime.processInspector.inspectProcess(processId);
   const runNonceHash = hashNonce(runNonce);
   if (!runNonceHash) throw new VaultSecretStorageError();
   const tracked: OwnedDetachedRun = {
+    projectId,
+    jobId,
     runId,
     runNonceHash,
     processGroupId: processId,
@@ -1128,6 +1197,8 @@ function trackRecoveredDetachedProcess(
 ): OwnedDetachedRun | undefined {
   if (hashNonce(leader.runNonce) !== recovery.processNonceHash) return undefined;
   const tracked: OwnedDetachedRun = {
+    projectId: recovery.projectId,
+    jobId: recovery.jobId,
     runId: recovery.runId,
     runNonceHash: recovery.processNonceHash,
     processGroupId: leader.processGroupId,
@@ -1175,7 +1246,7 @@ function finalizeVaultRunAfterVerifiedTeardown(runId: string): void {
 }
 
 function cleanupVaultSecretRunAfterTeardown(runId: string): void {
-  const tracked = ownedDetachedRuns.get(runId);
+  const tracked = pendingDetachedRun(runId);
   if (tracked) {
     markVaultRunTeardownPending(runId);
     if (!verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
@@ -1386,14 +1457,14 @@ export function recoverVaultSecretRunDirectories(): Promise<void> {
 }
 
 function noteLeaderClosed(runId: string): void {
-  const tracked = ownedDetachedRuns.get(runId);
+  const tracked = pendingDetachedRun(runId);
   if (!tracked) return;
   recordTrackingEvent(tracked, "leader-closed", "awaiting-owned-group-teardown");
   if (!verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
 }
 
 function signalOwnedGroup(runId: string, signal: NodeJS.Signals): void {
-  const tracked = ownedDetachedRuns.get(runId);
+  const tracked = pendingDetachedRun(runId);
   if (!tracked) return;
 
   const verification = revalidateOwnedGroup(tracked);
@@ -1403,7 +1474,7 @@ function signalOwnedGroup(runId: string, signal: NodeJS.Signals): void {
       "signal-suppressed",
       verification.status === "empty" ? "owned-group-empty" : verification.reason,
     );
-    if (verification.status === "empty") finalizeVaultRunAfterVerifiedTeardown(runId);
+    if (verification.status === "empty") retireOwnedGroup(tracked);
     else {
       markVaultRunTeardownPending(runId);
       scheduleGroupRecovery(tracked);
@@ -1463,7 +1534,7 @@ function terminateProcess(runId: string, proc: ChildProcess): Promise<void> {
   void completion.then(() => {
     if (terminationCompletions.get(runId) !== completion) return;
     terminationCompletions.delete(runId);
-    const tracked = ownedDetachedRuns.get(runId);
+    const tracked = pendingDetachedRun(runId);
     if (tracked && !verifyOwnedGroupTeardown(tracked)) scheduleGroupRecovery(tracked);
   });
 
@@ -1471,12 +1542,12 @@ function terminateProcess(runId: string, proc: ChildProcess): Promise<void> {
   const timer = setTimeout(() => {
     forceKillTimers.delete(runId);
     void (async () => {
-      const beforeKill = ownedDetachedRuns.get(runId);
+      const beforeKill = pendingDetachedRun(runId);
       if (beforeKill && verifyOwnedGroupTeardown(beforeKill)) {
         // SIGTERM removed the whole owned group; a SIGKILL would be unnecessary.
       } else {
         signalOwnedProcess(runId, proc, "SIGKILL");
-        const tracked = ownedDetachedRuns.get(runId);
+        const tracked = pendingDetachedRun(runId);
         if (tracked && !(await waitForOwnedGroupTeardown(tracked))) {
           markVaultRunTeardownPending(runId);
           scheduleGroupRecovery(tracked);
@@ -1674,7 +1745,7 @@ export async function executeJobRun(
   runProjects.set(runId, job.project_id);
   if (eventContext) eventRunContexts.set(runId, eventContext);
   if (supportsOwnedProcessGroups && typeof proc.pid === "number" && proc.pid > 0) {
-    trackDetachedProcess(runId, proc.pid, runNonce);
+    trackDetachedProcess(job.project_id, job.id, runId, proc.pid, runNonce);
   }
   let resolveClose: (() => void) | undefined;
   closePromises.set(runId, new Promise<void>((resolve) => {
@@ -1805,7 +1876,7 @@ export async function executeJobRun(
     cleanupVaultSecretRunAfterTeardown(runId);
     if (eventContext) {
       void termination.then(() => {
-        const ambiguous = ownedDetachedRuns.has(runId);
+        const ambiguous = !!pendingDetachedRun(runId);
         completeEvent(
           "timeout",
           -1,
@@ -1854,7 +1925,7 @@ export async function executeJobRun(
     noteLeaderClosed(runId);
     // A successful leader exit does not prove a detached descendant is gone.
     // Vault files remain until a verified teardown attempt has run.
-    if (ownedDetachedRuns.has(runId) && !terminationCompletions.has(runId)) {
+    if (!!pendingDetachedRun(runId) && !terminationCompletions.has(runId)) {
       void terminateProcess(runId, proc);
     }
     finalize();
@@ -1944,7 +2015,7 @@ export async function stopAllJobRuns(): Promise<void> {
   for (const result of settled) {
     if (result.status !== "fulfilled" || !result.value.eventContext) continue;
     const { runId, projectId, eventContext } = result.value;
-    const ambiguous = ownedDetachedRuns.has(runId);
+    const ambiguous = !!pendingDetachedRun(runId);
     jobEventDeliveries.completeJobEventDelivery(projectId, {
       ...eventContext,
       runId,
