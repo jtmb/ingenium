@@ -1,0 +1,13 @@
+import type { LocalEnvironment, LocalWorkspaceOwner } from "@veyra/contracts";
+import type { LocalIdentity, LocalTransport } from "./local-protocol.mjs";
+export type RuntimeRead = { owner: LocalWorkspaceOwner; ready: boolean; reason?: string; readiness_scope?: string;
+  agents?: readonly { id: string; name?: string; mode: string; hidden: boolean }[];
+  engine_model_selection?: { id: string }; model_selection_scope?: string };
+export type MessageRead = { owner: LocalWorkspaceOwner; session_id: string; order: string;
+  data: readonly { id: string; sessionID: string; type: string; text: string | null; content: readonly unknown[]; error?: unknown; status?: string; reason?: string; outcome?: string }[];
+  cursor: { next: string | null; previous: string | null } };
+export type ConversationRead = { runtime: RuntimeRead; status: { running: boolean; terminal_observed: false; agent?: string; model?: { id: string }; outcome?: string }; page: MessageRead };
+export function identityFromContext(reply: unknown, selectedEnvironment: LocalEnvironment): LocalIdentity;
+export function boundRead<T>(reply: T, actualOwner: LocalWorkspaceOwner, sessionID?: string): T;
+export function messagePage(reply: unknown, actualOwner: LocalWorkspaceOwner, sessionID: string, cursor?: string | null): MessageRead;
+export function readConversation(transport: LocalTransport, owner: LocalWorkspaceOwner, sessionID: string, current: () => boolean, cursor?: string | null): Promise<ConversationRead>;

@@ -1,0 +1,105 @@
+{
+  "native_base_tree": "c295428576246dfa2b97f3a30f2045fc5ff1950f",
+  "projects_source_commit": "8b18318e248c7e1cba953c1e68b47529aac1a276",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 7195,
+      "sha256": "a137858a3c8df98854f8e456aa150c22caba4998a7b259c4f3da7f77f9af1fa0"
+    },
+    {
+      "path": "inventory.py",
+      "bytes": 984,
+      "sha256": "3d95bd3ee85ddd77a7d632be410ece47a0e26b7c7e89753fc3c3c77bc7e2337e"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalChatEntry.tsx",
+      "bytes": 4472,
+      "sha256": "57ba0d04254b23934dd1fde6ad6b6b378032f6b71be207958f65f0452cc0bce6"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.test.tsx",
+      "bytes": 3647,
+      "sha256": "2a3b7935716139ac65c252fd22615b279279b422ae7ff0deb02e3545cab86967"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
+      "bytes": 8715,
+      "sha256": "dfe92945e021f5af6e71fc575bd81317106fab2098f2f3779904b473b23da586"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalConversation.tsx",
+      "bytes": 3591,
+      "sha256": "834e64016b1d3dda5eecc341ed40d047498f275a36288f0cf1ca833a05f79cb7"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx",
+      "bytes": 3694,
+      "sha256": "c57d15b45e8dc4b4b359599e0bf164da65b3fdaae0395d7a246eb052a47ddcd9"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-chat-controller.d.mts",
+      "bytes": 1604,
+      "sha256": "bca36af94d4fe37c31ca49a1149bb6297c2a4253cf1d93323656b8d9b45d821b"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-chat-controller.mjs",
+      "bytes": 17861,
+      "sha256": "16624dd63667b2b70757ae37a7974bed71e3323e413580d662989bc507ed2da0"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-chat.css",
+      "bytes": 1267,
+      "sha256": "bf7d12b54fa6c5a45c9b9e224d25a31cb80dd89e9aa7a9bc406b641ccfdb6362"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-flow-index.d.mts",
+      "bytes": 244,
+      "sha256": "4ebc9deb39bdd2d9d051d18e3c61edd05e6b06f99f577036039b86032e9544cc"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-flow-index.mjs",
+      "bytes": 1030,
+      "sha256": "9863629d0a4e9a46dd05ce4b0df8e984a46adb225e62f6ea6aa40ba5fd4e976a"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-observations.d.mts",
+      "bytes": 1482,
+      "sha256": "b117b4cc60f852a7bd959962c6f63d954136008cb7d8ed945d2a9accaa088f00"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-observations.mjs",
+      "bytes": 2892,
+      "sha256": "40ac778889e0f23ccaa8bfd593238bd34e2751b733f639ee8efebb1d15a537a3"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-original-store.d.mts",
+      "bytes": 166,
+      "sha256": "9217eb1acdd9177f7313dd32aa3dc9f80682854cdb757a268bcab220751f2a7b"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-original-store.mjs",
+      "bytes": 1128,
+      "sha256": "8e7be84ef946ca5d306ac4e4561e0faf11bcf434e537cb9ac702ce37202fc4e4"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-protocol.d.mts",
+      "bytes": 2678,
+      "sha256": "63560648162010743ee70fdb48b64e5935ceeefcf6fb19a49109588fad7d7746"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-protocol.mjs",
+      "bytes": 9259,
+      "sha256": "f6432e5639e066cbf385eef97c2d28342adfe31aa37fd0d3dfe046d4d62b06e2"
+    },
+    {
+      "path": "tests/local-chat.test.mjs",
+      "bytes": 14679,
+      "sha256": "1f14d4473985d1e3c2507a697b652b992fd4aa3cb6c585fc843c3ffb310c851f"
+    }
+  ],
+  "removed_paths": [],
+  "removed_bytes": 0,
+  "bulk_outputs": [],
+  "acceptance": "fixture source only; central React/types/native/runtime/visual gates open"
+}
