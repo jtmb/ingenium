@@ -1,0 +1,18 @@
+{
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "Existing C-backed Ubuntu ext4 VHDX, paired C volume EE22980A",
+  "output": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/current-agent-original",
+  "ceilingBytes": 21474836480,
+  "sourceOutputLimitBytes": 65536,
+  "effects": "Owned docs source/evidence only; no execution, binary downloads, environment, profile, database, process, mount, device or shared source changes",
+  "protected": [
+    "Original Native/API/Stratus source, locks, credentials, active builds and runtime",
+    "Earlier13unappliedNativeCPUdrafts",
+    "All earlier rejected cleanup targets"
+  ],
+  "regeneration": "Finite source hash/line audit and pinned upstream textual source links; no full source snapshots or dependency copies",
+  "consumer": "Root executor architecture decision and implementation/qualification",
+  "endCondition": "Retain minimal exact source evidence and required acceptance cases",
+  "productionApproval": false
+}

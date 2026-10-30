@@ -1,0 +1,90 @@
+{
+  "kind": "current-agent-required-runtime-cases-v1",
+  "cases": [
+    {
+      "id": "original-postfinalizer",
+      "trigger": "Delay original runner finalizer after terminal event",
+      "required": "Next turn/Core retirement remains fenced until exact retained original join, not event/idle",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "coalesced-and-successor",
+      "trigger": "Two canonical inputs coalesce, then a successor is admitted",
+      "required": "Original binding accounts all coalesced effects without following/cancelling successor",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "background-subagent",
+      "trigger": "Actual selected subagent tool returns while child still runs",
+      "required": "Original child enrollment retained and positively joined before turn reuse",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "barge-in-real-tool",
+      "trigger": "Cancel during a real selected shell/MCP/tool effect",
+      "required": "Signal same original scope, preserve permissions, join original effect/finalizer and actual process/tree where applicable",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "provider-stream",
+      "trigger": "doStream resolves while reader/transport is still pending",
+      "required": "Retain actual provider Promise, stream and finalizers; response acquisition is not drain",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "plugin-unload",
+      "trigger": "Unload/disable/reload or transform failure during original turn",
+      "required": "Mandatory gate prevents all future original effects and retains actual original joins even after optional transform removal",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "transform-order",
+      "trigger": "Later tool transform replaces wrapped execute or registry reload returns fresh snapshot",
+      "required": "Every actually selected executor bound to original authority; do not infer coverage from previously wrapped IDs",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "provider-native",
+      "trigger": "Selected provider uses native driver, not AISDK",
+      "required": "Actual provider owner covered without switching provider/model or silent fallback",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "authorization-continuity",
+      "trigger": "Real tool permission, form, steering and approval interaction",
+      "required": "Same original user/Core policy and UI outcomes; no autoaccept/reject, cancelled forms or anonymous model",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "canonical-queue-persistence",
+      "trigger": "Actual current conversation with source/memory/workspace context",
+      "required": "SAME queue/Run/chat and canonical writer, exact selected configuration and durable original; no copied transcript or second server",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "dropped-waiter-and-failure",
+      "trigger": "HTTP caller disconnects or original cleanup fails",
+      "required": "Retain original and quarantine unknown; no blind retry, forged receipt or timeout-to-success",
+      "status": "pending",
+      "executed": false
+    },
+    {
+      "id": "actual-producer-proof",
+      "trigger": "Consume success/control proof through actual Core verifier",
+      "required": "Private producer proof bound to actual original, not fixture flags, local reader join or injected positive observer",
+      "status": "pending",
+      "executed": false
+    }
+  ],
+  "notes": "Acceptance specification only. No passing tests or implementation are claimed; Root owns actual source integration and bounded execution."
+}

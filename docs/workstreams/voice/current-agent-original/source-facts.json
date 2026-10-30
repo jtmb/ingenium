@@ -1,0 +1,478 @@
+{
+  "kind": "current-agent-boundary-source-audit-v1",
+  "observedAt": "2026-10-30T11:16:16.9830196-04:00",
+  "producerImplemented": false,
+  "runtimeQualified": false,
+  "productionApproval": false,
+  "nativeRoot": "real-gmail-ui/veyra-phase-1/windows-source",
+  "appRoot": "real-gmail-ui/prd-ui-fixes",
+  "voicePreimageCommit": "54e1ebd539d5ccf2768cabe688d959546aaba1d8",
+  "nativePreimages": [
+    {
+      "path": "apps/service/src/routes/model_work.rs",
+      "bytes": 30558,
+      "sha256": "36752e0f620c31743c532c3cdaa745080709be3c5126c0e88cd9d7053bbc7d3a"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "bytes": 15888,
+      "sha256": "385adb47b4279216d822f14c418216f3915b4ee495cc255162ea7be80a69231f"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport.rs",
+      "bytes": 32405,
+      "sha256": "795ef91f0e2c651b12e498f20179360b7b80b370ecf3e13d516904241596abab"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/purpose.rs",
+      "bytes": 2864,
+      "sha256": "7c244aad7587fe3a71d74f93e062974ac424745e06ec70ba346458e5441ca8d0"
+    },
+    {
+      "path": "apps/service/src/inference/owned_transport/retirement.rs",
+      "bytes": 16046,
+      "sha256": "40aef4aab0d08f7edcecea47874a08034d92dcb9756e081a9903af8395241d57"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "bytes": 31795,
+      "sha256": "0908c3568ffb18e9776f551c0487aec200fd29b054fde0840b1a6e9f41638034"
+    },
+    {
+      "path": "apps/service/src/routes/provider/task_retirement.rs",
+      "bytes": 6955,
+      "sha256": "baf34bd917b4be234420fa759e990531e8d7f1f132f33e7be7902cb4060f487a"
+    },
+    {
+      "path": "apps/service/src/routes/task_activity/terminal.rs",
+      "bytes": 20860,
+      "sha256": "9b8cbf90f93121bb5183fb2c60566c36332af27313594979a3f51a98bcfd96e6"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows.rs",
+      "bytes": 106930,
+      "sha256": "58061361767ae938522b611af34d7660800d868f52d0b7d9e9ed7dff7e3b582e"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows/tree_exit.rs",
+      "bytes": 7394,
+      "sha256": "95a043232be9365e37026f04a69e06c177720477564fac143d1349812cf893f8"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "bytes": 143884,
+      "sha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/interruption.rs",
+      "bytes": 12995,
+      "sha256": "a16a51d4212b65c9e08307d326afe1517a7ff337979a76e99a942d62c72c2f55"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/task_permissions.rs",
+      "bytes": 45772,
+      "sha256": "8ddfebc961df9fae0f719f0678e2e78161157c6559c74503cf3d23da04ad603b"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows/retained_dispatch/protocol.rs",
+      "bytes": 30194,
+      "sha256": "298ee6b3c34db5688d82986cfd459e5fad9382d30dee9ed0560717c3dc4f9faa"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows/retained_events/turn/controls.rs",
+      "bytes": 17336,
+      "sha256": "46020fec2227d6327e2a10c8c52c62647ff453eef20cddfc27e31f4df23ded16"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows/retained_events/turn/followups.rs",
+      "bytes": 13893,
+      "sha256": "e4c4e056f292ecd041405db3e8a230819bbf08a1bd4b941860ecea2acfb3523d"
+    },
+    {
+      "path": "crates/adapters/src/opencode/owned_windows/retained_events/turn/tools.rs",
+      "bytes": 18778,
+      "sha256": "6f3e73d155d675bc43861332b240a3eaa5626164a65091ca6a2238f9d2c80beb"
+    },
+    {
+      "path": "crates/contracts/src/task_tools.rs",
+      "bytes": 2795,
+      "sha256": "03bb4844baa09d75be3ccf87ee8faee2598ebe8fddeb40655c6f6e98b5cf199a"
+    },
+    {
+      "path": "crates/adapters/src/interactive_terminal.rs",
+      "bytes": 47786,
+      "sha256": "c2e8d0da3bb6f50d193cfc2e5d7fd6ec91e573367edab42f22df8cb04c66ee1a"
+    },
+    {
+      "path": "crates/adapters/src/opencode/request_metadata/plugin/index.js",
+      "bytes": 2691,
+      "sha256": "2588e316a8daac4d9cb2e9417b87c8cdaf867d52a55c71a57b026951c3502cec"
+    }
+  ],
+  "nativePostimages": "unchanged by worker",
+  "installedPluginPreimages": [
+    {
+      "path": "node_modules/@opencode/plugin/package.json",
+      "bytes": 2053,
+      "sha256": "448f5aee838a7c6a1d30ab340ddfbdea8e7848fc4d5779bca652a2747a7c6146"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/session.d.ts",
+      "bytes": 5540,
+      "sha256": "5547fcb055794670b6ce0e5187b91e32bf3e89b1c4bed4581e39cf8fd63f5e6d"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/plugin.d.ts",
+      "bytes": 2475,
+      "sha256": "ad8e00e94b4c94587800db750132a44754f42fe322d5cfb6da9fb0168ced09f1"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/tool.d.ts",
+      "bytes": 2476,
+      "sha256": "4c54a68f96f2c4c6ed281b1bb0249b0c9ea5d585364ee0073a1ffaa8f864a879"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/effect/tool.d.ts",
+      "bytes": 2081,
+      "sha256": "84a4655b80d5dce02b55939dd4937d267b469e4aeb1a86d7bbbce88c1671cb2e"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/aisdk.d.ts",
+      "bytes": 594,
+      "sha256": "76e3f66209ff257d7fbe04e132dae9aa00ffebf4c5ef796419f7b5a9873a83a9"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/adapter.js",
+      "bytes": 26390,
+      "sha256": "84351c010e9c7151a5e0a3830e4c163671e5e23e1c8775410a763adad5d5f3de"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/promise/registration.d.ts",
+      "bytes": 710,
+      "sha256": "16436600a035f85d035e3baebb8412084119f620ee4eafc9feba1c7438f6f5ff"
+    },
+    {
+      "path": "node_modules/@opencode/plugin/dist/effect/session.d.ts",
+      "bytes": 5548,
+      "sha256": "6bff4b99c4476f6f1e30516e88274423cdab196069ee5ca28f12bc931c59f1a0"
+    },
+    {
+      "path": "node_modules/@opencode/schema/dist/tool.d.ts",
+      "bytes": 3348,
+      "sha256": "d2f905f306d3e04be9a743e16ef326ee93130c7fa9436e75874a492cea51d020"
+    }
+  ],
+  "pinnedUpstreamCommit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "primaryTextSources": [
+    {
+      "path": "packages/cli/src/commands/handlers/run.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/commands/handlers/run.ts",
+      "bytes": 1215,
+      "sha256": "1ae759254ffd7de58153fbe9336a2ff9fb46757cdbd86220b17524b78470112c",
+      "gitBlobSha1": "b86e1bfc05cb45a6c2fb0029eaacf359dcc29ba4",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/cli/src/services/server-connection.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/services/server-connection.ts",
+      "bytes": 4170,
+      "sha256": "cca1a3679d28168e1bec35af8d177cd4854a1e1d54dd9abb2e975cf336a944b5",
+      "gitBlobSha1": "5d2619ad424324afb63f2e1c6469f7478a57b462",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/cli/src/services/standalone.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/services/standalone.ts",
+      "bytes": 2729,
+      "sha256": "05b425f5b096770f9aa9c0fea938ce91e7ffdd368f19b3d6440a592dec3113ca",
+      "gitBlobSha1": "9ec70ac8431fdf53bfe928ff5ff4d8fd4dd542cb",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/cli/src/run/run.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/run/run.ts",
+      "bytes": 9221,
+      "sha256": "da2c319095d92215f7b79efd3b0654f9b6d8dd434bf7007e0d52d4fbf8c19846",
+      "gitBlobSha1": "e6b3a906ddf7808855ce7d65e390894eebf58224",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/cli/src/run/noninteractive.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/run/noninteractive.ts",
+      "bytes": 28810,
+      "sha256": "6498254d0b17c0ac01f91d1e3654321a2fbcc73d6195ec6eaa8c8e3fba1a4100",
+      "gitBlobSha1": "df9bc81ad8913b5954525e020a4bd2c9562635cc",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/plugin/hooks.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/plugin/hooks.ts",
+      "bytes": 4414,
+      "sha256": "2e475ccada7437c648d81c16403671deeb2de74517e4b05a397c5c2513cbbe48",
+      "gitBlobSha1": "1325837f9d5864b2619b795c2cd1493d291786d1",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/plugin/host.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/plugin/host.ts",
+      "bytes": 24945,
+      "sha256": "881e5fba4ffe8267200f2a8c314aacd838f46d9ce5d13e713792db3c806feb10",
+      "gitBlobSha1": "a2aee2865ea2a7b4940a4bfb29df05fb5d4b5918",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/plugin.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/plugin.ts",
+      "bytes": 12152,
+      "sha256": "5ddb3f20f45e43c575e7c84be695ce1bb06edcf02815c81769e3f1230f1995d6",
+      "gitBlobSha1": "8ade6826585f68e05e096720164c835abfdb0100",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/state.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/state.ts",
+      "bytes": 8927,
+      "sha256": "ffdaf9268a2cddec8f00870ed78a64031a148142e9c2497fad016e1c07cadea5",
+      "gitBlobSha1": "eafee2696e5645a215c19fdc4db341d283715359",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/tool.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/tool.ts",
+      "bytes": 14419,
+      "sha256": "51f0ccd1c66567d86264ceae8f348a3c6df020712f692d4fa660c1be13f686e9",
+      "gitBlobSha1": "1e46a289feccbaa67edeb9f835cb2edc4e2c5c26",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/tool/runtime.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/tool/runtime.ts",
+      "bytes": 12174,
+      "sha256": "0ec9775990c6abc01ed1d61e12c87da1abfedf4c3bf7cf6261b3bdd3c088c03d",
+      "gitBlobSha1": "f21c67a533ed942c06747f51474908bce099fc33",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/tool/plugin/subagent.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/tool/plugin/subagent.ts",
+      "bytes": 13834,
+      "sha256": "ad25cccaad32a567fe1298dfd9de810a068e9aa1442c9fac5520fe27a4eb8c4b",
+      "gitBlobSha1": "fe3d07dd7e1682c5c2248d840a07abc54b8b4cfe",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/session/runner/step.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/session/runner/step.ts",
+      "bytes": 13281,
+      "sha256": "06532fdd972e0418b3b72d302d60c62b4b1a00f39a38bc43f7cb6cb8ee450a1d",
+      "gitBlobSha1": "be8b11547f498d986c2791427afa0eb0b99af9ba",
+      "fullCopyRetained": false
+    },
+    {
+      "path": "packages/core/src/aisdk.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/aisdk.ts",
+      "bytes": 34890,
+      "sha256": "8f67c57f072fbbfab693b694e6ce42e221dfa0c94b02b490432dc28065f18b9a",
+      "gitBlobSha1": "14206bfbc2906b60bb6f4a2e28ac2c22240f7523",
+      "fullCopyRetained": false
+    }
+  ],
+  "protectedNativeDraftPreimages": [
+    {
+      "path": "docs/workstreams/voice/managed-cpu/capsule.rs",
+      "bytes": 3087,
+      "sha256": "09abff0419d3baa8c963700d19f69e94d1c3d54b37e99f656c10e194b75adfc7"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/http_additions.rs",
+      "bytes": 2709,
+      "sha256": "dd1bd4e6a97456fbd85cfabbfa4116545201855a43acd08d09048c470832ea1e"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/journal.rs",
+      "bytes": 21029,
+      "sha256": "1c39f088e388dca91071d52f0cfa3af6cd741872a68587de462860be1eff0711"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/make_patch.py",
+      "bytes": 14596,
+      "sha256": "39bc36afe3e9ea3a1c2db6a79abe95a9f0e5fb8b5c835a3a0393419d8e61c207"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/mod.rs",
+      "bytes": 18621,
+      "sha256": "b40396d72b1a38d2e12c2522f202e4ada599ca9835bbbf92697d32f556d0e6a8"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/native-managed-cpu.patch",
+      "bytes": 126154,
+      "sha256": "a31426b915822863adad06ec6a93124b2338f98f626e62564281e61011568d87"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/owner_lock.rs",
+      "bytes": 1671,
+      "sha256": "ba47953f57029ce94401fb97c2bccfd5bf75d127f9e2d17b5b5b731baef392e6"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/process.rs",
+      "bytes": 6285,
+      "sha256": "c35ca02c05ba784c17ea14d8182a6071d581daac4772d76d0794b6b0a1bbcfb6"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/profile.rs",
+      "bytes": 9605,
+      "sha256": "5ad07aad34a48e0a2f1db5cc53b62e249b4a507dc15aa82efb3a47ceb8fa19fa"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/provenance.json",
+      "bytes": 4762,
+      "sha256": "9801fe4a9a2f5051a7218ffbf1302b9a1c2fede57f5a2d946baf69ec9f9ad32a"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/tests.rs",
+      "bytes": 1319,
+      "sha256": "9ee364a8792f7cfb1a6d71ce8eac434750437f3498b7b4c99cdcb37f34647c81"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/windows_job_additions.rs",
+      "bytes": 2719,
+      "sha256": "2950218b34b22865ddc79ada4b22c385d6439d3c73f044530f3d66cf3861fc71"
+    },
+    {
+      "path": "docs/workstreams/voice/managed-cpu/wire.rs",
+      "bytes": 7556,
+      "sha256": "6a13a79c813bc962058e6fea5df79e03d29a7afb5a8dbe46c670f53354e22bfc"
+    }
+  ],
+  "protectedNativeDraftPostimages": "unchanged by worker",
+  "sourceFacts": [
+    {
+      "fact": "Observe/Command model lifecycle only",
+      "path": "apps/service/src/routes/model_work.rs",
+      "lines": "31-38"
+    },
+    {
+      "fact": "Sealed TaskPurpose/MemoryPurpose only",
+      "path": "apps/service/src/inference/owned_transport/purpose.rs",
+      "lines": "7-10"
+    },
+    {
+      "fact": "Task candidate requires actual Native engine/durable grant",
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "lines": "403-421"
+    },
+    {
+      "fact": "ActiveTurn is baseline/admission metadata",
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "lines": "382-385"
+    },
+    {
+      "fact": "Terminal observation uses idle/history rather than runner join",
+      "path": "crates/adapters/src/opencode/desktop_runtime/interruption.rs",
+      "lines": "152-171"
+    },
+    {
+      "fact": "Only version probe and persistent serve launch",
+      "path": "crates/adapters/src/opencode/owned_windows.rs",
+      "lines": "314-339"
+    },
+    {
+      "fact": "Exclusive private-storage owner lock",
+      "path": "crates/adapters/src/opencode/owned_windows.rs",
+      "lines": "1225"
+    },
+    {
+      "fact": "Interrupt sends only resume and receives interrupted boolean",
+      "path": "crates/adapters/src/opencode/owned_windows/retained_dispatch/protocol.rs",
+      "lines": "509-540"
+    },
+    {
+      "fact": "loaded_baseline None",
+      "path": "crates/adapters/src/opencode/owned_windows/retained_events/turn/tools.rs",
+      "lines": "314"
+    },
+    {
+      "fact": "Actual local request/reader/worker cleanup, not upstream runner capability",
+      "path": "apps/service/src/routes/task_activity/terminal.rs",
+      "lines": "144-163"
+    }
+  ],
+  "taskRunnerSearch": {
+    "scope": "Source-only identifier search; unrelated email executor excluded; not machine-wide absence",
+    "roots": [
+      "windows-source/apps",
+      "windows-source/crates",
+      "prd-ui-fixes/services/ingenium-api/lib",
+      "prd-ui-fixes/packages"
+    ],
+    "foundAgentTaskRunner": false
+  },
+  "minimalMissingProducer": [
+    "Original-at-admission upstream execution capture + exact cancel/post-finalizer join/tool census OR genuine Veyra-owned turn constructor",
+    "Same canonical chat/goal admission and full selected configuration/context/memory/tool capability capture",
+    "Sealed agent provider-purpose/claim in existing queue",
+    "Real complete selected tool dispatcher and child enrollment/cancel/join/persistence ownership"
+  ],
+  "effects": {
+    "binaryDownloaded": false,
+    "sharedSourceWritten": false,
+    "executedTests": false,
+    "processOrRuntimeLaunched": false,
+    "remoteTextRetained": false
+  },
+  "cleanup": {
+    "newBulkOrRuntimeOutputs": [],
+    "diskRecoveryClaimed": 0,
+    "endCondition": "Root implementation/review of actual current-agent executor",
+    "retained": "Only this minimal source-fact receipt, decision, pending cases and ownership inventory",
+    "removedPaths": [],
+    "removedBytes": 0
+  },
+  "pluginWrappingFacts": [
+    {
+      "fact": "ToolEditor.update can replace exact original execute Effect; real wrapping authority available",
+      "path": "@opencode/plugin/dist/effect/tool.d.ts"
+    },
+    {
+      "lines": "181-185,344-354,444-447",
+      "path": "@opencode/plugin/dist/promise/adapter.js",
+      "fact": "Original Effect executes in captured plugin context through runPromise; Promise ToolContext has no signal"
+    },
+    {
+      "lines": "22-38,128-145",
+      "path": "@opencode/plugin/dist/promise/session.d.ts",
+      "fact": "Actual per-request rendered context available; mutation hooks lack around-turn next/original join"
+    },
+    {
+      "lines": "545-550",
+      "path": "packages/core/src/plugin/host.ts",
+      "fact": "Plugin interrupt forwards resume only and wait is session-wide"
+    },
+    {
+      "lines": "24-56",
+      "path": "packages/core/src/tool/runtime.ts",
+      "fact": "Waits actual executor, maps foreign typed failures; no outer turn join"
+    },
+    {
+      "lines": "200-243",
+      "path": "packages/core/src/tool/plugin/subagent.ts",
+      "fact": "Background child can outlive returned tool execute"
+    },
+    {
+      "lines": "251-295,645-665",
+      "path": "packages/core/src/aisdk.ts",
+      "fact": "Language cached bymodel/settings, AISDK-only; doStream Promise precedes stream drain"
+    },
+    {
+      "lines": "18-24",
+      "path": "packages/core/src/state.ts",
+      "fact": "Scoped transforms removed on unload; later transforms may replace original wrappers"
+    },
+    {
+      "lines": "182-220",
+      "path": "packages/core/src/plugin.ts",
+      "fact": "Transform failure removes/refreshes before asynchronous plugin scope cleanup"
+    }
+  ],
+  "pluginConclusion": "Tool/provider wrapping and per-request context capture are real partial constructors. No supported original busy-period admission/join, all-background-child census or mandatory unload-surviving effect gate; no full settlement producer implemented."
+}
