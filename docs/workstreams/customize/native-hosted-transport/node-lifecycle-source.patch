@@ -2,7 +2,7 @@ diff --git a/packages/ingenium-core/lib/tools/node-native-lifecycle.ts b/package
 new file mode 100644
 --- /dev/null
 +++ b/packages/ingenium-core/lib/tools/node-native-lifecycle.ts
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,18 @@
 +/** Lifecycle checks query existing owners; no new authority or terminal-state invention. */
 +import type {getDb} from "../db.js";
 +export function assertNativeGovernanceLifecycleClear(db:ReturnType<typeof getDb>,projectId?:string):void{
@@ -14,6 +14,12 @@ new file mode 100644
 + // Unknown/malformed phase retains custody; missing table/owner throws, never falls back.
 + const connections=db.prepare("SELECT EXISTS(SELECT 1 FROM provider_connections WHERE provider_type='native' AND json_extract(config_json,'$.kind')='node-native-pairing-v1' AND COALESCE(json_extract(config_json,'$.phase'),'unknown')<>'retired'"+connectionScope+") AS held").get(...args) as {held:number}|undefined;
 + if(pending?.held||grants?.held||connections?.held)throw new Error("NATIVE_GOVERNANCE_CUSTODY_REQUIRES_RECONCILIATION");
++}
++/** Restore receipt access under a persisted fence; never clear/execute the unknown effect. */
++export function assertNativeGovernanceRecoveryRestore(db:ReturnType<typeof getDb>,projectId:string):void{
++ const unfenced=db.prepare("SELECT EXISTS(SELECT 1 FROM provider_connections WHERE provider_type='native' AND json_extract(config_json,'$.kind')='node-native-pairing-v1' AND json_extract(config_json,'$.projectId')=? AND (enabled<>0 OR COALESCE(json_extract(config_json,'$.phase'),'unknown') NOT IN ('quiescing','retired'))) AS held").get(projectId) as {held:number}|undefined;
++ const grants=db.prepare("SELECT EXISTS(SELECT 1 FROM native_hosted_governance_grants g WHERE g.hosted_project_id=? AND g.revoked_at IS NULL AND NOT EXISTS(SELECT 1 FROM provider_connections p WHERE p.owner_kind='user' AND p.owner_user_id=g.owner_user_id AND p.provider_type='native' AND p.enabled=0 AND json_extract(p.config_json,'$.kind')='node-native-pairing-v1' AND json_extract(p.config_json,'$.phase')='quiescing' AND json_extract(p.config_json,'$.enrollmentRequestId')=g.enrollment_request_id AND json_extract(p.config_json,'$.installationId')=g.installation_id AND json_extract(p.config_json,'$.projectId')=g.hosted_project_id)) AS held").get(projectId) as {held:number}|undefined;
++ if(unfenced?.held||grants?.held)throw new Error("NATIVE_GOVERNANCE_RESTORE_REQUIRES_QUIESCENCE");
 +}
 \ No newline at end of file
 diff --git a/services/ingenium-api/lib/authorization-policy.ts b/services/ingenium-api/lib/authorization-policy.ts
@@ -28,6 +34,53 @@ diff --git a/services/ingenium-api/lib/authorization-policy.ts b/services/ingeni
      || req.method === "GET" && /^\/api\/v1\/native-customize\/pairings\/[^/]+$/.test(req.path);
    if(nativePairing)return {action:"native-pairing."+permissionFor(req as Request),resource:"vault",permission:permissionFor(req as Request),target:"native-governance",browserSessionOnly:true,sensitive:req.method==="POST"};
    const nativeGovernance = req.method === "GET"
+diff --git a/services/ingenium-api/lib/native-hosted-connection-owner.ts b/services/ingenium-api/lib/native-hosted-connection-owner.ts
+--- a/services/ingenium-api/lib/native-hosted-connection-owner.ts
++++ b/services/ingenium-api/lib/native-hosted-connection-owner.ts
+@@ -15,7 +15,7 @@
+   */
+  withOriginal<T>(actorId:string,installationId:string,enrollmentRequestId:string,work:(reader:Reader)=>Promise<T>):Promise<T>;
+ }
+-type Frame={actorId:string;installationId:string;requestId:string;proof:NativeOwner;original:NativePairOriginal;startedAt:number;operationId?:string;payloadHash?:string;assertCurrent:()=>void};
++type Frame={actorId:string;installationId:string;requestId:string;proof:NativeOwner;original:NativePairOriginal;startedAt:number;operationId?:string;payloadHash?:string;assertCurrent:()=>void;recoveryOnly:boolean};
+ export function createVerifiedNativeContextOwner(custody:OriginalNativeConnectionCustody|((request:Request)=>OriginalNativeConnectionCustody)){
+  const frames=new WeakMap<Request,Frame>();
+  const currentUser=(req:Request)=>{const p=req.principal;if(p?.type!=="user"||!p.session)throw new HostedRefusal("BROWSER_SESSION_REQUIRED",401);return p;};
+@@ -26,12 +26,12 @@
+  }
+  const owner:VerifiedNativeContextOwner={
+   enrollment(req,requestId,actorId):VerifiedNative{
+-   const frame=checked(req,actorId);if(frame.requestId!==requestId)throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
++   const frame=checked(req,actorId);if(frame.recoveryOnly||frame.requestId!==requestId)throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
+    return {actorId,nativeLibraryId:frame.proof.library_id,nativeServiceInstanceId:frame.proof.service_instance_id,
+     nativeProjectId:frame.proof.project?.id as string??null,nativeProjectRevision:frame.proof.project?.revision as number??null};
+   },
+   current(req,grant:Row,_recovery:boolean,actorId){
+-   const frame=checked(req,actorId),n=frame.proof;
++   const frame=checked(req,actorId),n=frame.proof;if(frame.recoveryOnly&&(!_recovery||req.method!=="GET"||!/^\/operations(?:\/[^/]+)?$/.test(req.path)))throw new HostedRefusal("RECOVERY_PROOF_NOT_AUTHORITY",503);
+    if(grant.enrollment_request_id!==frame.requestId||grant.installation_id!==frame.installationId||grant.owner_user_id!==actorId||
+     grant.native_library_id!==n.library_id||grant.native_service_instance_id!==n.service_instance_id||
+     grant.native_project_id!==(n.project?.id??null)||grant.native_project_revision!==(n.project?.revision??null))throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
+@@ -41,6 +41,7 @@
+  async function preflight(req:Request,_res:Response,next:NextFunction){
+   try{
+    if(req.method==="GET"&&req.path.endsWith("/identity")){next();return;}
++   const recoveryOnly=req.method==="GET"&&/^\/operations(?:\/[^/]+)?$/.test(req.path);
+    const p=currentUser(req),installation=getDb().prepare("SELECT instance_id FROM veyra_installation_identity WHERE singleton=1").get() as {instance_id:string}|undefined;
+    if(!installation)throw new HostedRefusal("HOST_IDENTITY_UNAVAILABLE",503);
+    let requestId:string,hostedProjectId:string;
+@@ -63,9 +64,9 @@
+      const operationId=req.body?.original?.id,hash=payloadHash(req.body?.original);
+      if(typeof operationId!=="string")throw new HostedRefusal("INVALID_OPERATION_ID",422);
+      const proof=originalProof(await reader.readOriginal(operationId,hash),reader.original,operationId,hash);
+-     return {actorId:p.id,installationId:installation.instance_id,requestId,proof,original:reader.original,startedAt,assertCurrent:()=>reader.assertCurrent(),operationId,payloadHash:hash};
++     return {actorId:p.id,installationId:installation.instance_id,requestId,proof,original:reader.original,startedAt,recoveryOnly,assertCurrent:()=>reader.assertCurrent(),operationId,payloadHash:hash};
+     }
+-    return {actorId:p.id,installationId:installation.instance_id,requestId,proof:contextProof(await reader.readContext(),reader.original),original:reader.original,startedAt,assertCurrent:()=>reader.assertCurrent()};
++    return {actorId:p.id,installationId:installation.instance_id,requestId,proof:contextProof(await (recoveryOnly?reader.readRecoveryContext():reader.readContext()),reader.original),original:reader.original,startedAt,recoveryOnly,assertCurrent:()=>reader.assertCurrent()};
+    });
+    frames.set(req,frame);next();
+   }catch(e){next(e instanceof HostedRefusal?e:new HostedRefusal("NATIVE_ATTESTATION_UNAVAILABLE",503));}
 diff --git a/services/ingenium-api/lib/node-native-pairing-custody.ts b/services/ingenium-api/lib/node-native-pairing-custody.ts
 --- a/services/ingenium-api/lib/node-native-pairing-custody.ts
 +++ b/services/ingenium-api/lib/node-native-pairing-custody.ts
@@ -213,10 +266,11 @@ diff --git a/services/ingenium-api/lib/paired-native-proof.ts b/services/ingeniu
 diff --git a/services/ingenium-api/lib/paired-native-reader.ts b/services/ingenium-api/lib/paired-native-reader.ts
 --- a/services/ingenium-api/lib/paired-native-reader.ts
 +++ b/services/ingenium-api/lib/paired-native-reader.ts
-@@ -72,6 +72,9 @@
+@@ -72,6 +72,10 @@
   const original=structuredClone(credential.original),trust={endpoint:credential.endpoint,certificatePem:credential.certificatePem,certificateSha256:credential.certificateSha256},token=credential.token;
   return Object.freeze({original,
    readContext:()=>readContext({...trust,token},original.actorId,original.installationId,original.enrollmentRequestId),
++  async readRecoveryContext(){return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/recovery","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;},
 +  async readRetirement(){
 +   return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/retirement","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;
 +  },

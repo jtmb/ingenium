@@ -1,7 +1,7 @@
 diff --git a/apps/service/src/routes/remote_control.rs b/apps/service/src/routes/remote_control.rs
 --- a/apps/service/src/routes/remote_control.rs
 +++ b/apps/service/src/routes/remote_control.rs
-@@ -661,3 +661,19 @@
+@@ -661,3 +661,12 @@
  fn receipt(operation: &Operation) -> Value {
      json!({"operation_id":operation.id,"authority_id":operation.authority_id,"service_instance":operation.service_instance,"method":operation.method,"path":operation.path,"digest":operation.digest,"project_id":operation.project_id,"binding":operation.binding,"state":if operation.response.is_some(){"complete"}else{"uncertain"},"response":operation.response})
  }
@@ -9,13 +9,6 @@ diff --git a/apps/service/src/routes/remote_control.rs b/apps/service/src/routes
 +pub(super) fn hosted_project_custody(state:&ServiceState,id:Option<&str>)->Result<bool,storage::Error>{
 + let journal=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;
 + Ok(state.remote_control.store.hosted_project_is_live(id)?||journal.hosted_project_has_custody(id).map_err(|_|storage::Error::Unavailable)?)
-+}
-+pub(super) fn hosted_account_revocation_custody(state:&ServiceState,id:&str)->Result<bool,storage::Error>{
-+ let j=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;
-+ if state.remote_control.store.hosted_resource_is_live(id)?{return Ok(true);}
-+ for e in j.hosted_account_enrollments(id).map_err(|_|storage::Error::Unavailable)?{
-+  if j.hosted_effect_resource_has_custody(&e).map_err(|_|storage::Error::Unavailable)?||state.remote_control.store.hosted_resource_is_live(&e)?{return Ok(true);}
-+ }Ok(false)
 +}
 +pub(super) fn hosted_resource_custody(state:&ServiceState,id:&str)->Result<bool,storage::Error>{
 + let journal=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;
@@ -51,17 +44,6 @@ diff --git a/apps/service/src/routes/catalog.rs b/apps/service/src/routes/catalo
                  let mut projects = state
                      .projects
                      .lock()
-diff --git a/apps/service/src/routes/accounts.rs b/apps/service/src/routes/accounts.rs
---- a/apps/service/src/routes/accounts.rs
-+++ b/apps/service/src/routes/accounts.rs
-@@ -374,6 +374,7 @@
-         return Err(map_error(Error::Conflict));
-     }
-     tokio::task::spawn_blocking(move || {
-+        if super::remote_control::hosted_account_revocation_custody(&state,&id).map_err(|_|unavailable())?{return Err(map_error(Error::Conflict));}
-         state
-             .live_agent
-             .with_stopped_credentials(|| {
 diff --git a/apps/service/src/routes/access_profiles.rs b/apps/service/src/routes/access_profiles.rs
 --- a/apps/service/src/routes/access_profiles.rs
 +++ b/apps/service/src/routes/access_profiles.rs
@@ -69,7 +51,7 @@ diff --git a/apps/service/src/routes/access_profiles.rs b/apps/service/src/route
              let revision = profile.as_ref().map_or(0, |profile| profile.revision);
              let policy = policy.clone();
              let result = metadata(state.clone(), move |state| {
-+                if super::remote_control::hosted_resource_custody(state,&grant.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
++                if veyra_adapters::utility_operations::Store::open(&state.state_directory).and_then(|j|j.hosted_resource_has_custody(&grant.id)).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
                  let store = &state.remote_control.store;
                  AccessProfiles::new(&state.state_directory).configure_exact(
                      &grant,
@@ -77,18 +59,7 @@ diff --git a/apps/service/src/routes/access_profiles.rs b/apps/service/src/route
              let expected_profile = profile.clone();
              let profile_revision = profile.as_ref().map_or(0, |profile| profile.revision);
              let (profile, revoked_grant) = metadata(state.clone(), move |state| {
-+                if super::remote_control::hosted_resource_custody(state,&expected.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
-                 let current = state
-                     .remote_control
-                     .store
-diff --git a/apps/service/src/routes/remote_control/owned.rs b/apps/service/src/routes/remote_control/owned.rs
---- a/apps/service/src/routes/remote_control/owned.rs
-+++ b/apps/service/src/routes/remote_control/owned.rs
-@@ -379,6 +379,7 @@
-             let expected = grant.clone();
-             let revoke = matches!(command.action, Action::Revoke { .. });
-             let grant = metadata(state.clone(), move |state| {
-+                if super::hosted_resource_custody(state,&expected.id)?{return Err(Error::Conflict);}
++                if delete&&super::remote_control::hosted_resource_custody(state,&expected.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
                  let current = state
                      .remote_control
                      .store

@@ -72,6 +72,7 @@ export function createPairedNativeReader(credential:PairedNativeCredential){
  const original=structuredClone(credential.original),trust={endpoint:credential.endpoint,certificatePem:credential.certificatePem,certificateSha256:credential.certificateSha256},token=credential.token;
  return Object.freeze({original,
   readContext:()=>readContext({...trust,token},original.actorId,original.installationId,original.enrollmentRequestId),
+  async readRecoveryContext(){return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/recovery","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;},
   async readRetirement(){
    return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/retirement","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;
   },

@@ -14,7 +14,7 @@ struct OriginalRequest {binding:Binding,original:Original}
 struct OwnerRequest {binding:Binding}
 pub(super) fn router()->Router<Arc<ServiceState>>{
  Router::new().route("/context",post(context)).route("/read",post(read)).route("/reserve",post(reserve))
-  .route("/lifecycle-review",post(lifecycle_review)).route("/lifecycle-commands",post(lifecycle_command)).route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
+  .route("/recovery-inspect",post(recovery_inspect)).route("/recovery-index",post(recovery_index)).route("/lifecycle-review",post(lifecycle_review)).route("/lifecycle-commands",post(lifecycle_command)).route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
   .layer(axum::extract::DefaultBodyLimit::max(2_100_000))
   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
 }
@@ -104,6 +104,7 @@ fn retained_original(state:&ServiceState,input:&OriginalRequest)->Result<(utilit
 }
 fn inspect_exact(state:&ServiceState,connection:&hosted::SessionConnection,identity:&Identity,input:&OriginalRequest)->Result<Value,Error>{
  let(mut journal,row,record,terminal)=retained_original(state,input)?;
+ let owner=connection.enrollment();if record.private_owner.enrollment_request_id!=owner.enrollment_request_id||record.private_owner.account_review.account.id!=owner.account_review.account.id||json!(record.private_owner.native_owner)!=json!(owner.native_owner)||hosted::recovery_key(&record.private_owner.identity.binding)!=hosted::recovery_key(&owner.identity.binding){return Err(Error::Forbidden);}
  let key=hosted::recovery_key(&input.binding);
  if let Some(receipt)=terminal{
   // Recheck original access at its actual Node owner, including current source permission.
@@ -133,11 +134,11 @@ async fn send(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(i
  }).await
 }
 async fn inspect(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<OriginalRequest>)->Response{
- retained(state,move|state|{let(connection,identity)=current(&state,&id,&input.binding)?;inspect_exact(&state,&connection,&identity,&input)}).await
+ retained(state,move|state|{let(connection,identity)=receipt_context(&state,&id,&input.binding)?;inspect_exact(&state,&connection,&identity,&input)}).await
 }
 async fn pending(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<OwnerRequest>)->Response{
  retained(state,move|state|{
-  let(connection,identity)=current(&state,&id,&input.binding)?;
+  let(connection,identity)=receipt_context(&state,&id,&input.binding)?;
   let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
   value(index(&state,&connection,&identity,&journal)?.into_iter().map(|r|r.original).collect::<Vec<_>>())
  }).await
@@ -150,7 +151,7 @@ struct CustodianQuery{actor_id:String,installation_id:String}
 #[derive(Deserialize)]#[serde(deny_unknown_fields)]
 struct OriginalProofQuery{actor_id:String,installation_id:String,payload_hash:String}
 pub(super) fn paired_router()->Router<Arc<ServiceState>>{
- Router::new().route("/remote/v1/node-hosted/enrollments/{id}/retirement",get(paired_retirement)).route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
+ Router::new().route("/remote/v1/node-hosted/enrollments/{id}/recovery",get(paired_recovery)).route("/remote/v1/node-hosted/enrollments/{id}/retirement",get(paired_retirement)).route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
   .route("/remote/v1/node-hosted/enrollments/{id}/originals/{operation}",get(paired_original))
   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
 }
@@ -338,5 +339,50 @@ async fn local_account_reconciliation(State(state):State<Arc<ServiceState>>,Json
   journal.begin(&input.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
   journal.finish(&input.operation_id,&json!({"state":"completed","local_native_custody_released":true,"remote_sign_in_outcome":"unconfirmed","account_credentials_revoked":true,"active_native_authority":false})).map_err(|_|Error::Unavailable)?;
   journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
+ }).await
+}
+// Historical proof is ONLY for Node Core recovery=true receipt reads.
+// Never expose this grant through normal context/original/domain admission.
+async fn paired_recovery(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,axum::extract::Query(q):axum::extract::Query<CustodianQuery>,headers:HeaderMap)->Response{
+ if proxy::origin(&state,&headers,false).await.is_err(){return problem(Error::Forbidden);}
+ let Some(token)=headers.get("authorization").and_then(|v|v.to_str().ok()).and_then(|v|v.strip_prefix("Bearer ")).map(str::to_string)else{return problem(Error::Forbidden);};
+ match blocking(move||{
+  let (grant,_)=state.remote_control.store.authenticate(&token)?;
+  let grant=AccessProfiles::new(&state.state_directory).effective_grant(&grant,storage::now()).map_err(|_|Error::Forbidden)?;
+  let custodian=state.remote_control.store.node_custodian(&grant,&id,&q.actor_id,&q.installation_id)?;
+  if library(&state)?!=custodian.native_owner.library_id{return Err(Error::Forbidden);}
+  state.remote_control.store.context_proof(&grant,&custodian,&custodian.native_owner).and_then(value)
+ }).await{Ok(proof)=>Json(proof).into_response(),Err(e)=>problem(e)}
+}
+// This private historical identity is used ONLY by receipt GETs. It never leaves
+// as a current binding/context and is never accepted by reserve/read/send.
+fn receipt_context(state:&ServiceState,id:&str,b:&Binding)->Result<(hosted::SessionConnection,Identity),Error>{
+ let connection=state.remote_control.store.hosted(id)?;let e=connection.enrollment();
+ if library(state)?!=e.native_owner.library_id||id!=b.connection_id||hosted::recovery_key(b)!=hosted::recovery_key(&e.identity.binding){return Err(Error::Forbidden);}
+ let identity=e.identity.clone();state.remote_control.store.require_hosted(&connection)?;Ok((connection,identity))
+}
+#[derive(Deserialize)]#[serde(deny_unknown_fields)]
+struct RecoveryIndex{library_id:String}
+async fn recovery_index(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<RecoveryIndex>)->Response{
+ retained(state,move|state|{
+  let connection=state.remote_control.store.hosted(&id)?;let historical=connection.enrollment().identity.clone();
+  if input.library_id!=library(&state)?||historical.binding.native_library_id!=input.library_id{return Err(Error::Forbidden);}
+  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  let rows=index(&state,&connection,&historical,&journal)?;
+  Ok(json!({"historical_receipt_read_only":true,"connection_id":id,"data":rows.into_iter().map(|r|Ok(json!({"operation_id":r.original.id,"payload_hash":hosted::payload_hash(&r.original)?}))).collect::<Result<Vec<_>,Error>>()?}))
+ }).await
+}
+#[derive(Deserialize)]#[serde(deny_unknown_fields)]
+struct RecoverySelector{library_id:String,operation_id:String,payload_hash:String}
+async fn recovery_inspect(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<RecoverySelector>)->Response{
+ retained(state,move|state|{
+  let connection=state.remote_control.store.hosted(&id)?;let historical=connection.enrollment().identity.clone();
+  if input.library_id!=library(&state)?||historical.binding.native_library_id!=input.library_id{return Err(Error::Forbidden);}
+  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  let row=journal.hosted_record(&input.operation_id,&hosted::recovery_key(&historical.binding)).map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
+  let record:hosted::Retained=serde_json::from_value(row["record"].clone()).map_err(|_|Error::Unavailable)?;
+  if hosted::payload_hash(&record.original)?!=input.payload_hash{return Err(Error::Conflict);}
+  let receipt:Receipt=serde_json::from_value(inspect_exact(&state,&connection,&historical,&OriginalRequest{binding:historical.binding.clone(),original:record.original})?).map_err(|_|Error::Unavailable)?;
+  Ok(json!({"historical_receipt_read_only":true,"operation_id":receipt.original.id,"payload_hash":hosted::payload_hash(&receipt.original)?,"outcome":receipt.outcome,"error":receipt.error,"domain_readback":"not_requested","live_binding":false}))
  }).await
 }

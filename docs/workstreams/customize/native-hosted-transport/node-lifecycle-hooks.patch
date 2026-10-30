@@ -11,7 +11,7 @@ diff --git a/packages/ingenium-core/lib/tools/projects.ts b/packages/ingenium-co
 --- a/packages/ingenium-core/lib/tools/projects.ts
 +++ b/packages/ingenium-core/lib/tools/projects.ts
 @@ -1,3 +1,4 @@
-+import {assertNativeGovernanceLifecycleClear} from "./node-native-lifecycle.js";
++import {assertNativeGovernanceLifecycleClear,assertNativeGovernanceRecoveryRestore} from "./node-native-lifecycle.js";
  /**
   * Project CRUD — manages the two-project identity model (see docs/concepts/architecture.md).
   *
@@ -27,7 +27,7 @@ diff --git a/packages/ingenium-core/lib/tools/projects.ts b/packages/ingenium-co
      const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
      const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NOT NULL").get(name);
      if (!existing) return false;
-+    assertNativeGovernanceLifecycleClear(db,(existing as Project).id);
++    assertNativeGovernanceRecoveryRestore(db,(existing as Project).id);
      const activeGlobal = db.prepare(
        "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
      ).get((existing as Project).id) as { id: string } | undefined;
@@ -35,7 +35,7 @@ diff --git a/packages/ingenium-core/lib/tools/projects.ts b/packages/ingenium-co
      const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
      const existing = db.prepare("SELECT * FROM projects WHERE id = ? AND archived_at IS NOT NULL").get(projectId) as Project | undefined;
      if (!existing) return false;
-+    assertNativeGovernanceLifecycleClear(db,existing.id);
++    assertNativeGovernanceRecoveryRestore(db,existing.id);
      const activeGlobal = db.prepare(
        "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
      ).get(existing.id) as { id: string } | undefined;

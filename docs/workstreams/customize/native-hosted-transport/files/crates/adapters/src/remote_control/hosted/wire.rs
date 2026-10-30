@@ -30,10 +30,29 @@ fn decode(response:reqwest::blocking::Response)->Result<Value,Error>{
  if !parsed.is_object()||parsed.as_object().is_none_or(|m|m.len()!=1||!m.contains_key("data")){return Err(Error::Unavailable);}
  Ok(parsed["data"].clone())
 }
+fn recovery_path(method:&str,path:&str)->bool{
+ if method=="GET"&&path==format!("{BASE}/identity"){return true;}
+ if method=="GET"&&path==format!("{BASE}/operations"){return true;}
+ if method=="GET"{
+  for prefix in [format!("{BASE}/operations/"),format!("{BASE}/pairings/")]{
+   if path.strip_prefix(prefix.as_str()).is_some_and(crate::utility_operations::canonical){return true;}
+  }
+ }
+ if method=="POST"{
+  let prefix=format!("{BASE}/pairings/");
+  if let Some(tail)=path.strip_prefix(prefix.as_str()){
+   let parts=tail.split('/').collect::<Vec<_>>();
+   return parts.len()==2&&crate::utility_operations::canonical(parts[0])&&["quiesce","retire"].contains(&parts[1]);
+  }
+ }
+ false
+}
 fn get(target:&Target<'_>,s:&Session<'_>,path:&str,query:&[(&str,&str)])->Result<Value,Error>{
+ if s.recovery_only&&!recovery_path("GET",path){return Err(Error::Forbidden);}
  decode(target.client.get(url(target,path)?).query(query).header(reqwest::header::COOKIE,s.cookie).send().map_err(|_|Error::Unavailable)?)
 }
 fn post(target:&Target<'_>,s:&Session<'_>,path:&str,body:&Value,locks:Option<&crate::account_vault::node_hosted::Maintenance>)->Result<Value,Error>{
+ if s.recovery_only&&!recovery_path("POST",path){return Err(Error::Forbidden);}
  let mut request=target.client.post(url(target,path)?).header(reqwest::header::COOKIE,s.cookie).header(reqwest::header::ORIGIN,target.dashboard_origin)
   .header("x-ingenium-ui","dashboard").header("x-csrf-token",s.csrf).json(body);
  if let Some(locks)=locks{
@@ -139,6 +158,7 @@ pub(super) fn site_identity(target:&Target<'_>,s:&Session<'_>)->Result<SiteIdent
 
 /// Fixed existing vault creation + private connection command. No URL or token in reply.
 pub(super) fn publish_pairing(target:&Target<'_>,s:&Session<'_>,api_project:&str,hosted_project:&str,request_id:&str,preparation:&Value)->Result<(),Error>{
+ if s.recovery_only{return Err(Error::Forbidden);}
  if api_project.is_empty()||api_project.len()>256||api_project.chars().any(char::is_control){return Err(Error::Invalid);}
  let mut endpoint=url(target,"/api/v1/vault/items")?;endpoint.query_pairs_mut().append_pair("project",api_project);
  let response=target.client.post(endpoint).header(reqwest::header::COOKIE,s.cookie).header(reqwest::header::ORIGIN,target.dashboard_origin)
@@ -158,4 +178,17 @@ pub(super) fn pairing_status(target:&Target<'_>,s:&Session<'_>,id:&str)->Result<
 pub(super) fn pairing_lifecycle(target:&Target<'_>,s:&Session<'_>,id:&str,action:&str,revision:u64)->Result<Value,Error>{
  if !crate::utility_operations::canonical(id)||!["quiesce","retire"].contains(&action){return Err(Error::Invalid);}
  post(target,s,&format!("{BASE}/pairings/{id}/{action}"),&json!({"expectedRevision":revision}),None)
+}
+#[cfg(test)]mod recovery_scope_tests{
+ use super::*;
+ #[test]fn restricted_session_cannot_be_promoted_to_domain_or_binding(){
+  for (method,path)in [("GET","/api/v1/native-customize/enrollments/grant"),("POST","/api/v1/native-customize/read"),("POST","/api/v1/native-customize/effects"),("POST","/api/v1/native-customize/enrollments"),("POST","/api/v1/native-customize/pairings")]{assert!(!recovery_path(method,path));}
+ }
+ #[test]fn restricted_receipts_and_retirement_use_only_canonical_closed_selectors(){
+  let id="11111111-1111-4111-8111-111111111111";
+  assert!(recovery_path("GET",&format!("{BASE}/operations/{id}")));
+  assert!(recovery_path("POST",&format!("{BASE}/pairings/{id}/retire")));
+  assert!(!recovery_path("POST",&format!("{BASE}/pairings/{id}/inspect")));
+  assert!(!recovery_path("GET",&format!("{BASE}/operations/{id}/extra")));
+ }
 }

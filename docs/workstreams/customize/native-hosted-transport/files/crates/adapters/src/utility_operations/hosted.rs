@@ -135,9 +135,3 @@ impl Store{
   Ok(json!({"data":data,"pagination":{"has_more":more,"next_cursor":cursor}}))
  }
 }
-impl Store{
- pub fn hosted_account_enrollments(&self,account:&str)->Result<Vec<String>>{
-  let mut q=self.db.prepare("SELECT DISTINCT COALESCE(json_extract(original,'$.command.enrollment_request_id'),json_extract(original,'$.command.account.enrollment_request_id'),json_extract(original,'$.private_owner.enrollment_request_id')) FROM originals WHERE kind='remote_admin' AND COALESCE(json_extract(original,'$.command.account_review.account.id'),json_extract(original,'$.command.account.account_review.account.id'),json_extract(original,'$.private_owner.account_review.account.id'))=?").map_err(|_|"Account enrollment index unavailable")?;
-  q.query_map([account],|r|r.get::<_,Option<String>>(0)).map_err(|_|"Account enrollment index unavailable")?.filter_map(|r|match r{Ok(Some(id))=>Some(Ok(id)),Ok(None)=>None,Err(_)=>Some(Err("Account enrollment row unavailable".into()))}).collect()
- }
-}

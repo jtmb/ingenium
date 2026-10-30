@@ -29,14 +29,7 @@ try{
  ' let journal=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;',
  ' Ok(state.remote_control.store.hosted_project_is_live(id)?||journal.hosted_project_has_custody(id).map_err(|_|storage::Error::Unavailable)?)',
  '}',
- 'pub(super) fn hosted_account_revocation_custody(state:&ServiceState,id:&str)->Result<bool,storage::Error>{',
-' let j=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;',
-' if state.remote_control.store.hosted_resource_is_live(id)?{return Ok(true);}',
-' for e in j.hosted_account_enrollments(id).map_err(|_|storage::Error::Unavailable)?{',
-'  if j.hosted_effect_resource_has_custody(&e).map_err(|_|storage::Error::Unavailable)?||state.remote_control.store.hosted_resource_is_live(&e)?{return Ok(true);}',
-' }Ok(false)',
-'}',
-'pub(super) fn hosted_resource_custody(state:&ServiceState,id:&str)->Result<bool,storage::Error>{',
+ 'pub(super) fn hosted_resource_custody(state:&ServiceState,id:&str)->Result<bool,storage::Error>{',
  ' let journal=veyra_adapters::utility_operations::Store::open(&state.state_directory).map_err(|_|storage::Error::Unavailable)?;',
  ' Ok(state.remote_control.store.hosted_resource_is_live(id)?||journal.hosted_resource_has_custody(id).map_err(|_|storage::Error::Unavailable)?)',
  '}'].join("\n")+"\n");
@@ -48,18 +41,13 @@ try{
  part=once(part,'                let _serial = serial;','                let _serial = serial;\n                if super::remote_control::hosted_project_custody(&state,Some(&id)).map_err(|_|store_error(StoreError::Corrupt))?{return Err(catalog_failure(StatusCode::CONFLICT,ErrorCode::UnknownState,"Hosted custody requires explicit reconciliation before project changes"));}');
  return s.slice(0,a)+part;
  });
- hook("native","apps/service/src/routes/accounts.rs",s=>{const a=s.indexOf("async fn revoke("),b=s.indexOf("\n#[derive",a);let part=s.slice(a,b);
- part=once(part,'    tokio::task::spawn_blocking(move || {\n        state','    tokio::task::spawn_blocking(move || {\n        if super::remote_control::hosted_account_revocation_custody(&state,&id).map_err(|_|unavailable())?{return Err(map_error(Error::Conflict));}\n        state');
- return s.slice(0,a)+part+s.slice(b);
- });
  hook("native","apps/service/src/routes/access_profiles.rs",s=>{
- s=once(s,'                let store = &state.remote_control.store;','                if super::remote_control::hosted_resource_custody(state,&grant.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}\n                let store = &state.remote_control.store;');
- return once(s,'            let (profile, revoked_grant) = metadata(state.clone(), move |state| {\n                let current','            let (profile, revoked_grant) = metadata(state.clone(), move |state| {\n                if super::remote_control::hosted_resource_custody(state,&expected.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}\n                let current');
+ s=once(s,'                let store = &state.remote_control.store;','                if veyra_adapters::utility_operations::Store::open(&state.state_directory).and_then(|j|j.hosted_resource_has_custody(&grant.id)).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}\n                let store = &state.remote_control.store;');
+ return once(s,'            let (profile, revoked_grant) = metadata(state.clone(), move |state| {\n                let current','            let (profile, revoked_grant) = metadata(state.clone(), move |state| {\n                if delete&&super::remote_control::hosted_resource_custody(state,&expected.id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}\n                let current');
  });
- hook("native","apps/service/src/routes/remote_control/owned.rs",s=>once(s,'            let grant = metadata(state.clone(), move |state| {\n                let current','            let grant = metadata(state.clone(), move |state| {\n                if super::hosted_resource_custody(state,&expected.id)?{return Err(Error::Conflict);}\n                let current'));
  hook("node","packages/ingenium-core/lib/index.ts",s=>s+'\nexport {assertNativeGovernanceLifecycleClear} from "./tools/node-native-lifecycle.js";\n');
  hook("node","packages/ingenium-core/lib/tools/projects.ts",s=>{
- s='import {assertNativeGovernanceLifecycleClear} from "./node-native-lifecycle.js";\n'+s;
+ s='import {assertNativeGovernanceLifecycleClear,assertNativeGovernanceRecoveryRestore} from "./node-native-lifecycle.js";\n'+s;
  const changes=[
  ["archiveProject",'    if (!existing || existing.is_global) return false;','existing.id'],
  ["unarchiveProject",'    if (!existing) return false;','(existing as Project).id'],
@@ -67,7 +55,7 @@ try{
  ["deleteProject",'    if (!project) return { status: "not_found" } as ProjectDeletionResult;','project.id'],
  ["updateProject",'    if (!existing) return undefined;','existing.id'],
  ["setProjectGlobal",'    if (!existing || existing.archived_at) return false;',null]];
- for(const [fn,needle,id]of changes){const a=s.indexOf("export function "+fn+"("),b=s.indexOf("\nexport function ",a+1),end=b<0?s.length:b;let part=s.slice(a,end);part=once(part,needle,needle+'\n    assertNativeGovernanceLifecycleClear(db'+(id?','+id:'')+');');s=s.slice(0,a)+part+s.slice(end);}
+ for(const [fn,needle,id]of changes){const a=s.indexOf("export function "+fn+"("),b=s.indexOf("\nexport function ",a+1),end=b<0?s.length:b;let part=s.slice(a,end);part=once(part,needle,needle+'\n    '+(fn.startsWith('unarchiveProject')?'assertNativeGovernanceRecoveryRestore':'assertNativeGovernanceLifecycleClear')+'(db'+(id?','+id:'')+');');s=s.slice(0,a)+part+s.slice(end);}
  return s;
  });
  hook("node","services/ingenium-api/scripts/restore-maintenance.ts",s=>{

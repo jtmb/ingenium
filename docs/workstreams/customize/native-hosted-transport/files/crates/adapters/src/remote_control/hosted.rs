@@ -102,7 +102,7 @@ impl SessionConnection {
  }
  pub fn pending(&self,vault:&AccountVault,profiles:&AccessProfiles,current:&Identity)->Result<Vec<RemotePending>,Error>{
   self.authorized(profiles,current,false)?;
-  vault.with_node_hosted_session(&self.target(),&self.enrollment().account_review,|s|wire::pending(&self.target(),&s,&current.binding).map_err(|_|crate::account_vault::Error::Unavailable)).map_err(account_error)
+  vault.with_node_hosted_retirement_session(&self.target(),&self.enrollment().account_review,&self.enrollment().enrollment_request_id,&self.enrollment().identity.binding,|s|wire::pending(&self.target(),&s,&current.binding).map_err(|_|crate::account_vault::Error::Unavailable)).map_err(account_error)
  }
  pub fn send(&self,vault:&AccountVault,profiles:&AccessProfiles,current:&Identity,original:&Original)->Result<Receipt,Error>{
   if current.binding!=original.binding||!original.command.validate()||!current.capabilities.contains(&original.command.capability()){return Err(Error::Conflict);}
@@ -114,7 +114,7 @@ impl SessionConnection {
  pub fn inspect(&self,vault:&AccountVault,profiles:&AccessProfiles,current:&Identity,original:&Original)->Result<Receipt,Error>{
   self.authorized(profiles,current,false)?;
   if recovery_key(&current.binding)!=recovery_key(&original.binding){return Err(Error::Forbidden);}
-  vault.with_node_hosted_session(&self.target(),&self.enrollment().account_review,|s|wire::inspect(&self.target(),&s,&current.binding,original).map_err(|_|crate::account_vault::Error::Unavailable)).map_err(account_error)
+  vault.with_node_hosted_retirement_session(&self.target(),&self.enrollment().account_review,&self.enrollment().enrollment_request_id,&self.enrollment().identity.binding,|s|wire::inspect(&self.target(),&s,&current.binding,original).map_err(|_|crate::account_vault::Error::Unavailable)).map_err(account_error)
  }
 }
 pub fn recovery_key(b:&Binding)->String{

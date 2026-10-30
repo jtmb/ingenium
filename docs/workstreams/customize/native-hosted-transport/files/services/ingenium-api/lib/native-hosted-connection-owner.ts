@@ -15,7 +15,7 @@ export interface OriginalNativeConnectionCustody {
   */
  withOriginal<T>(actorId:string,installationId:string,enrollmentRequestId:string,work:(reader:Reader)=>Promise<T>):Promise<T>;
 }
-type Frame={actorId:string;installationId:string;requestId:string;proof:NativeOwner;original:NativePairOriginal;startedAt:number;operationId?:string;payloadHash?:string;assertCurrent:()=>void};
+type Frame={actorId:string;installationId:string;requestId:string;proof:NativeOwner;original:NativePairOriginal;startedAt:number;operationId?:string;payloadHash?:string;assertCurrent:()=>void;recoveryOnly:boolean};
 export function createVerifiedNativeContextOwner(custody:OriginalNativeConnectionCustody|((request:Request)=>OriginalNativeConnectionCustody)){
  const frames=new WeakMap<Request,Frame>();
  const currentUser=(req:Request)=>{const p=req.principal;if(p?.type!=="user"||!p.session)throw new HostedRefusal("BROWSER_SESSION_REQUIRED",401);return p;};
@@ -26,12 +26,12 @@ export function createVerifiedNativeContextOwner(custody:OriginalNativeConnectio
  }
  const owner:VerifiedNativeContextOwner={
   enrollment(req,requestId,actorId):VerifiedNative{
-   const frame=checked(req,actorId);if(frame.requestId!==requestId)throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
+   const frame=checked(req,actorId);if(frame.recoveryOnly||frame.requestId!==requestId)throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
    return {actorId,nativeLibraryId:frame.proof.library_id,nativeServiceInstanceId:frame.proof.service_instance_id,
     nativeProjectId:frame.proof.project?.id as string??null,nativeProjectRevision:frame.proof.project?.revision as number??null};
   },
   current(req,grant:Row,_recovery:boolean,actorId){
-   const frame=checked(req,actorId),n=frame.proof;
+   const frame=checked(req,actorId),n=frame.proof;if(frame.recoveryOnly&&(!_recovery||req.method!=="GET"||!/^\/operations(?:\/[^/]+)?$/.test(req.path)))throw new HostedRefusal("RECOVERY_PROOF_NOT_AUTHORITY",503);
    if(grant.enrollment_request_id!==frame.requestId||grant.installation_id!==frame.installationId||grant.owner_user_id!==actorId||
     grant.native_library_id!==n.library_id||grant.native_service_instance_id!==n.service_instance_id||
     grant.native_project_id!==(n.project?.id??null)||grant.native_project_revision!==(n.project?.revision??null))throw new HostedRefusal("NATIVE_ATTESTATION_REFUSED",503);
@@ -41,6 +41,7 @@ export function createVerifiedNativeContextOwner(custody:OriginalNativeConnectio
  async function preflight(req:Request,_res:Response,next:NextFunction){
   try{
    if(req.method==="GET"&&req.path.endsWith("/identity")){next();return;}
+   const recoveryOnly=req.method==="GET"&&/^\/operations(?:\/[^/]+)?$/.test(req.path);
    const p=currentUser(req),installation=getDb().prepare("SELECT instance_id FROM veyra_installation_identity WHERE singleton=1").get() as {instance_id:string}|undefined;
    if(!installation)throw new HostedRefusal("HOST_IDENTITY_UNAVAILABLE",503);
    let requestId:string,hostedProjectId:string;
@@ -63,9 +64,9 @@ export function createVerifiedNativeContextOwner(custody:OriginalNativeConnectio
      const operationId=req.body?.original?.id,hash=payloadHash(req.body?.original);
      if(typeof operationId!=="string")throw new HostedRefusal("INVALID_OPERATION_ID",422);
      const proof=originalProof(await reader.readOriginal(operationId,hash),reader.original,operationId,hash);
-     return {actorId:p.id,installationId:installation.instance_id,requestId,proof,original:reader.original,startedAt,assertCurrent:()=>reader.assertCurrent(),operationId,payloadHash:hash};
+     return {actorId:p.id,installationId:installation.instance_id,requestId,proof,original:reader.original,startedAt,recoveryOnly,assertCurrent:()=>reader.assertCurrent(),operationId,payloadHash:hash};
     }
-    return {actorId:p.id,installationId:installation.instance_id,requestId,proof:contextProof(await reader.readContext(),reader.original),original:reader.original,startedAt,assertCurrent:()=>reader.assertCurrent()};
+    return {actorId:p.id,installationId:installation.instance_id,requestId,proof:contextProof(await (recoveryOnly?reader.readRecoveryContext():reader.readContext()),reader.original),original:reader.original,startedAt,recoveryOnly,assertCurrent:()=>reader.assertCurrent()};
    });
    frames.set(req,frame);next();
   }catch(e){next(e instanceof HostedRefusal?e:new HostedRefusal("NATIVE_ATTESTATION_UNAVAILABLE",503));}

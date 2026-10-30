@@ -168,4 +168,9 @@ test("quiescing during one-use redemption cannot reactivate custody or resend co
  await assert.rejects(f.owner.custody.withOriginal("user","installation","enrollment",async()=>{}));
  const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});assert.equal(q.state,"quiescing");
  assert.equal((await f.owner.retire("enrollment",{expectedRevision:q.revision})).state,"retired");
+}finally{f.close();}});test("project recovery restore requires actual quiescence and preserves executing receipt custody",async()=>{const f=fixture();try{
+ const {assertNativeGovernanceRecoveryRestore:restore}=await import(encode(transpile(root+"/files/packages/ingenium-core/lib/tools/node-native-lifecycle.ts")));
+ await f.owner.pair(f.input);grant(f);assert.throws(()=>restore(f.db,"project"),/QUIESCENCE/);
+ f.db.prepare("INSERT INTO native_hosted_governance_effects(operation_id,grant_id,actor_id,project_id,payload_hash,binding_hash,command_kind,state,created_at,updated_at) VALUES('unknown','node-grant','user','project',?,?,'archive','executing','now','now')").run("e".repeat(64),"f".repeat(64));
+ f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});restore(f.db,"project");assert.equal(f.db.prepare("SELECT state FROM native_hosted_governance_effects").get().state,"executing");
 }finally{f.close();}});

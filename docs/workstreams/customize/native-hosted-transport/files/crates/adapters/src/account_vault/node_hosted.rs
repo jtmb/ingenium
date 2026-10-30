@@ -19,7 +19,7 @@ pub struct AccountReview {pub account:Account,pub session_revision:Option<String
 #[derive(Serialize)]
 pub struct SessionStatus {pub state:&'static str,pub actor_id:Option<String>,pub review:AccountReview}
 pub(crate) struct Maintenance<'a>{pub(crate) target:Option<&'a str>,pub(crate) source:Option<&'a str>}
-pub(crate) struct Session<'a>{pub(crate) cookie:&'a str,pub(crate) csrf:&'a str,pub(crate) actor_id:&'a str,pub(crate) locks:Maintenance<'a>}
+pub(crate) struct Session<'a>{pub(crate) recovery_only:bool,pub(crate) cookie:&'a str,pub(crate) csrf:&'a str,pub(crate) actor_id:&'a str,pub(crate) locks:Maintenance<'a>}
 pub(crate) struct Target<'a>{pub(crate) client:&'a Client,pub(crate) endpoint:&'a str,pub(crate) dashboard_origin:&'a str,pub(crate) connection_id:&'a str}
 fn url(target:&Target<'_>,path:&str)->Result<reqwest::Url,Error>{
  let mut result=reqwest::Url::parse(target.endpoint).map_err(|_|Error::Invalid)?;
@@ -115,7 +115,7 @@ impl AccountVault {
  pub(crate) fn with_node_hosted_session<T>(&self,target:&Target<'_>,expected:&AccountReview,work:impl FnOnce(Session<'_>)->Result<T,Error>)->Result<T,Error>{
   let _lock=self.lock()?;let contents=self.read()?;let r=contents.accounts.iter().find(|r|r.account.id==expected.account.id).ok_or(Error::NotFound)?;
   if !account_matches(r,expected)||r.credentials.get(CONNECTION).map(String::as_str)!=Some(target.connection_id){return Err(Error::Conflict);}
-  let session=Session{cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:r.credentials.get("NODE_HOSTED_TARGET_LOCK_TOKEN").map(String::as_str),source:r.credentials.get("NODE_HOSTED_SOURCE_LOCK_TOKEN").map(String::as_str)}};
+  let session=Session{recovery_only:false,cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:r.credentials.get("NODE_HOSTED_TARGET_LOCK_TOKEN").map(String::as_str),source:r.credentials.get("NODE_HOSTED_SOURCE_LOCK_TOKEN").map(String::as_str)}};
   let value=body(target.client.get(url(target,"/api/v1/auth/session")?).header(reqwest::header::COOKIE,session.cookie).send().map_err(|_|Error::Unavailable)?)?;
   if value["data"]["user"]["id"].as_str()!=Some(session.actor_id){return Err(Error::Conflict);}
   work(session)
@@ -162,7 +162,7 @@ impl AccountVault{
   if r.account.revoked_at.is_some()||r.account.provider!="ingenium-node-hosted"||!r.account.scopes.iter().any(|s|s=="hosted-governance")||
    !r.credentials.get(CONNECTION).is_some_and(|id|id==&binding.connection_id||id==enrollment_id)||
    r.credentials.get(ACTOR).map(String::as_str)!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
-  let session=Session{cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:None,source:None}};
+  let session=Session{recovery_only:true,cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:None,source:None}};
   let value=body(target.client.get(url(target,"/api/v1/auth/session")?).header(reqwest::header::COOKIE,session.cookie).send().map_err(|_|Error::Unavailable)?)?;
   if value["data"]["user"]["id"].as_str()!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
   let (actor,installation,authority)=crate::remote_control::hosted::retirement_site_identity(target,&session).map_err(|_|Error::Conflict)?;
