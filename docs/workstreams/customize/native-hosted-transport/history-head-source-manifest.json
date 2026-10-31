@@ -1,0 +1,13 @@
+{
+  "sourceOnly": true,
+  "dataOnly": true,
+  "ddlChanges": false,
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-history-head.ts",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-history-head.ts",
+      "preimageSha256": null,
+      "postimageSha256": "406335a7ef06543c75a6c344ac2d797c4359c196af689c573ab9c68001f0af3d"
+    }
+  ]
+}
