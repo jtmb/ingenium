@@ -1,0 +1,18 @@
+{
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "Existing C-backed Ubuntu ext4 VHDX, paired C volume EE22980A",
+  "priorImmutablePacket": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/current-agent-attachment",
+  "packet": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/gpu-production",
+  "priorBytes": 425907,
+  "packetLimitBytes": 98381,
+  "totalSourceLimitBytes": 524288,
+  "globalArtifactCeilingBytes": 21474836480,
+  "scope": "GPU ownership gap evidence, observation-only kernel source, budget math, fixed prelaunch CPU fallback guard and exact integration splices",
+  "effects": "No builds, tests, installs, downloads, models, GPU initialization, device opens, runtime, network probes, desktop, shared writes or Stratus",
+  "regeneration": "Unique source and exact recipes retained in owned Git checkpoint; Root integrates and validates separately",
+  "consumer": "Root genuine provider/process/GPU-admission implementation and source integration review",
+  "endCondition": "Root integrates or rejects source; no reproducible bulk outputs are generated",
+  "protected": ["All immutable previous packets", "All13 original Native drafts", "Root canonical and Native sources", "Active LLM and desktop allocations", "Existing CPU proofs/profile/source identity"],
+  "cleanup": "No generated bulk/cache/temp/dependency outputs; removed paths none, removed bytes0"
+}

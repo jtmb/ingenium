@@ -1,0 +1,62 @@
+{
+  "kind": "gpu-source-packet-manifest-v1",
+  "qualified": false,
+  "files": [
+    {
+      "path": "gpu-budget.d.mts",
+      "bytes": 1141,
+      "sha256": "2ca9ee10ec3ffdc518fb2ff72d05f60eb3525070a3b0b1af0b90878ea7907eba"
+    },
+    {
+      "path": "gpu-budget.mjs",
+      "bytes": 3925,
+      "sha256": "ed8e39db16c2ef4c1ede536d4b0a6c7276de92ea0d9d1e314eeb8c9321d51419"
+    },
+    {
+      "path": "gpu-prelaunch-fallback.d.mts",
+      "bytes": 536,
+      "sha256": "7a6b4ed0bc246ee38f2ad1128eb4f6c70ddfa104c8fa862e5008bb783745e399"
+    },
+    {
+      "path": "gpu-prelaunch-fallback.mjs",
+      "bytes": 1421,
+      "sha256": "8799642086b2db85a12eb39e4b32ba703dac6cf385840f3ddd09b95c5a92e849"
+    },
+    {
+      "path": "gpu-production.test.mjs",
+      "bytes": 5723,
+      "sha256": "db3a79deced0fc7fc5ed5d8ff6a013643ac12b550f098c8680f96c2374834457"
+    },
+    {
+      "path": "guarded-splices.json",
+      "bytes": 2569,
+      "sha256": "20f8cae03b48c6d94741800d23884c49c5d4350165ee5ded3b688069c9a03c72"
+    },
+    {
+      "path": "linux-gpu-observation.d.mts",
+      "bytes": 211,
+      "sha256": "e613830a52bc483bbfc22b8e2645d4deba4e64cd1c6544436e12b0f49e5e5f0c"
+    },
+    {
+      "path": "linux-gpu-observation.mjs",
+      "bytes": 3983,
+      "sha256": "4488a22ab281e81d2e220380d68ce38a203eaa2281aad49c31d787e31886afa2"
+    },
+    {
+      "path": "ownership.json",
+      "bytes": 1514,
+      "sha256": "514c612f78393678cd80086532b1f61117b435a43e55081e1458661965b1c635"
+    },
+    {
+      "path": "README.md",
+      "bytes": 7569,
+      "sha256": "b2d94e5991c21a892b0f0d8548347831717e17e018ccb543d1110acf4701c8bf"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 1571,
+      "sha256": "ee1d4e53c74e410bf8a885557718088ab6c36ecaa1b623d24b921c5b8d047e76"
+    }
+  ],
+  "contentBytes": 30163.0
+}

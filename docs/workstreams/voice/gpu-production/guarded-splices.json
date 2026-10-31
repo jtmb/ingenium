@@ -1,0 +1,32 @@
+{
+  "kind": "gpu-known-no-start-prelaunch-splices-v1",
+  "canonicalReadOnlyPins": {
+    "services/ingenium-api/lib/voice-v2/production-system.ts": "c14e992ce2fec582696c924721ad5e94be54f67279c88ccc7b70e50155b69cac",
+    "services/ingenium-api/lib/voice-v2/managed-profile.mjs": "17ba2346a41b63e4e21955af2cccad24148dca627f7bf89d8115bb551814746e",
+    "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs": "a06e6934b559d472f295c8605ce61f038061d2c8cf5ee5e812118ea74737c60a",
+    "services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs": "8b2ff9128ba83a83d7cc1c79372922dd2e49dd7baa26080946ba46068f6d094d",
+    "services/ingenium-api/lib/voice-v2/resource-approval.mjs": "454d3f59954fc01653da1660f4e1256f5a0319950a8ea395fbe455707a0874a4",
+    "packages/veyra-voice/speech-worker/directml_models.py": "df5e50b602bfabc1a5efae25fa7bd1ffaac6722fb3dbf5c1c02ef1c3c769b1b0",
+    "packages/veyra-voice/speech-worker/managed_entry.py": "13e761c12ef07094d5ab2e824cd56371d9aced4f853600f0db83f4ab24fd8c93",
+    "packages/veyra-voice/speech-worker/managed_bootstrap.py": "28b16e63e06c66c56058db2d40581a57402b25f8822cee060ba44951bb977a0f",
+    "packages/veyra-voice/speech-worker/veyra_worker.py": "6c6b6f0e0d7f18257a3f13ca4fe706ff2baaa0a0f6ce3e06ad0c90ca7176bf26",
+    "packages/ingenium-core/lib/tools/voice-operation-ledger.ts": "e00817b9c3a7a0c5c9caefa7f9bad2a50ce7d67a4c77f1c0b0e3a4d51eec0067"
+  },
+  "target": "services/ingenium-api/lib/voice-v2/production-system.ts",
+  "preimageSha256": "c14e992ce2fec582696c924721ad5e94be54f67279c88ccc7b70e50155b69cac",
+  "anchorEncoding": "LF-normalized comparison only; preserve actual canonical newline conventions",
+  "edits": [
+    {
+      "before": "import {isAbsolute,resolve} from 'node:path';",
+      "after": "import {isAbsolute,resolve} from 'node:path';\nimport {beginGpuPreferredPrelaunch,takeKnownNoGpuStartCpuBackup} from './gpu-prelaunch-fallback.mjs';"
+    },
+    {
+      "before": "  if(process.platform!=='linux')return unavailable();",
+      "after": "  if(process.platform!=='linux')return unavailable();\n  // No GPU producer entered: fixed prelaunch CPU backup, not GPU qualification.\n  const backendChoice=beginGpuPreferredPrelaunch();\n  if(takeKnownNoGpuStartCpuBackup(backendChoice)!=='cpu-onnx')return unavailable();"
+    }
+  ],
+  "applied": false,
+  "compiled": false,
+  "gpuImplementationComplete": false,
+  "instruction": "Install only six proposed modules; optional static no-start guard before original CPU factory. Never wire DATA fits into admission. No worker/profile/Core/Native guard changes."
+}

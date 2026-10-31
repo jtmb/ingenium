@@ -1,0 +1,5 @@
+export interface GpuPeakPhase {vramPeakBytes:number;ramPeakBytes:number;additionalTasks:number}
+export interface GpuPeakPlan {version:1;backend:'directml'|'rocm'|'cuda';profileDigest:string;providerDigest:string;modelSetDigest:string;measurementDigest:string;sttMeasured:true;ttsMeasured:true;reserveVramBytes:number;externalGrowthBytes:number;reserveRamBytes:number;reserveTasks:number;cpuMilli:number;phases:{cold:GpuPeakPhase;hot:GpuPeakPhase;retirement:GpuPeakPhase}}
+export interface GpuKernelObservation {deviceIdentity:string;bootId:string;sampleStartedAt:number;observedAt:number;totalBytes:number;usedBytes:number;availableBytes:number;scope:'visible-amdgpu-driver';observationOnly:true}
+export function validateGpuPeakPlan(plan:unknown):GpuPeakPlan;
+export function evaluateGpuHeadroom(plan:GpuPeakPlan,kernel:GpuKernelObservation,host:{memoryHeadroom:number;pidsHeadroom:number;cpuMilli:number},phase:'cold'|'hot'|'retirement',now:number):Readonly<{fits:boolean;reasons:readonly string[];requiredVramBytes:number;requiredRamBytes:number;requiredTasks:number;observationOnly:true;admissionAuthorized:false;deviceIdentity:string}>;

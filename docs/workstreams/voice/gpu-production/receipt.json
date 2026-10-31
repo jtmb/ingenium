@@ -1,0 +1,32 @@
+{
+  "kind": "gpu-source-independent-boundaries-receipt-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "0b1eba3c",
+  "applied": false,
+  "typescriptCompiled": false,
+  "sourceTestsAuthored": 38,
+  "sourceTestsExecuted": 0,
+  "syntaxOnly": "Four JavaScript bodies compiled in tool V8 after import/export erasure; never invoked",
+  "kernelProbeExecuted": false,
+  "gpuInitialized": false,
+  "modelsLoaded": false,
+  "runtimeQualified": false,
+  "gpuImplementationComplete": false,
+  "remainingOriginals": [
+    "Provider-specific actual GPU process/pipe/resource owner",
+    "Fresh visible-driver observations bound to verified actual host coverage and measured profile",
+    "Single voice allocation slot with RAM/tasks and VRAM phase admission",
+    "Distinct backend-bound Core parent/restore identity preserving CPU invariants",
+    "Actual driver allocation owner retirement before slot release and cross-backend fallback"
+  ],
+  "qualification": "GPU preference remains incomplete; known-no-start CPU backup only, no post-start proof API",
+  "priorImmutableBytes": 425907.0,
+  "priorManifestSha256": "db719f45d70bf9f602b6c4f8da167936f2148490215d3a20d3fedf8afc6589e3",
+  "totalSourceLimitBytes": 524288,
+  "packetLimitBytes": 98381,
+  "removedPaths": [],
+  "removedBytes": 0,
+  "retained": "Unique proposal sources, tests, pinned splice recipe and review/receipts; Root integration consumer",
+  "generatedBulkCacheTemporaryPaths": [],
+  "protected": "Prior packets/13Native drafts/canonical sources/LLM and desktop workloads unchanged"
+}
