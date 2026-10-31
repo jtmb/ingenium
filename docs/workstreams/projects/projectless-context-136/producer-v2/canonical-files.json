@@ -1,0 +1,39 @@
+{
+  "kind": "additive-source-proposal-not-applied",
+  "prerequisite": "22164b203c95746da43120b6dbf0d8209f9b7529",
+  "sharedSplices": "producer.patch",
+  "files": {
+    "workspace-runtime-credentials.mjs": "packages/ingenium-core/lib/tools/workspace-runtime-credentials.mjs",
+    "workspace-runtime-auth.mjs": "packages/ingenium-core/lib/tools/workspace-runtime-auth.mjs",
+    "workspace-runtime-auth.d.mts": "packages/ingenium-core/lib/tools/workspace-runtime-auth.d.mts",
+    "workspace-v2-image.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-image.mjs",
+    "workspace-v2-image.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-image.d.mts",
+    "workspace-manager-wire.mjs": "services/ingenium-api/lib/projects-v2/workspace-manager-wire.mjs",
+    "workspace-manager-wire.d.mts": "services/ingenium-api/lib/projects-v2/workspace-manager-wire.d.mts",
+    "workspace-v2-control.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-control.mjs",
+    "workspace-v2-control.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-control.d.mts",
+    "workspace-v2-placement.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-placement.mjs",
+    "workspace-v2-placement.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-placement.d.mts",
+    "workspace-v2-mcp.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-mcp.mjs",
+    "workspace-v2-mcp.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-mcp.d.mts",
+    "workspace-v2-opencode.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-opencode.mjs",
+    "workspace-v2-opencode.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-opencode.d.mts",
+    "workspace-v2-gateway.mjs": "services/ingenium-api/lib/projects-v2/workspace-v2-gateway.mjs",
+    "workspace-v2-gateway.d.mts": "services/ingenium-api/lib/projects-v2/workspace-v2-gateway.d.mts",
+    "runtime-workspace-bootstrap.mjs": "services/ingenium-api/scripts/runtime-workspace-bootstrap.mjs",
+    "workspace-runtime-mcp-client.ts": "packages/ingenium-extension/scripts/workspace-runtime-mcp-client.ts",
+    "workspace-runtime-mcp-transport.ts": "packages/ingenium-extension/scripts/workspace-runtime-mcp-transport.ts",
+    "veyra-projects-workspace-v2-archive.test.mjs": "services/ingenium-api/tests/veyra-projects-workspace-v2-archive.test.mjs",
+    "workspace-runtime-credentials.d.mts": "packages/ingenium-core/lib/tools/workspace-runtime-credentials.d.mts"
+  },
+  "packetOnlyTests": [
+    "workspace-runtime-auth.test.mjs"
+  ],
+  "requiredRuntimeCopyIntegration": [
+    "Core runtime copy strict per-module closure: credentials/auth mjs and declarations; credentials only may reference actual compiled ../db.js and ./authentication.js",
+    "API domain runtime copy: all new projects-v2 mjs/declarations and runtime-workspace-bootstrap.mjs",
+    "Extension existing TypeScript distribution compiles both new SDK files; required-artifact list is in patch",
+    "Existing independently approved image manifest must include exact new workspace artifacts/protocol cases; no approval is created"
+  ],
+  "runtimeHasCoreDbAuthority": false
+}

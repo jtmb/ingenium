@@ -1,0 +1,497 @@
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -1,3 +1,7 @@
++import {workspaceDocker,workspaceDockerJson,joinWorkspaceAttach,requireRetainedWorkspaceAttach} from '../lib/projects-v2/workspace-manager-wire.mjs';
++import {verifyWorkspaceArchive} from '../lib/projects-v2/workspace-v2-image.mjs';
++import {parseStrictJobJson} from '../lib/dot-v2/job-bootstrap-frame.mjs';
++import {buildWorkspaceRuntimeContainerSpecV2,type WorkspaceRuntimeProvisionRequestV2} from '../lib/runtime-manager-contract.js';
+ import {createOriginalCandidateWaitingOwner} from '../lib/dot-v2/candidate-original-manager.mjs';
+ import {createOriginalCandidateClosureProducer} from '../../../packages/veyra-operations/core126-candidate-observation.mjs';
+ import {createCore126ManagerProofProducer} from "../../../packages/veyra-operations/core126-manager-proof.mjs";
+@@ -392,6 +396,80 @@
+     chunks.push(buffer);
+   }
+   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
++}
++
++// Additive private methods in actual scripts/runtime-manager.ts. v1 is unchanged.
++const workspaceV2Attempts=new Map<string,{requestSha256:string;phase:string;containerId?:string;failure?:string;failurePhase?:string}>();
++async function workspaceV2Core(operation:'admission'|'original',body:unknown):Promise<any>{
++ const base=new URL(environment('INGENIUM_RUNTIME_API_URL'));
++ if(base.protocol!=='http:'||base.pathname!=='/api/v1'||base.username||base.password||base.search||base.hash)throw Error('WORKSPACE_V2_CORE_URL');
++ base.pathname+='/internal/workspace-runtime-v2/'+operation;
++ const response=await fetch(base,{method:'POST',redirect:'error',headers:{Authorization:'Bearer '+loadManagerToken(),'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
++ if(response.status!==200||!response.body)throw Error('WORKSPACE_V2_CORE_OWNER_UNAVAILABLE');
++ let size=0;const chunks:Buffer[]=[];for await(const chunk of response.body){size+=chunk.length;if(size>65536)throw Error('WORKSPACE_V2_CORE_BOUND');chunks.push(Buffer.from(chunk));}
++ const envelope=parseStrictJobJson(Buffer.concat(chunks),65536) as {data?:unknown};if(!envelope.data)throw Error('WORKSPACE_V2_CORE_RESPONSE');return envelope.data;
++}
++function workspaceV2Public(input:Record<string,unknown>){
++ const {capability:_capability,capabilityExpiresAt:_expires,bootstrapNonce:_nonce,...publicRequest}=input;
++ return runtimeProvision.publicWorkspaceProvisionRequest(publicRequest as unknown as runtimeProvision.PublicWorkspaceProvisionRequest);
++}
++async function workspaceV2Artifacts(containerId:string,definition:any){
++ const measurements=[];
++ for(const file of definition.files){const r=await workspaceDocker('GET','/containers/'+containerId+'/archive?path='+encodeURIComponent(file.path),undefined,file.bytes+65536) as {status:number;bytes:Buffer};if(r.status!==200)throw Error('WORKSPACE_V2_IMAGE_ARTIFACT_UNAVAILABLE');measurements.push(verifyWorkspaceArchive(r.bytes,file));}
++ return measurements;
++}
++function workspaceV2Parent(raw:any,expected:any,original?:any){
++ const c=raw?.Config,h=raw?.HostConfig,s=raw?.State,l=c?.Labels??{};
++ if(!raw||!/^([a-f0-9]{64})$/.test(raw.Id)||raw.Name!=='/'+expected.backendName||c.User!=='1000:1000'||c.WorkingDir!=='/workspace'||l['com.ingenium.managed']!=='runtime-manager'||l['com.ingenium.runtime.scope']!=='workspace'||Object.hasOwn(l,'com.ingenium.runtime.project')
++ ||l['com.ingenium.runtime.id']!==expected.runtimeId||l['com.ingenium.runtime.organization']!==expected.organizationId||l['com.ingenium.runtime.owner']!==expected.ownerUserId||l['com.ingenium.runtime.workspace']!==expected.workspaceId||l['com.ingenium.runtime.storage']!==expected.storageMappingHash||l['com.ingenium.runtime.security-epoch']!==String(expected.securityEpoch)||l['com.ingenium.runtime.revision']!==String(expected.revision)
++ ||!/^([a-f0-9]{40})$/.test(l['org.opencontainers.image.revision']??''))throw Error('WORKSPACE_V2_PARENT_SCOPE');
++ const profile=runtimeProvision.provisionHash({User:c.User,WorkingDir:c.WorkingDir,Entrypoint:c.Entrypoint,Cmd:c.Cmd,HostConfig:h,Mounts:raw.Mounts,AppArmorProfile:raw.AppArmorProfile}),start=runtimeProvision.provisionHash([s?.StartedAt,raw.RestartCount]);
++ if(original&&(raw.Id!==original.parentContainerId||raw.Image!==original.imageId||profile!==original.publicProfileSha256||start!==original.startIdentity||s?.Running!==true||s.Status!=='running'||s.Health?.Status!=='healthy'))throw Error('WORKSPACE_V2_ORIGINAL_PROFILE_CHANGED');
++ return {profile,start,imageRevision:l['org.opencontainers.image.revision']};
++}
++async function provisionOriginalWorkspaceV2(input:Record<string,unknown>,mappings:ReturnType<typeof readWorkspaceMappings>){
++ const publicRequest=workspaceV2Public(input),requestSha256=runtimeProvision.provisionHash(publicRequest),runtimeId=publicRequest.runtimeId;
++ if(Object.keys(input).sort().join('|')!==[...Object.keys(publicRequest),'capability','capabilityExpiresAt','bootstrapNonce'].sort().join('|')||typeof input.bootstrapNonce!=='string'||!/^[a-f0-9]{64}$/.test(input.bootstrapNonce)||workspaceV2Attempts.has(runtimeId))throw Error('WORKSPACE_V2_NEW_REQUEST_REQUIRED');
++ const attempt={requestSha256,phase:'admission'} as {requestSha256:string;phase:string;containerId?:string;failure?:string;failurePhase?:string};workspaceV2Attempts.set(runtimeId,attempt);
++ try{
++  const admitted=await workspaceV2Core('admission',{runtimeId,requestId:publicRequest.originalRequestId,requestSha256});
++  if(runtimeProvision.provisionHash(admitted.publicRequest)!==requestSha256||admitted.nonce!==input.bootstrapNonce||!admitted.credentialId)throw Error('WORKSPACE_V2_ORIGINAL_ADMISSION_CHANGED');
++  const mapping=mappings.get(publicRequest.workspaceId);if(!mapping||mapping.hostPath!==publicRequest.storagePath)throw Error('WORKSPACE_V2_REAL_MAPPING_UNAVAILABLE');
++  const definition=admitted.definition;
++  if(definition?.schemaVersion!==2||definition.imageId!==environment('INGENIUM_USER_RUNTIME_IMAGE')||!/^sha256:[a-f0-9]{64}$/.test(definition.imageId)||definition.validUntil<=Date.now())throw Error('WORKSPACE_V2_IMMUTABLE_IMAGE_UNAVAILABLE');
++  const prior=await workspaceDocker('GET','/containers/'+encodeURIComponent(publicRequest.backendName)+'/json') as {status:number};if(prior.status!==404)throw Error('WORKSPACE_V2_PRIOR_CONTAINER_PRESERVED');
++  const image=await workspaceDockerJson('GET','/images/'+encodeURIComponent(definition.imageId)+'/json');
++  if((image as any).value?.Id!==definition.imageId||runtimeProvision.provisionHash(Object.fromEntries(['User','WorkingDir','Entrypoint','Cmd'].map(k=>[k,(image as any).value.Config?.[k]??null])))!==runtimeProvision.provisionHash(definition.imageConfig))throw Error('WORKSPACE_V2_IMAGE_CONFIG_CHANGED');
++  const config={image:definition.imageId,network:runtimeNetworkName(runtimeId),apiUrl:environment('INGENIUM_RUNTIME_API_URL')};
++  const spec=buildWorkspaceRuntimeContainerSpecV2(input as unknown as WorkspaceRuntimeProvisionRequestV2,mapping,config);
++  await ensureRuntimeNetwork(config.network,runtimeId);await connectControlPlane(config.network);await connectRuntimeGateway(config.network);
++  await workspaceV2Core('admission',{runtimeId,requestId:publicRequest.originalRequestId,requestSha256});
++  const daemon=await workspaceDockerJson('GET','/info');
++  attempt.phase='create-sent';const created=await workspaceDockerJson('POST','/containers/create?name='+encodeURIComponent(publicRequest.backendName),spec,201);
++  const containerId=(created as any).value?.Id;if(typeof containerId!=='string'||!/^[a-f0-9]{64}$/.test(containerId))throw Error('WORKSPACE_V2_CREATE_ID_UNKNOWN');attempt.containerId=containerId;attempt.phase='created';
++  const born=await workspaceDockerJson('GET','/containers/'+containerId+'/json');workspaceV2Parent((born as any).value,publicRequest);
++  await workspaceV2Artifacts(containerId,definition);
++  await workspaceV2Core('admission',{runtimeId,requestId:publicRequest.originalRequestId,requestSha256});
++  attempt.phase='start-sent';const started=await workspaceDockerJson('POST','/containers/'+containerId+'/start',undefined,204); // 304 is NEVER an original start
++  const starting=await workspaceDockerJson('GET','/containers/'+containerId+'/json'),startIdentity=runtimeProvision.provisionHash([(starting as any).value?.State?.StartedAt,(starting as any).value?.RestartCount]);
++  attempt.phase='attach-sent';await joinWorkspaceAttach(containerId,input.capability,{nonce:admitted.nonce,runtimeId,workspaceId:publicRequest.workspaceId,credentialId:admitted.credentialId,bindingHash:publicRequest.storageMappingHash,bindingEpoch:publicRequest.securityEpoch,startIdentity,requestId:publicRequest.originalRequestId});
++  const after=await workspaceDockerJson('GET','/containers/'+containerId+'/json'),daemonAfter=await workspaceDockerJson('GET','/info');
++  const original=runtimeProvision.originalWorkspaceProvisionFromNewFlow({request:publicRequest,spec,daemonBefore:(daemon as any).value,daemonAfter:(daemonAfter as any).value,imageId:definition.imageId,createdId:containerId,createStatus:(created as any).status,startStatus:(started as any).status,attachJoined:requireRetainedWorkspaceAttach(containerId)!==undefined,container:(after as any).value});
++  attempt.phase='original-joined';return {...publicInspect((after as any).value),disposition:'new_created',originalProvision:original};
++ }catch(error){const e=error as {code?:unknown;message?:unknown},code=typeof e.code==='string'?e.code:typeof e.message==='string'?e.message:'';attempt.failure=/^WORKSPACE_V2_[A-Z0-9_]+$/.test(code)?code:'WORKSPACE_V2_ORIGINAL_OUTCOME_UNAVAILABLE';attempt.failurePhase=attempt.phase;attempt.phase='retained-failure';throw error;}
++ // No stale stop/remove/reuse, retry, log scraping, credential replay or adoption.
++}
++async function observeOriginalWorkspaceV2(runtimeId:string){
++ const originalContext=await workspaceV2Core('original',{runtimeId}),{runtime:r,workspace:w,original:o,definition:d}=originalContext;
++ if(o?.schemaVersion!==2||o.projectId!==null||r.projectId!==null||r.backendContainerId!==o.parentContainerId||o.imageId!==d.imageId||d.validUntil<=Date.now())throw Error('WORKSPACE_V2_ORIGINAL_BINDING');
++ requireRetainedWorkspaceAttach(o.parentContainerId); // A manager restart is a gate, never label adoption.
++ const begin=Date.now(),daemon=await workspaceDockerJson('GET','/info'),first=await workspaceDockerJson('GET','/containers/'+o.parentContainerId+'/json');
++ const expected={runtimeId,backendName:r.backendName,organizationId:r.organizationId,ownerUserId:r.ownerUserId,workspaceId:w.id,storageMappingHash:w.storageMappingHash,securityEpoch:w.securityEpoch,revision:o.provisioningRevision};
++ const a=workspaceV2Parent((first as any).value,expected,o),artifacts=await workspaceV2Artifacts(o.parentContainerId,d);
++ const last=await workspaceDockerJson('GET','/containers/'+o.parentContainerId+'/json'),endDaemon=await workspaceDockerJson('GET','/info'),b=workspaceV2Parent((last as any).value,expected,o);
++ if((daemon as any).value?.ID!==o.daemonId||(endDaemon as any).value?.ID!==o.daemonId||a.profile!==b.profile||a.start!==b.start||Date.now()>=begin+5000)throw Error('WORKSPACE_V2_FRESH_ORIGINAL_CHANGED');
++ requireRetainedWorkspaceAttach(o.parentContainerId);
++ return {schemaVersion:2,kind:'original-workspace-runtime-v2-placement',runtimeId,parentContainerId:o.parentContainerId,startIdentity:o.startIdentity,publicProfileSha256:o.publicProfileSha256,provisioningRevision:o.provisioningRevision,imageId:o.imageId,daemonId:o.daemonId,hostId:o.hostId,organizationId:w.organizationId,ownerUserId:w.ownerUserId,projectId:null,workspaceId:w.id,bindingHash:w.storageMappingHash,bindingEpoch:w.securityEpoch,state:'running',health:'healthy',artifacts,definitionSha256:runtimeProvision.provisionHash(d),observedAt:begin,expiresAt:begin+5000};
+ }
+ 
+ export function startRuntimeManager(): import("node:http").Server {
+@@ -426,6 +504,17 @@
+         response.writeHead(200).end(JSON.stringify({ data: { status: "ok" } }));
+         return;
+       }
++      // Separate exact v2 route under the SAME original protected manager token.
++      if(request.headers.cookie===undefined&&request.headers.origin===undefined&&url.search===''){
++        if(request.method==='POST'&&url.pathname==='/v2/workspace-runtimes'){
++          const data=await provisionOriginalWorkspaceV2(await readJsonBody(request) as Record<string,unknown>,mappings);
++          response.writeHead(200).end(JSON.stringify({data}));return;
++        }
++        const v2=/^\/v2\/workspace-runtimes\/([a-f0-9-]+)\/placement$/.exec(url.pathname);
++        if(request.method==='GET'&&v2&&UUID.test(v2[1]!)){
++          const data=await observeOriginalWorkspaceV2(v2[1]!);response.writeHead(200).end(JSON.stringify({data}));return;
++        }
++      }
+       if (request.method === "POST" && url.pathname === "/v1/runtimes") {
+         const inspect = await provisionRuntime(await readJsonBody(request) as RuntimeProvisionRequest, mappings);
+         const original=originalProvisionResponses.get(inspect);
+--- a/services/ingenium-api/lib/runtime-manager-client.ts
++++ b/services/ingenium-api/lib/runtime-manager-client.ts
+@@ -219,3 +219,25 @@
+   throw Object.assign(Error(code),{code});
+  }
+ }
++
++// Append to actual runtime-manager-client.ts; uses its ORIGINAL URL/token/raw-fetch owners.
++const workspaceOriginalResponses=new WeakMap<object,runtimeProvision.WorkspaceRuntimeOriginalProvision>();
++export function authenticatedOriginalWorkspaceProvisionV2(result:object):runtimeProvision.WorkspaceRuntimeOriginalProvision|undefined{return workspaceOriginalResponses.get(result);}
++async function originalWorkspaceManagerV2(path:string,body?:unknown):Promise<Record<string,unknown>>{
++ const url=new URL(path,managerUrl()).href,signal=AbortSignal.timeout(45000);
++ const response=await originalCallManagerFetch(url,{method:body===undefined?'GET':'POST',redirect:'manual',credentials:'omit',cache:'no-store',signal,
++ headers:{Authorization:'Bearer '+managerToken(),Accept:'application/json','Accept-Encoding':'identity',...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
++ const consumed=await consumeBoundedRawJson(response,url,RAW_ASSISTANT_LIMITS.sessionBytes,signal);
++ try{const envelope=consumed.json as {data?:Record<string,unknown>};if(!envelope?.data||typeof envelope.data!=='object')throw Error('WORKSPACE_V2_MANAGER_RESPONSE');return envelope.data;}finally{consumed.raw.fill(0);}
++}
++export async function postOriginalWorkspaceRuntimeV2(payload:runtimeProvision.PublicWorkspaceProvisionRequest&{capability:string;capabilityExpiresAt:string;bootstrapNonce:string}):Promise<RuntimeManagerInspect>{
++ const {capability:_capability,capabilityExpiresAt:_expires,bootstrapNonce:_nonce,...publicRequest}=payload;
++ const expected=runtimeProvision.publicWorkspaceProvisionRequest(publicRequest),raw=await originalWorkspaceManagerV2('/v2/workspace-runtimes',payload);
++ if(raw.disposition!=='new_created'||raw.runtimeId!==expected.runtimeId||typeof raw.backendId!=='string'||!SHA256.test(raw.backendId)||raw.backendName!==expected.backendName||typeof raw.imageRevision!=='string'||!SHA1.test(raw.imageRevision)||raw.state!=='running')throw Error('WORKSPACE_V2_ORIGINAL_RESPONSE');
++ const original=runtimeProvision.validateWorkspaceProvisionResponse(raw.originalProvision,expected,raw.backendId);
++ const result:RuntimeManagerInspect={backendId:raw.backendId,backendName:expected.backendName,runtimeId:expected.runtimeId,imageRevision:raw.imageRevision,state:'running',health:typeof raw.health==='string'?raw.health:'unknown'};
++ workspaceOriginalResponses.set(result,original);return result; // no DTO constructor/adoption path
++}
++export async function inspectOriginalWorkspaceRuntimeV2(runtimeId:string):Promise<unknown>{
++ if(!UUID.test(runtimeId))throw Error('WORKSPACE_V2_RUNTIME_ID');return await originalWorkspaceManagerV2('/v2/workspace-runtimes/'+runtimeId+'/placement');
++}
+--- a/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts
+@@ -1,3 +1,4 @@
++import {workspaceV2ImageDefinition} from '../projects-v2/workspace-v2-image.mjs';
+ import {readInstalledCandidateSource} from '../../../../packages/veyra-operations/core126-candidate-observation.mjs';
+ import {constants,openSync,closeSync,fstatSync,lstatSync,realpathSync,readFileSync} from "node:fs";
+ import {dirname} from "node:path";
+@@ -61,3 +62,15 @@
+  const registry=createCore126ImageRegistry({loadManifestBytes:async()=>deny()},[]);
+  return createCore126ImageOwner({client,registry,inTransaction:()=>getDb().inTransaction,originalProvisionProfile:facts=>runtimes.getRuntimeOriginalProvision(facts.runtime.id)});
+ }
++
++/** Additive export in the EXISTING root-owned Core126 policy loader. No new approval source. */
++export function loadInstalledWorkspaceRuntimeV2ImageDefinition(imageId:string):unknown {
++ const policy=readProtected(POLICY_FILE,64*1024),raw=parseStrictJobJson(policy,64*1024) as {schemaVersion?:unknown;approvedImages?:Array<Core126ImageApproval>};
++ if(raw.schemaVersion!==1||!Array.isArray(raw.approvedImages)||raw.approvedImages.length<1||raw.approvedImages.length>32)return deny();
++ const rows=raw.approvedImages.filter(row=>row.imageId===imageId);if(rows.length!==1)return deny();const approval=rows[0]!;
++ if(!/^sha256:[a-f0-9]{64}$/.test(imageId)||!/^[a-f0-9]{64}$/.test(approval.manifestSha256)||approval.validUntil<=Date.now())return deny();
++ const bytes=readProtected(POLICY_DIRECTORY+'/'+approval.manifestSha256+'.json',2*1024*1024);
++ if(digest(bytes)!==approval.manifestSha256)return deny();
++ const definition=workspaceV2ImageDefinition(parseStrictJobJson(bytes,2*1024*1024),approval);
++ if(digest(readProtected(POLICY_FILE,64*1024))!==digest(policy))return deny();return definition;
++}
+--- a/services/ingenium-api/lib/runtime-placement.ts
++++ b/services/ingenium-api/lib/runtime-placement.ts
+@@ -1,3 +1,4 @@
++import {withManagedWorkspaceV2Placement} from './projects-v2/workspace-v2-placement.mjs';
+ import { AsyncLocalStorage } from "node:async_hooks";
+ import type { Request } from "express";
+ import { authorization, explicitMemory, getDb, runtimes } from "ingenium-core";
+@@ -33,7 +34,7 @@
+     || typeof selected.workspaceId!=="string" || typeof selected.runtimeId!=="string")
+     throw new RequestExecutionError("INVALID_EXECUTION_SELECTION",422);
+   const selection={...selected};
+-  if(selection.projectId===null)throw new RequestExecutionError("PROJECTLESS_EXECUTION_OWNER_UNAVAILABLE",503);
++  if(selection.projectId===null)return withManagedWorkspaceV2Placement(request,selection,work);
+   const identity=revalidateRequestIdentity(request);
+   if(!identity)throw new RequestExecutionError("EXECUTION_IDENTITY_UNAVAILABLE",401);
+   const principal=identity.principal;
+--- a/services/ingenium-api/lib/projects-v2/request-execution.ts
++++ b/services/ingenium-api/lib/projects-v2/request-execution.ts
+@@ -1,3 +1,4 @@
++import {resolveCurrentWorkspaceV2Execution} from './workspace-v2-placement.mjs';
+ import {createCanonicalRequestChatResolver} from "./canonical-chat-binding.mjs";
+ import type { Request } from "express";
+ import { findRequestChatSourceIds, isRequestChatConversationActive } from "./request-chat-source.mjs";
+@@ -74,6 +75,7 @@
+ });
+ 
+ export function resolveRequestExecution(request: Request, selection: RequestExecutionSelection) {
++  if(selection.projectId===null)return resolveCurrentWorkspaceV2Execution(request,selection);
+   return resolver.resolveRequestExecution(request, selection);
+ }
+ export function resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string, purpose: RequestChatPurpose = "active") {
+--- a/services/ingenium-api/scripts/api-server.ts
++++ b/services/ingenium-api/scripts/api-server.ts
+@@ -1,3 +1,5 @@
++import {workspaceV2McpIngress} from '../lib/projects-v2/workspace-v2-mcp.mjs';
++import {workspaceV2PrivateIngress,provisionWorkspaceRuntimeFromRequestV2,refreshWorkspaceRuntimeFromRequestV2} from '../lib/projects-v2/workspace-v2-control.mjs';
+ import {captureOriginalCandidateManagerBody} from "../lib/dot-v2/candidate-manager-http.mjs";
+ import {createCurrentAgentCallRouter,captureOriginalCurrentCallBody,captureOriginalCurrentCallPcmBody,releaseOriginalCurrentCallPcmBody} from '../lib/voice-v2/current-call-http.js';
+ import {CURRENT_CALL_PREFIX,CURRENT_CALL_BODY_LIMIT,CURRENT_CALL_PCM_LIMIT,isCurrentCallHttpPath,isCurrentCallPcmPath} from '../lib/voice-v2/current-call-http-protocol.mjs';
+@@ -172,10 +174,22 @@
+ app.use(rateLimit);
+ // Dedicated manager/job-run audiences authenticate in their original owners.
+ app.use(createCore126Ingress(actualManagedJobHandlers));
++app.use(workspaceV2PrivateIngress); // exact manager/bootstrap audiences only
++app.use(workspaceV2McpIngress);
+ app.use(authMiddleware);
+ app.use(recordCandidateAuthenticationFailure);
+ app.use(authenticatedReadRateLimit);
+ app.use(csrfMiddleware);
++// Real session/CSRF/rate admission above; explicit canonical workspace owner
++// authorization precedes the legacy Project route mapper for these exact routes.
++app.post('/api/v1/runtimes/workspace-v2/provision',async(req,res)=>{
++ try{if(req.originalUrl!==req.path)throw Error('exact path');res.status(202).json({data:await provisionWorkspaceRuntimeFromRequestV2(req,req.body)});}
++ catch{res.status(503).json({error:{code:'WORKSPACE_V2_PROVISION_UNAVAILABLE'}});}
++});
++app.post('/api/v1/runtimes/workspace-v2/refresh',async(req,res)=>{
++ try{if(req.originalUrl!==req.path)throw Error('exact path');res.status(200).json({data:await refreshWorkspaceRuntimeFromRequestV2(req,req.body)});}
++ catch{res.status(503).json({error:{code:'WORKSPACE_V2_PLACEMENT_UNAVAILABLE'}});}
++});
+ app.use(authorizationMiddleware);
+ app.use(CURRENT_CALL_PREFIX,createCurrentAgentCallRouter());
+ app.use(createRepositorySyncIngress());
+--- a/scripts/runtime-entrypoint.sh
++++ b/scripts/runtime-entrypoint.sh
+@@ -5,6 +5,18 @@
+   echo "ERROR: user runtime must run as appuser"
+   exit 1
+ fi
++
++# Explicit v2 branch, without a Project default/sentinel/adoption.
++case "${INGENIUM_EXECUTION_SCOPE:-project}" in
++  workspace)
++    if [ "${INGENIUM_PROJECT+x}" = x ] || [ "${INGENIUM_PROJECT_ID+x}" = x ] || [ "${INGENIUM_PROJECT_NAME+x}" = x ]; then
++      echo "ERROR: ambiguous runtime scope"; exit 1
++    fi
++    exec node /app/services/ingenium-api/dist/scripts/runtime-workspace-bootstrap.mjs
++    ;;
++  project) ;;
++  *) echo "ERROR: runtime scope unavailable"; exit 1 ;;
++esac
+ 
+ for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID INGENIUM_STORAGE_MAPPING_HASH; do
+   eval "value=\${$name:-}"
+--- a/scripts/start-runtime-opencode-web.sh
++++ b/scripts/start-runtime-opencode-web.sh
+@@ -1,5 +1,22 @@
+ #!/bin/sh
+ set -eu
++
++if [ "${INGENIUM_EXECUTION_SCOPE:-project}" = workspace ]; then
++  for name in INGENIUM_API_URL INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID INGENIUM_STORAGE_MAPPING_HASH; do
++    eval "value=\${$name:-}"; if [ -z "$value" ]; then echo "ERROR: workspace runtime identity incomplete"; exit 1; fi
++  done
++  if [ "${INGENIUM_PROJECT+x}" = x ] || [ "${INGENIUM_PROJECT_ID+x}" = x ]; then echo "ERROR: ambiguous workspace runtime"; exit 1; fi
++  password_file="${OPENCODE_SERVER_PASSWORD_FILE:-/run/ingenium-runtime/opencode-server-password}"
++  if [ ! -r "$password_file" ]; then echo "ERROR: runtime OpenCode secret unavailable"; exit 1; fi
++  opencode_server_password="$(cat "$password_file")"
++  exec env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" PWD="/app" \
++    HOME="/home/appuser" XDG_CONFIG_HOME="/home/appuser/.config" XDG_DATA_HOME="/home/appuser/.local/share" XDG_STATE_HOME="/home/appuser/.local/state" \
++    OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime" OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json" OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
++    INGENIUM_EXECUTION_SCOPE=workspace INGENIUM_API_URL="$INGENIUM_API_URL" INGENIUM_ORGANIZATION_ID="$INGENIUM_ORGANIZATION_ID" INGENIUM_RUNTIME_ID="$INGENIUM_RUNTIME_ID" \
++    INGENIUM_RUNTIME_OWNER_ID="$INGENIUM_RUNTIME_OWNER_ID" INGENIUM_WORKSPACE_ID="$INGENIUM_WORKSPACE_ID" INGENIUM_STORAGE_MAPPING_HASH="$INGENIUM_STORAGE_MAPPING_HASH" \
++    INGENIUM_WORKTREE=/workspace INGENIUM_MCP_AUDIENCE=runtime INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability INGENIUM_RUNTIME_CREDENTIAL_FILE=/run/ingenium-runtime/capability \
++    opencode serve --port 4098 --hostname 0.0.0.0
++fi
+ 
+ for name in INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID INGENIUM_STORAGE_MAPPING_HASH; do
+   eval "value=\${$name:-}"
+--- a/packages/ingenium-core/lib/tools/mcp-tool-catalog.ts
++++ b/packages/ingenium-core/lib/tools/mcp-tool-catalog.ts
+@@ -13,7 +13,8 @@
+   name: string;           // e.g. "ingenium_skill_list"
+   category: string;       // e.g. "Skills"
+   description: string;
+-  projectScope: "per-project" | "global";
++  projectScope: "per-project" | "global" | "workspace";
++  workspaceRuntimeV2?: {protocol:2;enabled:boolean;inputSchema:Record<string,unknown>};
+   defaultEnabled: boolean;
+   apiEndpoints: string[]; // e.g. ["GET /api/v1/skills"]
+   authorization?: import("./mcp-authorization-policy.js").McpAuthorizationPolicy;
+@@ -2542,6 +2543,12 @@
+   },
+ ];
+ 
++// Single canonical definition; legacy Project facet remains disabled by default.
++MCP_TOOL_CATALOG.push({name:"ingenium_workspace_runtime_scope",category:"Runtime",
++ description:"Read this credential-owned private workspace/runtime binding; canonical state is not fresh execution readiness.",
++ projectScope:"workspace",defaultEnabled:false,apiEndpoints:["POST /api/v1/runtime/workspace-v2/mcp/call"],
++ workspaceRuntimeV2:{protocol:2,enabled:true,inputSchema:{type:"object",properties:{},additionalProperties:false}}});
++
+ import { explicitMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
+ for (const entry of MCP_TOOL_CATALOG) entry.authorization = explicitMcpAuthorizationPolicy(entry.name, entry.category);
+ 
+--- a/packages/ingenium-core/lib/tools/mcp-authorization-policy.ts
++++ b/packages/ingenium-core/lib/tools/mcp-authorization-policy.ts
+@@ -82,6 +82,7 @@
+ ]);
+ 
+ export function explicitMcpAuthorizationPolicy(toolName: string, category: string): McpAuthorizationPolicy {
++  if(toolName==="ingenium_workspace_runtime_scope")return {action:"runtime.read",resource:"runtime",permission:"read",target:"private",scopes:["runtime:activity"],launcherBinding:"required"};
+   const transportName = toolName.startsWith("ingenium_") ? toolName.slice("ingenium_".length) : toolName;
+   if (!READ.has(transportName) && !ADMIN.has(transportName) && !EXECUTE.has(transportName) && !WRITE.has(transportName)) throw new Error(`Missing explicit MCP authorization policy: ${toolName}`);
+   const permission: AuthorizationPermission = ADMIN.has(transportName) ? "admin" : EXECUTE.has(transportName) ? "execute" : READ.has(transportName) ? "read" : "write";
+--- a/services/ingenium-server/scripts/mcp-server.ts
++++ b/services/ingenium-server/scripts/mcp-server.ts
+@@ -275,6 +275,10 @@
+   };
+ }
+ 
++// Canonical workspace-only tool is a negative, normally hidden legacy facet.
++server.registerTool("workspace_runtime_scope", {description:"Requires the original workspace-runtime-v2 transport.",inputSchema:{}},
++ wrapHandler(C("workspace_runtime_scope"),async()=>({isError:true,content:[{type:"text" as const,text:JSON.stringify({code:"WORKSPACE_RUNTIME_V2_REQUIRED"})}]})));
++
+ server.registerTool(
+   "setting_get",
+   { description: "Get a setting value by key", inputSchema: { project: projectParam, key: z.string() } },
+--- a/packages/ingenium-extension/scripts/mcp-server.ts
++++ b/packages/ingenium-extension/scripts/mcp-server.ts
+@@ -1,4 +1,5 @@
+ #!/usr/bin/env node
++export async function bootstrapWorkspaceRuntimeV2(hints:import("./workspace-runtime-mcp-client.js").WorkspaceMcpHints){const original=await import("./workspace-runtime-mcp-transport.js");return original.bootstrapWorkspaceRuntimeV2(hints); }
+ import { realpathSync } from "node:fs";
+ import { resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
+@@ -105,6 +106,11 @@
+       return 2;
+     }
+   }
++  // Dedicated actual workspace facet before ANY generic Project preflight.
++  if(process.env.INGENIUM_EXECUTION_SCOPE==="workspace"){
++    try{const {runWorkspaceRuntimeMcpTransportV2}=await import("./workspace-runtime-mcp-transport.js");await runWorkspaceRuntimeMcpTransportV2();return 0;}
++    catch{writeLauncherFailure("authentication","Workspace runtime MCP owner unavailable.");return 2;}
++  }
+   const preflight = preflightMcpLauncher(worktree);
+   if (!preflight.ok) {
+     writeLauncherFailure(preflight.stage, preflight.message);
+--- a/packages/ingenium-extension/scripts/build-distributions.mjs
++++ b/packages/ingenium-extension/scripts/build-distributions.mjs
+@@ -10,7 +10,7 @@
+   "repository-command", "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner",
+ ].map((name) => `scripts/${name}.js`);
+ const EXTENSION_REQUIRED = [
+-  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
++  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/workspace-runtime-mcp-client.js", "scripts/workspace-runtime-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
+   ...[
+     "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
+   ].flatMap((name) => [
+--- a/services/ingenium-api/lib/runtime-opencode-context.ts
++++ b/services/ingenium-api/lib/runtime-opencode-context.ts
+@@ -1,3 +1,4 @@
++import {runtimeWorkspaceOpenCodeContextV2} from './projects-v2/workspace-v2-opencode.mjs';
+ import { AsyncLocalStorage } from "node:async_hooks";
+ import type { NextFunction, Request, Response } from "express";
+ import { authorization, runtimes } from "ingenium-core";
+@@ -27,6 +28,7 @@
+     return;
+   }
+   const id = req.get("x-ingenium-runtime-id") ?? (typeof req.query.runtime_id === "string" ? req.query.runtime_id : "");
++  if(runtimeWorkspaceOpenCodeContextV2(req,res,next,id))return; // actual v2 row + fresh scope only
+   const runtime = runtimes.getRuntimeInstance(id);
+   if (!runtime || (runtime.state !== "READY" && runtime.state !== "IDLE") || !req.principal) {
+     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });
+--- a/services/ingenium-api/lib/routes/runtimes.ts
++++ b/services/ingenium-api/lib/routes/runtimes.ts
+@@ -1,3 +1,4 @@
++import {validateWorkspaceGatewaySessionV2} from '../projects-v2/workspace-v2-gateway.mjs';
+ import { issueCompatibilityLaunch } from "../compatibility-runtime-access.js";
+ import { Router } from "express";
+ import { getDb, runtimes, securityAudit } from "ingenium-core";
+@@ -342,11 +343,16 @@
+   res.json({ data: { sessionToken: exchanged.token, session: exchanged.session } });
+ });
+ 
+-runtimesRouter.post("/gateway/validate", (req, res) => {
++runtimesRouter.post("/gateway/validate", async (req, res) => {
+   const parsed = gatewayValidateInput.safeParse(req.body);
+   if (!parsed.success) {
+     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime session request is invalid" } });
+     return;
++  }
++  // Secret-bearing v2 response is ONLY for the original private gateway principal.
++  if(req.principal?.type==='runtime-service'&&req.principal.id==='runtime-gateway'&&req.principal.audience==='runtime-gateway'){
++    try{const workspace=await validateWorkspaceGatewaySessionV2(parsed.data);if(workspace){res.set('Cache-Control','no-store');res.json({data:workspace});return;}}
++    catch{res.status(503).json({error:{code:'WORKSPACE_V2_GATEWAY_UNAVAILABLE'}});return;}
+   }
+   const resolved = runtimes.resolveRuntimeBrowserSession({
+     token: parsed.data.sessionToken,
+--- a/services/ingenium-api/scripts/runtime-gateway.ts
++++ b/services/ingenium-api/scripts/runtime-gateway.ts
+@@ -19,6 +19,7 @@
+   containerPort: 8080 | 8443;
+ };
+ type ValidatedSession = {
++  workspaceV2AuthHeader?: string; // private Core response only; never browser headers
+   backendName: string;
+   session: { expiresAt: string; launcherOrigin: string };
+ };
+@@ -234,13 +235,14 @@
+   }).end(message);
+ }
+ 
+-export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeScope, websocket = false): IncomingHttpHeaders {
++export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeScope, websocket = false, workspaceV2AuthHeader?:string): IncomingHttpHeaders {
+   const result: IncomingHttpHeaders = {};
+   for (const [name, value] of Object.entries(headers)) {
+     const lower = name.toLowerCase();
+     if (PRIVATE_HEADERS.has(lower) || (!websocket && HOP_HEADERS.has(lower)) || lower === "host" || lower === "origin" || lower === "referer") continue;
+     result[lower] = value;
+   }
++  if(workspaceV2AuthHeader!==undefined){if(!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(workspaceV2AuthHeader))throw Error("WORKSPACE_V2_AUTH_HEADER");if(scope.audience==="web")result.authorization=workspaceV2AuthHeader;}
+   result.host = scope.host;
+   if (scope.audience === "cli") result["x-ingenium-authenticated-user"] = "runtime";
+   if (websocket) {
+@@ -344,14 +346,14 @@
+   return "/";
+ }
+ 
+-async function backendReady(scope: RuntimeScope, backendName: string): Promise<boolean> {
++async function backendReady(scope: RuntimeScope, backendName: string,workspaceV2AuthHeader?:string): Promise<boolean> {
+   return new Promise((resolve) => {
+     const upstream = httpRequest({
+       hostname: backendName,
+       port: BACKEND_PORTS[scope.audience],
+       method: "GET",
+       path: runtimeBackendHealthPath(scope.audience),
+-      headers: sanitizedHeaders({}, scope),
++      headers: sanitizedHeaders({}, scope,false,workspaceV2AuthHeader),
+       timeout: 5_000,
+     }, (response) => {
+       response.resume();
+@@ -395,7 +397,7 @@
+   }
+   const token = runtimeAudienceSessionCookie(request, scope.audience);
+   const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
+-  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName)) {
++  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName,resolved.workspaceV2AuthHeader)) {
+     reject(response, 503, "Runtime audience is unavailable", origin, scope.audience);
+     return;
+   }
+@@ -437,7 +439,7 @@
+     port: BACKEND_PORTS[scope.audience],
+     method: request.method,
+     path: request.url,
+-    headers: sanitizedHeaders(request.headers, scope),
++    headers: sanitizedHeaders(request.headers, scope,false,resolved.workspaceV2AuthHeader),
+     timeout: 30_000,
+   }, (upstreamResponse) => {
+     response.writeHead(
+@@ -474,7 +476,7 @@
+     port: BACKEND_PORTS[scope.audience],
+     method: request.method,
+     path: request.url,
+-    headers: sanitizedHeaders(request.headers, scope, true),
++    headers: sanitizedHeaders(request.headers, scope,true,resolved.workspaceV2AuthHeader),
+   });
+   upstream.on("upgrade", async (upstreamResponse, upstreamSocket, upstreamHead) => {
+     if (!await recordActivity(scope, token, "connection_opened").catch(() => false)) {
+--- a/services/ingenium-api/lib/mcp-usefulness-collector.ts
++++ b/services/ingenium-api/lib/mcp-usefulness-collector.ts
+@@ -44,7 +44,7 @@
+   name: string;
+   category: string;
+   description: string;
+-  projectScope: "per-project" | "global";
++  projectScope: "per-project" | "global" | "workspace";
+   defaultEnabled: boolean;
+   apiEndpoints: string[];
+   enabled: boolean;
+--- a/scripts/start-ttyd.sh
++++ b/scripts/start-ttyd.sh
+@@ -7,6 +7,10 @@
+ # OpenCode V2 requires HTTP basic auth; use this identity's private copy,
+ # never an ACL on the proxy's owner-private secret.
+ opencode_server_password=""
++if [ "${INGENIUM_EXECUTION_SCOPE:-project}" = workspace ]; then
++  if [ ! -r /run/ingenium-runtime/opencode-server-password ]; then echo "ERROR: workspace OpenCode secret unavailable"; exit 1; fi
++  opencode_server_password="$(cat /run/ingenium-runtime/opencode-server-password)"
++else
+ for candidate in \
+   /run/ingenium-secrets/ttyd/opencode-server-password \
+   /run/ingenium-runtime/opencode-server-password; do
+@@ -15,6 +19,7 @@
+     break
+   fi
+ done
++fi
+ 
+ # Keep the browser-facing terminal free of inherited credentials. OpenCode's
+ # server process owns MCP/plugin access; this process is only an attach client.
+--- a/packages/ingenium-core/lib/index.ts
++++ b/packages/ingenium-core/lib/index.ts
+@@ -92,3 +92,5 @@
+ export * as customizeCatalog from "./tools/customize-catalog-owner.js";
+ 
+ export type {OriginalAssistantSourceClaim,OriginalAssistantSourceInspectors,OriginalAssistantPlanFacts,OriginalAssistantDispatchFacts} from './tools/voice-assistant-source.js';
++
++export * as workspaceRuntimeCredentialsV2 from "./tools/workspace-runtime-credentials.mjs";
