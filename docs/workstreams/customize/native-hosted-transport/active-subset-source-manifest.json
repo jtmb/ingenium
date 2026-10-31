@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "base": "Root current Core133/7c069 request-current source; preserve all v1 behavior",
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+      "preimageSha256": "89506d17ec74df3086d07d485f463075af2b70dd0425448759f71f7273098e19",
+      "postimageSha256": "d94e5199b856f7c9b9bb3639531ed62687bb6a83ba5aceee378ae052b34c373b",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-transition.ts"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-active-subset.ts",
+      "preimageSha256": null,
+      "postimageSha256": "4ea70ea178f962cbe81fa5723f710bc59622be522b3678f2da0fc8c292fcbcb0",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-active-subset.ts"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "preimageSha256": "88ed24ffc3b3350f6e5bd1231428d84816e91e090e5b35ad4164ff0b7cb944fe",
+      "postimageSha256": "16bcf69823d0da6b9259e9cb3835c78d58ac17adc6ce5af6320917773fa35697",
+      "sourceFile": "files/services/ingenium-api/lib/routes/customize-scoped-v1.ts"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/configs.ts",
+      "replacements": [
+        {
+          "before": "import { resolveProjectBase, getConfigPath } from \"./paths.js\";",
+          "after": "import { resolveProjectBase, getConfigPath } from \"./paths.js\";\nimport {managedPluginConfigPathIfPresent,PluginProjectionTransitionRequired} from \"./plugin-projection-transition.js\";"
+        },
+        {
+          "before": "  if(type===\"project\")getConfigPath(projectId);",
+          "after": "  managedPluginConfigPathIfPresent(projectId);\n  if(type===\"project\")getConfigPath(projectId);"
+        },
+        {
+          "before": " if(!getDb().inTransaction)throw new Error(\"Core config transaction required\");",
+          "after": " if(!getDb().inTransaction)throw new Error(\"Core config transaction required\");\n managedPluginConfigPathIfPresent(projectId);"
+        },
+        {
+          "before": " const path=type===\"global\"?resolve(resolveProjectBase(projectId),\"opencode.jsonc\"):getConfigPath(projectId);",
+          "after": " managedPluginConfigPathIfPresent(projectId);\n const path=type===\"global\"?resolve(resolveProjectBase(projectId),\"opencode.jsonc\"):getConfigPath(projectId);"
+        },
+        {
+          "before": "export function syncConfigFromDisk(projectId: string, type: \"project\" | \"global\"): Config | undefined {\n  try {",
+          "after": "export function syncConfigFromDisk(projectId: string, type: \"project\" | \"global\"): Config | undefined {\n  managedPluginConfigPathIfPresent(projectId);\n  try {"
+        },
+        {
+          "before": "  } catch {\n    return undefined;\n  }\n}",
+          "after": "  } catch (error) {\n    if(error instanceof PluginProjectionTransitionRequired)throw error;\n    return undefined;\n  }\n}"
+        }
+      ],
+      "preimageSha256": "2abd543f73c2f0a76d07c8aa75c62f4cf93a1e74d4c8c98ee01a73733dd8cc27",
+      "postimageSha256": "a600f15e225b915509326cc5ad36fb5928551d919baa272c53b44baa01390c23"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/projects.ts",
+      "replacements": [
+        {
+          "before": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";",
+          "after": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";\nimport {assertCapturedProjectRestoreAvailable} from \"./plugin-projection-transition.js\";"
+        },
+        {
+          "before": "    assertNativeGovernanceRecoveryRestore(db,(existing as Project).id);",
+          "after": "    assertNativeGovernanceRecoveryRestore(db,(existing as Project).id);\n    assertCapturedProjectRestoreAvailable((existing as Project).id);"
+        },
+        {
+          "before": "    assertNativeGovernanceRecoveryRestore(db,existing.id);",
+          "after": "    assertNativeGovernanceRecoveryRestore(db,existing.id);\n    assertCapturedProjectRestoreAvailable(existing.id);"
+        }
+      ],
+      "preimageSha256": "28133d3e9bcca1e3c4806cb15fddcbce40367aee7931585a646597bf4675b40d",
+      "postimageSha256": "7410bf3b5f873c63c402ddf1db6d1ae7bb02ee004650377a23f92392dec1ba62"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/projects.ts",
+      "replacements": [
+        {
+          "before": "import {createPositivePluginProjectionOwner} from \"ingenium-core/lib/tools/plugin-projection-transition\";",
+          "after": "import {createPositivePluginProjectionOwner,PluginProjectionTransitionRequired} from \"ingenium-core/lib/tools/plugin-projection-transition\";"
+        },
+        {
+          "before": "  const restored = projects.unarchiveProjectById(target.id);",
+          "after": "  let restored:boolean;\n  try{restored=projects.unarchiveProjectById(target.id);}catch(error){if(error instanceof PluginProjectionTransitionRequired){res.status(409).json({error:{code:error.code,message:\"Captured project restoration needs its explicit initialization workflow\"}});return;}throw error;}"
+        }
+      ],
+      "preimageSha256": "7a530c8de1447f68c2028e51bc6c83e66c05c97d3be69fcfd33219691790f88a",
+      "postimageSha256": "bd0e0b65698616cde4990720e76a74b59293bcb6c0d1d9bf165cb00232ba3217"
+    }
+  ],
+  "ddlChanges": false,
+  "restoreInitializationImplemented": false
+}

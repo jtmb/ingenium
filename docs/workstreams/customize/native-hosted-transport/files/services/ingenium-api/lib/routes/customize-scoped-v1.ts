@@ -1,4 +1,5 @@
 import {committedPluginProjectionPaths,createPositivePluginProjectionOwner,PluginProjectionTransitionRequired} from 'ingenium-core/lib/tools/plugin-projection-transition';
+import {ActiveSubsetRefusal} from 'ingenium-core/lib/tools/plugin-projection-active-subset';
 /** Request-bound composition: original cookie/CSRF + private paired TLS + original Core writer. */
 import {Router,type Request,type Response,type NextFunction} from 'express';
 import {z} from 'zod';
@@ -83,7 +84,7 @@ export function createNativeScopedCustomizeRouter(){
  const router=Router();
  const run=(work:(req:Request,res:Response)=>Promise<unknown>|unknown)=>async(req:Request,res:Response,next:NextFunction)=>{
   res.set('Cache-Control','no-store');try{session(req,res);res.json({data:await work(req,res)});}catch(e){
-   if(e instanceof HostedRefusal||e instanceof customizeCatalog.CustomizeCatalogRefusal){res.status(e.status).json({error:{code:e.code,message:'Scoped Customize request refused'}});return;}
+   if(e instanceof HostedRefusal||e instanceof customizeCatalog.CustomizeCatalogRefusal||e instanceof ActiveSubsetRefusal){res.status(e.status).json({error:{code:e.code,message:'Scoped Customize request refused'}});return;}
    if(e instanceof PluginProjectionTransitionRequired){res.status(409).json({error:{code:e.code,message:'Project namespace requires its original owner'}});return;}
    if(e instanceof z.ZodError){res.status(422).json({error:{code:'INVALID_SCOPED_CONTRACT',message:'Use the explicit versioned consent contract'}});return;}next(e);
   }
@@ -94,7 +95,8 @@ export function createNativeScopedCustomizeRouter(){
   const assertCurrent=()=>{authenticateRequestWithoutActivity(req);csrfMiddleware(req,{} as Response,()=>{});const p=req.principal;need(p?.type==='user'&&p.session&&p.id===actorId&&p.session.id===sessionId,'BROWSER_SESSION_CHANGED',401);if(write)need(authentication.hasRecentStepUp(p.session),'RECENT_STEP_UP_REQUIRED',403);};
   assertCurrent();const result=work(createPositivePluginProjectionOwner(toAuthorizationPrincipal(original),assertCurrent));assertCurrent();return result;
  };
- const transitionSelection=z.object({mode:z.enum(['fresh-project','captured-legacy-cohort']),projectId:uuid,configOrigin:z.enum(['new-empty','database-project','reviewed-legacy-raw'])}).strict();
+ const configOrigin=z.enum(['new-empty','database-project','reviewed-legacy-raw']);
+ const transitionSelection=z.object({mode:z.enum(['fresh-project','captured-legacy-cohort','captured-active-subset']),projectId:uuid,configOrigin:z.union([configOrigin,z.record(uuid,configOrigin)])}).strict();
  router.post('/plugin-namespace/review',run(req=>withTransitionOwner(req,false,owner=>{const q=transitionSelection.parse(req.body);return owner.review(q.mode,q.projectId,q.configOrigin);})));
  router.post('/plugin-namespace/apply',run(req=>withTransitionOwner(req,true,owner=>owner.apply(transitionSelection.extend({operationId:uuid,reviewSha256:hash}).strict().parse(req.body)))));
  router.post('/plugin-namespace/reconcile',run(req=>withTransitionOwner(req,true,owner=>owner.reconcile(z.object({operationId:uuid,sourceOperationId:uuid,sourcePayloadSha256:hash}).strict().parse(req.body)))));
