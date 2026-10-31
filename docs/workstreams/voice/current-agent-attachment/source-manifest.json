@@ -124,6 +124,46 @@
       "sha256": "c1aff30151e63590cfe9188e93cc9f3b35f709dd813808f52f4fa27a1711c06b"
     },
     {
+      "path": "current-call-consumer.d.mts",
+      "bytes": 172,
+      "sha256": "64076568c2c221079e944877ea973836be9ec372c09be8faeac4f44b22fd4e46"
+    },
+    {
+      "path": "current-call-consumer.mjs",
+      "bytes": 1563,
+      "sha256": "53bdd95393bd3a5db6872dc40f87847e5902f15ba87f5c5bf23f05ed312adc7b"
+    },
+    {
+      "path": "current-call-http-protocol.d.mts",
+      "bytes": 455,
+      "sha256": "388e679d9e22b1a3dbbfdf2b1d98cd8cf2ccda7391d3efafa073101d295ab0e8"
+    },
+    {
+      "path": "current-call-http-protocol.mjs",
+      "bytes": 2150,
+      "sha256": "93cf9eb319c29e68f5ca77dc4b12f171cecc4239d3d66df63bb72edf9753c7d0"
+    },
+    {
+      "path": "current-call-http-receipt.json",
+      "bytes": 971,
+      "sha256": "8431632ac43a5eeeb06428f1aa5e26173efc3b3fe5b0ef63a14756540ce34f4e"
+    },
+    {
+      "path": "current-call-http-review.md",
+      "bytes": 1670,
+      "sha256": "0545f067ba4eccbe496d954448017c80679975a21d834dfc7ceb4f28d47200c6"
+    },
+    {
+      "path": "current-call-http.test.mjs",
+      "bytes": 7189,
+      "sha256": "fd04524224f5419e92acce2b48e83701804110bc8359e5ffeadf2800c872d400"
+    },
+    {
+      "path": "current-call-http.ts",
+      "bytes": 17588,
+      "sha256": "e2effa67e718897b625b20a6acbf143662f0d993d909dfc1d7daf074b6e41ea5"
+    },
+    {
       "path": "delivery-owner.mjs",
       "bytes": 6411,
       "sha256": "adbb5d8404ed41f3a944a0105f9d7369faa075a0dfed486d4455897504205f55"
@@ -185,8 +225,8 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1467,
-      "sha256": "8fd18041a8a5051b940677218c7eb4414e157e3e34daa01d2ce76777389db66d"
+      "bytes": 1397,
+      "sha256": "3bb03c73a27380cd247ae50d73bda4971a99237992762bc3744ae55025940571"
     },
     {
       "path": "private-call-enrollment-followon.json",
@@ -394,5 +434,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 379922.0
+  "totalContentBytes": 411610.0
 }

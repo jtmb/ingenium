@@ -1,0 +1,20 @@
+{
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parent": "06b773d1",
+  "canonicalReadOnlyPins": {
+    "services/ingenium-api/lib/voice-v2/request-context.ts": "55b87f18d2f480cb717db8fe34468d04dbcf46cf78078f538ef81cd58b8fc6d5",
+    "services/ingenium-api/lib/voice-v2/production-system.ts": "c14e992ce2fec582696c924721ad5e94be54f67279c88ccc7b70e50155b69cac",
+    "services/ingenium-api/lib/voice-v2/http.mjs": "f30f8050842eb0ccb87e99e810d69c9787d94822e43c135a70275d49b60c4002",
+    "services/ingenium-api/scripts/api-server.ts": "221405c956487df1178ce25fe9af11e5cd561c50ec2cecb63fdc72c32e5dd148"
+  },
+  "targetDirectory": "services/ingenium-api/lib/voice-v2",
+  "applied": false,
+  "compiled": false,
+  "testsAuthored": 31,
+  "testsExecuted": 0,
+  "runtimeQualified": false,
+  "remaining": "Root real mount/body/auth/pump/cancel/Core134/UI/audio gates",
+  "removedPaths": [],
+  "removedBytes": 0,
+  "syntaxOnly": "3 JS bodies compiled in tool V8, never invoked"
+}
