@@ -12,7 +12,7 @@ function current(request,selection){
  const identity=revalidateRequestIdentity(request);if(identity?.principal.type!=='user'||!identity.principal.session)return fail('WORKSPACE_V2_USER_IDENTITY');
  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),runtime=runtimes.getWorkspaceRuntimeV2(selection.runtimeId),workspace=runtimes.getAuthorizedWorkspaceV2(selection.workspaceId),original=provision.readWorkspaceRuntimeOriginalProvision(db,selection.runtimeId);
  if(!runtime||!workspace||!original||workspace.status!=='authorized'||runtime.workspaceId!==workspace.id||workspace.ownerUserId!==identity.principal.id||runtime.ownerUserId!==workspace.ownerUserId||runtime.organizationId!==workspace.organizationId||runtime.securityEpoch!==workspace.securityEpoch
- ||!db.prepare("SELECT 1 FROM organization_memberships WHERE organization_id=? AND user_id=? AND status='active'").get(workspace.organizationId,workspace.ownerUserId))return fail('WORKSPACE_V2_EXECUTION_SCOPE');
+ ||!db.prepare("SELECT 1 FROM organization_memberships m JOIN organizations organization ON organization.id=m.organization_id WHERE m.organization_id=? AND m.user_id=? AND m.status='active' AND organization.status='active'").get(workspace.organizationId,workspace.ownerUserId))return fail('WORKSPACE_V2_EXECUTION_SCOPE');
  const definition=loadInstalledWorkspaceRuntimeV2ImageDefinition(original.imageId);
  return {db,runtime,workspace,original,definition,key:JSON.stringify([identity.principal.id,identity.principal.session.id,identity.principal.session.security_epoch,runtime,workspace,original,definition])};
 }

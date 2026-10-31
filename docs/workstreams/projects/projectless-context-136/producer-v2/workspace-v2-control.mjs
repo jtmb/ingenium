@@ -18,7 +18,7 @@ function currentUser(request,selection){
  const identity=revalidateRequestIdentity(request);if(identity?.principal.type!=='user'||!identity.principal.session)return fail('WORKSPACE_V2_USER_IDENTITY');
  const w=runtimes.getAuthorizedWorkspaceV2(selection.workspaceId),r=runtimes.getWorkspaceRuntimeV2(selection.runtimeId),db=dbOf();
  if(!w||!r||w.status!=='authorized'||w.ownerUserId!==identity.principal.id||r.workspaceId!==w.id||r.organizationId!==w.organizationId||r.ownerUserId!==w.ownerUserId||r.securityEpoch!==w.securityEpoch
- ||!db.prepare("SELECT 1 FROM organization_memberships WHERE organization_id=? AND user_id=? AND status='active'").get(w.organizationId,w.ownerUserId))return fail('WORKSPACE_V2_SCOPE');
+ ||!db.prepare("SELECT 1 FROM organization_memberships m JOIN organizations organization ON organization.id=m.organization_id WHERE m.organization_id=? AND m.user_id=? AND m.status='active' AND organization.status='active'").get(w.organizationId,w.ownerUserId))return fail('WORKSPACE_V2_SCOPE');
  return {workspace:w,runtime:r,identityKey:JSON.stringify([identity.principal.id,identity.principal.session.id,identity.principal.session.security_epoch]),key:JSON.stringify([identity.principal.id,identity.principal.session.id,identity.principal.session.security_epoch,w,r])};
 }
 export async function provisionWorkspaceRuntimeFromRequestV2(request,selection){
