@@ -1,0 +1,29 @@
+{
+  "owner": "packaging-worker-chat8",
+  "task": "current-dashboard-generated-standalone-r1",
+  "at": "2026-10-31T04:51:18.149Z",
+  "kind": "unexecuted source proposal",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "existing authorized C-backed WSL filesystem",
+  "files": [
+    {
+      "path": "docs/workstreams/packaging/dashboard-standalone-plan-r1.md",
+      "bytes": 7497,
+      "sha256": "307b28f997fc3874f6c13dcdd04817fcfd779e08f0040eda25068aa1994544d0"
+    },
+    {
+      "path": "docs/workstreams/packaging/dashboard-standalone-audit-proposal.mjs",
+      "bytes": 6044,
+      "sha256": "aaf029bb259fd06f82bf84496239ce840030b48b77f8e7940b5de47b8cbc5b04"
+    }
+  ],
+  "testsRun": 0,
+  "buildsRun": 0,
+  "runtimeRuns": 0,
+  "dependencyCopies": 0,
+  "deletions": [],
+  "retained": "These three small source packet files are durable review inputs for Root; two older unaccepted harness drafts untouched.",
+  "remaining": "Root assembly, audit qualification, genuine standalone runtime, cleanup and all existing release gates",
+  "regeneration": "git show this packet commit:docs/workstreams/packaging/<file>",
+  "protected": "Canonical source/locks, runtime/models/golden132, unique failure witnesses and all prior cleanup refusals unchanged"
+}
