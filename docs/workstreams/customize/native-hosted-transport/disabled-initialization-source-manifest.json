@@ -1,0 +1,12 @@
+{
+  "sourceOnly": true,
+  "dataOnly": true,
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-disabled-initialization-plan.ts",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-disabled-initialization-plan.ts",
+      "preimageSha256": null,
+      "postimageSha256": "d59ea361932f011298327ac24c8e4abaf6b8e02f7cced3c46c4248a1061c919a"
+    }
+  ]
+}
