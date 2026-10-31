@@ -1,0 +1,24 @@
+{
+  "kind": "source-proposal-not-applied",
+  "files": {
+    "migration-rebuild.mjs": "packages/ingenium-core/data/migrations/migration-rebuild.mjs",
+    "migration-136.mjs": "packages/ingenium-core/data/migrations/migration-136.mjs",
+    "migration-136.d.mts": "packages/ingenium-core/data/migrations/migration-136.d.mts",
+    "migration-137.mjs": "packages/ingenium-core/data/migrations/migration-137.mjs",
+    "migration-137.d.mts": "packages/ingenium-core/data/migrations/migration-137.d.mts",
+    "136_projectless_context.sql": "packages/ingenium-core/data/migrations/136_projectless_context.sql",
+    "137_workspace_execution.sql": "packages/ingenium-core/data/migrations/137_workspace_execution.sql",
+    "workspace-context-store.mjs": "packages/ingenium-core/lib/tools/workspace-context-store.mjs",
+    "workspace-context-store.d.mts": "packages/ingenium-core/lib/tools/workspace-context-store.d.mts",
+    "projectless-context.mjs": "services/ingenium-api/lib/projects-v2/projectless-context.mjs",
+    "projectless-context.d.mts": "services/ingenium-api/lib/projects-v2/projectless-context.d.mts",
+    "veyra-projects-workspace-provision-v2.test.ts": "services/ingenium-api/tests/veyra-projects-workspace-provision-v2.test.ts"
+  },
+  "patch": "canonical.patch",
+  "packetOnlyTests": [
+    "context-fixture.mjs",
+    "migration-rebuild.test.mjs",
+    "workspace-context.test.mjs"
+  ],
+  "assetRequirement": "Ship migration mjs/SQL as exact unbundled data assets at these paths; do not relocate import.meta.url recipe inputs silently."
+}
