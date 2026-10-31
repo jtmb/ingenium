@@ -3,11 +3,13 @@ import type {VoiceKind,VoiceOwner,VoiceScope} from './voice-operation-ledger.js'
 /** Additive family. Legacy VoiceKind/VoiceOriginal/VoiceControl stay EXACT. */
 export type VoiceGpuKind='voice-gpu-supervisor'|'voice-gpu-speech-stt'|'voice-gpu-speech-tts';
 export type SpeechParentKind=Extract<VoiceKind,'voice-cpu-supervisor'>|'voice-gpu-supervisor';
-export interface VoiceGpuDescriptor {
- version:1;resourceKind:'voice-gpu-v1';backend:'directml'|'rocm'|'cuda';platform:'win32'|'linux';
+/** platform is a deployment DATA discriminator, not process.platform or a
+ * device/WSL/Windows-host authority. linux-wsl names the pinned DirectML path. */
+export type VoiceGpuDescriptor = {
+ version:1;resourceKind:'voice-gpu-v1';
  providerDigest:string;deviceIdentityDigest:string;deviceBootId:string;profileDigest:string;
  modelSetDigest:string;measurementDigest:string;admissionId:string;
-}
+} & ({backend:'directml';platform:'win32'|'linux-wsl'}|{backend:'rocm'|'cuda';platform:'linux'});
 export interface VoiceGpuControlOriginal {
  version:1;kind:'voice-gpu-supervisor';operationId:string;requestId:string;scope:VoiceScope;
  descriptor:VoiceGpuDescriptor;deadlineAt:number;

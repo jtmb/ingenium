@@ -19,7 +19,7 @@ export function gpuDataDigest(v:unknown):string {return createHash('sha256').upd
 export function validateGpuDescriptorData(v:unknown):VoiceGpuDescriptor {
  exact(v,['version','resourceKind','backend','platform','providerDigest','deviceIdentityDigest','deviceBootId','profileDigest','modelSetDigest','measurementDigest','admissionId']);
  if(v.version!==1||v.resourceKind!=='voice-gpu-v1'||!['directml','rocm','cuda'].includes(String(v.backend))||
-  (v.backend==='directml'?v.platform!=='win32':v.platform!=='linux')||!uuid(v.deviceBootId)||!uuid(v.admissionId)||
+  (v.backend==='directml'?!['win32','linux-wsl'].includes(String(v.platform)):v.platform!=='linux')||!uuid(v.deviceBootId)||!uuid(v.admissionId)||
   ['providerDigest','deviceIdentityDigest','profileDigest','modelSetDigest','measurementDigest'].some(k=>!hash(v[k])))return deny('VOICE_GPU_DESCRIPTOR_DATA_INVALID');
  return Object.freeze({...v}) as unknown as VoiceGpuDescriptor;
 }

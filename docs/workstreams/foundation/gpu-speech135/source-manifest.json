@@ -19,17 +19,20 @@
     "services/ingenium-api/lib/voice-v2/production-system.ts": "c14e992ce2fec582696c924721ad5e94be54f67279c88ccc7b70e50155b69cac",
     "services/ingenium-api/lib/voice-v2/request-context.ts": "da18cfa2aa918f761027d14d21ed89f5d79a7360945bee74371fbc1cc130c48e",
     "docs/workstreams/voice/gpu-production/README.md": "b2d94e5991c21a892b0f0d8548347831717e17e018ccb543d1110acf4701c8bf",
-    "docs/workstreams/voice/gpu-production/gpu-budget.d.mts": "2ca9ee10ec3ffdc518fb2ff72d05f60eb3525070a3b0b1af0b90878ea7907eba"
+    "docs/workstreams/voice/gpu-production/gpu-budget.d.mts": "2ca9ee10ec3ffdc518fb2ff72d05f60eb3525070a3b0b1af0b90878ea7907eba",
+    "packages/veyra-voice/speech-worker/README.md": "f38d3e78e2c5705874b5ae291e7d6843554b6e61e4e850e0157a0757810ed2bc",
+    "packages/veyra-voice/speech-worker/requirements-directml.in": "ce13cc27ee084fa798667eb0e74c9c78eade118fbded65068e8a5fbb33a3bd3a",
+    "packages/veyra-voice/speech-worker/requirements-directml.lock": "ac4c6395f487b476058bd228bb51aeb5b398dd78c59425b14027964ca24bb14c"
   },
   "allocationManifestSha256": "cc67b68290ebb0c255433de74e3d376a1a2c0c18b269c2f635afaa55a13f823e",
   "ownedSources": {
     "135_voice_gpu_controls.sql": {
-      "bytes": 20915,
-      "sha256": "7e7c8b983700bae08104efdce788fa386ec3b4033c37980e01779c14ef8102cd"
+      "bytes": 20932,
+      "sha256": "3b196567f815660800a113aca19345e88835c726b5790597a4586451799b60bf"
     },
     "README.md": {
-      "bytes": 8817,
-      "sha256": "e107b7b65acb16887d983f877f7fabd023215e095af806fb43053b8c3b30dbb4"
+      "bytes": 9834,
+      "sha256": "663e581565910bb4a2d8bc6d59ca3c618dc1dffaf8fc45e06666462e544b5467"
     },
     "cpu-cross-backend-refusal.ts": {
       "bytes": 1624,
@@ -40,28 +43,28 @@
       "sha256": "cd413ae1c13256af0a00174f80f2d6ba583f3d1aa369b69fad0b06132fbd8862"
     },
     "gpu135.authored.test.mjs": {
-      "bytes": 15429,
-      "sha256": "0f03f6fe9a3f148c48df7742fa1ae9eaf0cf17cf73e602829a9cb2c80670937c"
+      "bytes": 16641,
+      "sha256": "f487cefeb188b0ace1670e11386320f962b7cbada3c307bb2e9b6df497ee012c"
     },
     "guarded-splices.md": {
-      "bytes": 8493,
-      "sha256": "0edab4d938bdc962883a20aa2029ab16299ed07f676a3e829f247013a5d5f5bd"
+      "bytes": 9031,
+      "sha256": "73e5a4802cf3053d692685b55162c5887ee050922d346b6a8339e98c3ea9e49e"
     },
     "startup-restore135.ts": {
       "bytes": 9268,
       "sha256": "0f93383a4f9baa2079f16bc0d132ba4f79789b72234b23811af939781ac10af3"
     },
     "typed-controls.AUTHORED.ts": {
-      "bytes": 1340,
-      "sha256": "d9e65eb599ca996c398f062c67a648e6383954ed338fd16fda380dc9b8cdfca3"
+      "bytes": 1815,
+      "sha256": "8fcf851a37da4c693d763451d4c57d5df686dd73d3ae197c526c1a599d67d1fd"
     },
     "voice-gpu-closed.ts": {
-      "bytes": 4999,
-      "sha256": "bd1f2e19bf6a21da6a83d6c2dde7980015aba2a4653cf87b0930c0b9e48b69c7"
+      "bytes": 5030,
+      "sha256": "e66bcb27646be5750ce49cc8e822642b0fa148dee4080cee00b2a4e66496c92b"
     },
     "voice-gpu-contract.ts": {
-      "bytes": 2276,
-      "sha256": "6e89c8044fe34dfcefe338d3dd42f2122f35c53d385c9569b1c19bc7686fe06d"
+      "bytes": 2469,
+      "sha256": "2f9826760c48b5a06c62a7f355e439ea3095e3955095fa001b3f8307994b453e"
     }
   },
   "controls": "AUTHORED_UNRUN",
@@ -78,5 +81,16 @@
     "removedPaths": [],
     "removedBytes": 0,
     "retentionConsumer": "Root source review, exact schema/storage/contract decision and canonical integration; no disposable generated artifacts"
+  },
+  "directmlCorrection": {
+    "baseCommit": "95080266b1fcbf04c777c14b7a95106f91e841c6",
+    "field": "existing platform deployment DATA tag; no extra descriptor fields",
+    "directmlPlatforms": [
+      "linux-wsl",
+      "win32"
+    ],
+    "linuxWslBasis": "pinned cp312 Linuxx86_64 WSL /dev/dxg torch-directml0.2.5.dev240914 worker; source compatibility only",
+    "authority": "none; actual enrolled platform/adapter/process/driver originals still required; all GPU methods closed",
+    "controls": "AUTHORED_UNRUN"
   }
 }

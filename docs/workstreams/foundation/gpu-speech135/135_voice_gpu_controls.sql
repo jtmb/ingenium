@@ -93,7 +93,7 @@ WHEN NEW.phase<>'reserved' OR NEW.revision<>0 OR NEW.fenced<>0 OR NEW.resource_r
  OR json_extract(NEW.descriptor_json,'$.resourceKind') IS NOT 'voice-gpu-v1'
  OR json_type(NEW.descriptor_json,'$.platform') IS NOT 'text'
  OR json_type(NEW.descriptor_json,'$.backend') IS NOT 'text'
- OR NOT ((NEW.backend='directml' AND json_extract(NEW.descriptor_json,'$.platform')='win32') OR
+ OR NOT ((NEW.backend='directml' AND json_extract(NEW.descriptor_json,'$.platform') IN ('win32','linux-wsl')) OR
  (NEW.backend IN ('rocm','cuda') AND json_extract(NEW.descriptor_json,'$.platform')='linux'))
  OR (SELECT count(*) FROM json_each(NEW.descriptor_json))<>11
  OR EXISTS(SELECT 1 FROM json_each(NEW.descriptor_json) WHERE key NOT IN ('version','resourceKind','backend','platform','providerDigest','deviceIdentityDigest','deviceBootId','profileDigest','modelSetDigest','measurementDigest','admissionId'))

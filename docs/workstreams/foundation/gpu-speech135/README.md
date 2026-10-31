@@ -32,6 +32,20 @@ Actual future platform originals alone may supply those facts after Root
 qualification; operator VRAM settings, kernel probes, profile-shaped DTOs,
 health and serialized CPU proofs cannot mint them.
 
+DirectML correction: existing `platform` is a deployment DATA discriminator.
+`directml/linux-wsl` represents the pinned Python3.12 Linux x86_64 WSL pipeline
+with `/dev/dxg` and `torch-directml==0.2.5.dev240914`; `directml/win32` represents
+the Windows DirectML category, not a qualified Windows wrapper/wheel/runtime.
+Plain `linux` does not establish WSL and is not accepted for DirectML. No new
+descriptor fields are added. Types, DATA validator and SQL agree on these
+labels. Merely supplying `linux-wsl`, seeing a device path, or reading Linux
+process.platform cannot establish WSL, Windows-host adapter or physical device
+authority. Actual enrolled platform/adapter/process/driver originals remain
+mandatory. ROCm/CUDA Linux labels remain source-only, unimplemented categories;
+none of these labels activates a provider. Matching shape/SQL/negative-authority
+controls are AUTHORED UNRUN. Exact speech-worker README/input/lock read pins are
+included in the manifest; no dependency, device or runtime was invoked.
+
 There is ONE cross-backend original voice-control slot for the actual fixed
 installation voice instance. SQL guards and the negative CPU gate reject an
 unretired/unknown control OR child from the other backend, including after

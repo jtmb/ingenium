@@ -15,4 +15,10 @@ const forbiddenOriginal:VoiceOriginal=gpuControl;
 const forbiddenControl:VoiceControl={...oldCpuControl,backend:descriptor.backend};
 const cpuParent:SpeechParentKind='voice-cpu-supervisor';
 const gpuParent:SpeechParentKind='voice-gpu-supervisor';
+declare const common:Omit<VoiceGpuDescriptor,'backend'|'platform'>;
+const wslDirectml:VoiceGpuDescriptor={...common,backend:'directml',platform:'linux-wsl'};
+const windowsDirectml:VoiceGpuDescriptor={...common,backend:'directml',platform:'win32'};
+// @ts-expect-error plain Linux does not discriminate the pinned WSL deployment.
+const bareLinuxDirectml:VoiceGpuDescriptor={...common,backend:'directml',platform:'linux'};
+void [wslDirectml,windowsDirectml,bareLinuxDirectml];
 void [forbiddenCpu,forbiddenGpu,forbiddenOriginal,forbiddenControl,cpuParent,gpuParent];

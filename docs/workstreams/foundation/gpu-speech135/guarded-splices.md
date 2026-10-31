@@ -96,6 +96,13 @@ ONE actual voice slot and live kernel headroom including measured cold/hot/
 retirement peaks and reserve. Keep desktop/LLM allocations running; no global
 exclusive-VRAM assumption or invented subtracted budget. Default GPU path stays
 unavailable until this concrete physical producer exists and is qualified.
+The existing platform DATA field discriminates DirectML `linux-wsl` (the pinned
+cp312 Linux WSL worker) from `win32` (Windows DirectML category, wrapper still
+unqualified). It is not Node process.platform and no new field is required.
+WSL/Linux process custody alone cannot prove Windows-host adapter/driver
+allocation cleanup. Root's actual producer must enroll both boundaries and
+their genuine private originals; neither a linux-wsl label nor /dev/dxg path
+is authority. Plain Linux DATA cannot substitute for that deployment binding.
 After allocation starts, CPU backup requires genuine cancellation, pending
 request join, inherited EOF, process-tree AND driver-allocation cleanup;
 unknown retains original+slot. Then fence the old call and create a NEW actual
