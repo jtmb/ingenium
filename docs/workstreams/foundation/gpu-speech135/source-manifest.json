@@ -1,0 +1,82 @@
+{
+  "kind": "Foundation5-GPU135-source-only-v1",
+  "owner": "01a18935-0bbb-7142-80a6-39b2b4e0407b",
+  "branch": "codex/veyra-parallel-rust-api",
+  "baseCommit": "dabf3ad7c43e8989fc3132e8ee17efdc6119b1fb",
+  "modelEffort": "existing gpt-6.1-sol/medium per coordinator; unchanged by worker",
+  "scope": "135 only; 136/137 exact definitions and GPU original source binding remain Root merge dependencies",
+  "canonicalReadPins": {
+    "packages/ingenium-core/lib/tools/voice-operation-ledger.ts": "e00817b9c3a7a0c5c9caefa7f9bad2a50ce7d67a4c77f1c0b0e3a4d51eec0067",
+    "packages/ingenium-core/lib/tools/voice-operation-contract.ts": "708e160d563a0ee8a29187c94a6a1051588b2a7ee1c82a6d161c983e9cd51cfb",
+    "packages/ingenium-core/lib/tools/voice-operation-cpu.ts": "a611ca1b948da267c7980514eafc155c32c282997b07a372e2214c9aab610623",
+    "packages/ingenium-core/lib/tools/voice-operation-owner.ts": "4647dbdbe04cbbff0b7a494732626567658378d33e46eb4d31f2de19b3d4cf9e",
+    "packages/ingenium-core/lib/tools/voice-assistant-source.ts": "1bf6730300938ad3bae9bb16b9d87b3c661e457a60f280b07b9d288ed88e5fc6",
+    "packages/ingenium-core/lib/db.ts": "45c69beab1af986b856a9050b47b0123b2e1e7dd39da8bca5d9e2c20113f7b64",
+    "packages/ingenium-core/data/migrations/128_voice_operations.sql": "e9056961e84020a797165babb189e8ba1469a1f630561ae793b2884c395be55e",
+    "packages/ingenium-core/data/migrations/134_voice_assistant_sources.sql": "e007bf725dc4dd6dc444c61bd3937094e12554ef8e1b07e85277363b51951efa",
+    "services/ingenium-api/lib/voice-v2/managed-profile.mjs": "17ba2346a41b63e4e21955af2cccad24148dca627f7bf89d8115bb551814746e",
+    "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs": "a06e6934b559d472f295c8605ce61f038061d2c8cf5ee5e812118ea74737c60a",
+    "services/ingenium-api/lib/voice-v2/production-system.ts": "c14e992ce2fec582696c924721ad5e94be54f67279c88ccc7b70e50155b69cac",
+    "services/ingenium-api/lib/voice-v2/request-context.ts": "da18cfa2aa918f761027d14d21ed89f5d79a7360945bee74371fbc1cc130c48e",
+    "docs/workstreams/voice/gpu-production/README.md": "b2d94e5991c21a892b0f0d8548347831717e17e018ccb543d1110acf4701c8bf",
+    "docs/workstreams/voice/gpu-production/gpu-budget.d.mts": "2ca9ee10ec3ffdc518fb2ff72d05f60eb3525070a3b0b1af0b90878ea7907eba"
+  },
+  "allocationManifestSha256": "cc67b68290ebb0c255433de74e3d376a1a2c0c18b269c2f635afaa55a13f823e",
+  "ownedSources": {
+    "135_voice_gpu_controls.sql": {
+      "bytes": 20915,
+      "sha256": "7e7c8b983700bae08104efdce788fa386ec3b4033c37980e01779c14ef8102cd"
+    },
+    "README.md": {
+      "bytes": 8817,
+      "sha256": "e107b7b65acb16887d983f877f7fabd023215e095af806fb43053b8c3b30dbb4"
+    },
+    "cpu-cross-backend-refusal.ts": {
+      "bytes": 1624,
+      "sha256": "79987281f1d23faadcedeae4c459714df199078e89ec9ce5fb50be0942f3df60"
+    },
+    "gpu135-bootstrap.authored.mjs": {
+      "bytes": 7060,
+      "sha256": "cd413ae1c13256af0a00174f80f2d6ba583f3d1aa369b69fad0b06132fbd8862"
+    },
+    "gpu135.authored.test.mjs": {
+      "bytes": 15429,
+      "sha256": "0f03f6fe9a3f148c48df7742fa1ae9eaf0cf17cf73e602829a9cb2c80670937c"
+    },
+    "guarded-splices.md": {
+      "bytes": 8493,
+      "sha256": "0edab4d938bdc962883a20aa2029ab16299ed07f676a3e829f247013a5d5f5bd"
+    },
+    "startup-restore135.ts": {
+      "bytes": 9268,
+      "sha256": "0f93383a4f9baa2079f16bc0d132ba4f79789b72234b23811af939781ac10af3"
+    },
+    "typed-controls.AUTHORED.ts": {
+      "bytes": 1340,
+      "sha256": "d9e65eb599ca996c398f062c67a648e6383954ed338fd16fda380dc9b8cdfca3"
+    },
+    "voice-gpu-closed.ts": {
+      "bytes": 4999,
+      "sha256": "bd1f2e19bf6a21da6a83d6c2dde7980015aba2a4653cf87b0930c0b9e48b69c7"
+    },
+    "voice-gpu-contract.ts": {
+      "bytes": 2276,
+      "sha256": "6e89c8044fe34dfcefe338d3dd42f2122f35c53d385c9569b1c19bc7686fe06d"
+    }
+  },
+  "controls": "AUTHORED_UNRUN",
+  "workerTestsRun": false,
+  "workerTypeChecksRun": false,
+  "workerBuildsRun": false,
+  "sqlApplied": false,
+  "runtimeActions": false,
+  "productionGpuAvailable": false,
+  "gpuFactoryImplemented": false,
+  "positivePrivateAuthorityImplemented": false,
+  "additionalSourceEvidenceCapBytes": 131072,
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retentionConsumer": "Root source review, exact schema/storage/contract decision and canonical integration; no disposable generated artifacts"
+  }
+}
