@@ -1,0 +1,80 @@
+{
+  "owner": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "scope": "Docs-only exact declaration compiler-root/package allowlist proposal",
+  "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+  "before": "47cc63df0d161f8f19186547d341bcf60edc093de37750e8e07c3f40dd76af7d",
+  "after": "b887b0e4428e0b200b1c0a5e750c8b5f39f516fda0578190610d36e01fb0623a",
+  "addedRoots": [
+    "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+    "services/ingenium-api/lib/dot-v2/request-session.ts"
+  ],
+  "addedTypePackage": "express-serve-static-core",
+  "typePackageResolution": {
+    "moduleSpecifier": "express-serve-static-core",
+    "resolved": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@types/express-serve-static-core/index.d.ts",
+    "packageName": "@types/express-serve-static-core",
+    "version": "4.19.8",
+    "packageManifest": {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/@types/express-serve-static-core/package.json",
+      "bytes": 1622,
+      "sha256": "345a8926decb0a621b439fb5ef52c67084a847ab292a3326d11b013c1a077d3e"
+    },
+    "lock": {
+      "version": "4.19.8",
+      "resolved": "https://registry.npmjs.org/@types/express-serve-static-core/-/express-serve-static-core-4.19.8.tgz",
+      "integrity": "sha512-02S5fmqeoKzVZCHPZid4b8JH2eM5HzQLZWN2FohQEy/0eXTq8VXZfSN6Pcr3F6N9R/vNrj7cpgbhjie6m/1tCA==",
+      "dev": true,
+      "license": "MIT",
+      "dependencies": {
+        "@types/node": "*",
+        "@types/qs": "*",
+        "@types/range-parser": "*",
+        "@types/send": "*"
+      }
+    }
+  },
+  "patch": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/../veyra-phase-1/parallel/packaging/docs/workstreams/packaging/api-two-declaration-roots.patch",
+    "bytes": 1997,
+    "sha256": "e3535394e9d51ea8e68bfd4c069de81d9818cd20f447691061eeab3d090acca5"
+  },
+  "fixtures": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/../veyra-phase-1/parallel/packaging/docs/workstreams/packaging/declaration-root-fixtures/installed-dot-http.d.ts",
+      "bytes": 1263,
+      "sha256": "5a3d2ed782c6caedd9433d3044c0195043bc82eeacb762e7f7cff5a28efd6c05"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/../veyra-phase-1/parallel/packaging/docs/workstreams/packaging/declaration-root-fixtures/request-session.d.ts",
+      "bytes": 1721,
+      "sha256": "0c315e7430fe00dd98df92574f843f6f59cad99613c397b6e3eb4e1962688332"
+    }
+  ],
+  "originalCompilerBadReferences": 5,
+  "expectedReplacement": "../../veyra-packages/veyra-automation/contracts.js",
+  "existingMappedDeclaration": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/veyra-packages/veyra-automation/contracts.d.ts",
+    "bytes": 2617,
+    "sha256": "864f1ccff6bc79086741ec6040706119db3168fca466ae94179f573d9239742b"
+  },
+  "tests": {
+    "actualSyntaxRewriteAndNormalResolver": 3,
+    "canonicalCurrentAdapter": 17,
+    "gitApplyCheck": true
+  },
+  "initialTwoRootOnlyFailure": {
+    "post": "386bcbdbc313ed31219339c3df037eeb459224ea2b43bb1cdb9fe58467e8e8f8",
+    "error": "Undeclared declaration package: express-serve-static-core",
+    "disposition": "Root explicitly authorized exactly this existing type-only package; no install or type relaxation"
+  },
+  "canonicalNormalization": {
+    "extended": "b887b0e4428e0b200b1c0a5e750c8b5f39f516fda0578190610d36e01fb0623a",
+    "to": "47cc63df0d161f8f19186547d341bcf60edc093de37750e8e07c3f40dd76af7d",
+    "thenOriginal": "b360aa94aeea2ad0b743ba1d7bee7b7369ab4867131a881c0f2781d33836c3e5",
+    "onlyInMemory": true
+  },
+  "sharedWrites": false,
+  "compilerOrRuntimeRun": false,
+  "artifactMutations": false,
+  "remaining": "Root applies helper, actualcopier/rebuild and ordinary strict NodeNext declaration consumer rerun; fiveoriginal diagnostics/logs remain preserved until independently closed"
+}
