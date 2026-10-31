@@ -1,0 +1,73 @@
+{
+  "owner": "packaging-worker-chat8",
+  "at": "2026-10-31T05:15:22.435Z",
+  "kind": "read-only source and byte diagnosis, not test/runtime acceptance",
+  "originalFailurePreserved": "coordination/integration/current-dashboard-standalone-closure-r1.json",
+  "buildDir": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-dashboard/tests/artifacts/current-dashboard-build-view-r1/services/ingenium-dashboard",
+  "standaloneDir": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/runtime/current-dashboard-standalone-r1",
+  "nextVersion": "16.4.2",
+  "primaryInstalledSources": [
+    {
+      "path": "node_modules/next/dist/build/utils.js",
+      "sha256": "5fd190db661ac661673b75839156a52657b9ae64b790ad253ee8197a209683c2"
+    },
+    {
+      "path": "node_modules/next/dist/build/index.js",
+      "sha256": "1e04dddaf2e2d356173ef572ad813d675f4d9f2ef6edc6ded76c0462484b5dda"
+    },
+    {
+      "path": "node_modules/next/dist/build/collect-build-traces.js",
+      "sha256": "bb009f03e0137f8aa3c27066b977b905003f686bad309220d78058d77ff9e5ae"
+    },
+    {
+      "path": "node_modules/next/dist/build/nft.js",
+      "sha256": "eec5a6c331cd9323ec49e856e4d1cbdb1d3e42a2b5716536df0da8db987fa60f"
+    },
+    {
+      "path": "node_modules/next/package.json",
+      "sha256": "e84ada0a68191fed192392bfb8ee35ad4ed8e7439f645a40dd48cf139588ddc5"
+    }
+  ],
+  "traceScan": {
+    "manifests": 54,
+    "references": 11613,
+    "uniqueSourcePaths": 1547,
+    "additionalRoots": 0,
+    "symlinkEntries": 0,
+    "sourceMissing": 0,
+    "destinationMissing": 1,
+    "byteMismatches": 0,
+    "manifestsAggregateSha256": "29072703ffaca0c3e092e95395042cfee1803ba30d4601a6a8e52db237564e79",
+    "mappedFilesAggregateSha256": "32fe2f39762edc0fcf93dc40b61bbe5a0d9934aa560bdb5ca390a4be4a8fe6e1",
+    "exceptions": [
+      {
+        "path": "node_modules/next/dist/compiled/next-server/server.runtime.prod.js",
+        "sourceExists": true,
+        "destinationExists": false,
+        "traces": [
+          "next-minimal-server.js.nft.json"
+        ],
+        "sourceBytes": 224679,
+        "sourceSha256": "0f86584a8bac2303e5cd1d024ed61311fc35ff3b198fa1c2af414ab28080b0ff"
+      }
+    ]
+  },
+  "requiredFiles": {
+    "entries": 18,
+    "uniquePaths": 18,
+    "byteMismatches": 0,
+    "metadataSha256": "19ad88827bc75cca1f7fbb32da761d93e621f6ab4264829ebd9253c02d0e3ef1",
+    "aggregateSha256": "98e02f99feca3f368224d2dd1ec39003c28b6c84070f4cdd8d3342ff277cbecd"
+  },
+  "inputAndComparedFileHashesStableAtEnd": true,
+  "classification": "One absent file belongs only to independently generated minimal-server trace, which copyTracedFiles does not consume for standalone. No source absence, byte transform or proven consumed-trace omission found.",
+  "helperChanged": false,
+  "checksWaived": false,
+  "tests": 0,
+  "moduleEvaluations": 0,
+  "runtimeRuns": 0,
+  "copies": 0,
+  "deletions": [],
+  "runtimeAccepted": false,
+  "remaining": "Root review and any authorized narrowly scoped helper revision, ordinary generated standalone runtime/dynamic resolution/HTTP/static checks and all full-release gates"
+}
