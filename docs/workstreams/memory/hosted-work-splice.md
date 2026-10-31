@@ -20,9 +20,16 @@ engine-to-Context mapping or canChange/canForget. No synthetic adapter supplies
 these. New component stays unavailable until Root installs BOTH this route and
 the original expected-binding guards below. No positive proof callbacks exist.
 
-Proposed GET /api/v1/memory/lifecycle/work-binding accepts exactly:
-projectId, workspaceId, runtimeId, engineSessionId. All must be actual nonempty
-IDs; projectless/drafts/compatibility/global-project fallback remain closed.
+Proposed GET /api/v1/memory/lifecycle/work-binding requires exactly workspaceId,
+runtimeId, engineSessionId, optionally expectedProjectId (a known actual Project
+UUID for narrowing only). Initial lookup does NOT require a client projectId:
+current RuntimeContext provides projectName but no Project UUID. Do not send a
+name, default project or projectless flag. Expected actorUserId/organizationId
+stay client comparison metadata, never query grants. Server derives the real
+non-null Project ID from the freshly authorized owned workspace. Absence of a
+client Project ID is not projectless authority. Null server workspace.projectId,
+drafts and compatibility remain unavailable. A known expectedProjectId must
+equal the derived Project ID; it cannot authorize or substitute for the lookup.
 Response {data:{schemaVersion:1,available:true,actorUserId,organizationId,
 projectId,workspaceId,runtimeId,engineSessionId,contextConversationId,scopeHash,
 bindingHash,bindingEpoch,canChange,canForget}}. All identity fields are strings;
@@ -32,8 +39,15 @@ no authority: every later route revalidates its real original owners.
 
 Root route algorithm, under existing authenticated/limited route composition:
 
-1. Validate exact selector keys; require a genuine current user principal,
-   never a request-body actor, injected principal or Voice/agent permission.
+1. Validate exact workspace/runtime/engine and optional expectedProjectId keys;
+   require a genuine current user principal, never a request-body actor, injected
+   principal or Voice/agent permission. Freshly getAuthorizedWorkspace(workspaceId)
+   through the existing runtimes owner: actual status authorized, owner matches
+   principal, actual org membership current. Derive projectId ONLY from this
+   original workspace. Null => projectless unavailable; optional known expected
+   UUID mismatch => refusal. Do not resolve it from projectName/organizationName,
+   labels, a global Project or a raw scope DTO. Build selected={projectId:the
+   derived UUID,workspaceId:the original id,runtimeId:the requested runtime}.
 2. Reuse withManagedRequestPlacement, resolveRequestExecution(request,selected),
    resolveRequestChatBinding(request,execution,engineSessionId,'active').
    The latter returns the genuine contextConversationId; do NOT assume equality.
@@ -53,7 +67,8 @@ Root route algorithm, under existing authenticated/limited route composition:
    session.resolveScope('write-policy'/'forget') is WRONG: current
    authorizeMemoryRequestOperation intentionally refuses mutation permissions
    on safe methods. Do not bypass unsafe-method/CSRF checks for actual writes.
-5. Revalidate original identity, execution, read scope and exact reverse mapping
+5. Revalidate original workspace/project identity, ownership/security epoch,
+   request identity, execution, read scope and exact reverse mapping
    immediately before returning; changed original/permission facts refuse.
    Cache-Control:no-store. No transcript/DB mutation or engine launch.
 
@@ -84,15 +99,23 @@ calling this complete; do not erase metadata merely because receipt is absent.
 
 ## Minimal Work mount
 
-Inside Root's actual BoundWorkRuntime, after genuine selected Project ID,
-authenticated actor/org, confirmed workspace/runtime and successfully created
-engine session are present, mount HostedWorkMemory with that selector. Never
-use project display name, DEFAULT_PROJECT, a draft ID, Context ID as engine ID,
-or a guessed permission. Null selection renders unavailable. Root may place it
+Inside Root's actual BoundWorkRuntime, after authenticated actor/org IDs,
+confirmed workspaceId/runtimeId and successfully created engine session are
+present, mount HostedWorkMemory with those five comparison/selection fields.
+Current RuntimeContext.projectName and RuntimeWorkspaceOption.projectName are
+display values, not UUIDs. No projectRefId prop is required on default /work.
+An optional genuinely known expectedProjectId can narrow the server lookup.
+The acquired binding carries projectId for all subsequent EXISTING lifecycle
+calls and the journal. Refresh work-binding also narrows by that acquired UUID;
+a changed Project cannot be silently adopted. Never use DEFAULT_PROJECT, a draft
+ID, Context ID as engine ID, or guessed permission. Null selection is unavailable.
+Root may place it
 in the existing memory control/panel slot or in a small Memory details panel;
 do not mount it simultaneously under two independent controller owners.
 
-Selection key includes actor/org/project/workspace/runtime/engine. New selection
+Initial selection key includes actor/org/workspace/runtime/engine and optional
+expected Project; acquired controller identity also includes the real Project.
+New selection
 unmounts old resources, aborts reads, disposes controller and invalidates cursor
 results; captured original writes retain their own metadata for reconciliation.
 Strict Mode creates fresh controllers rather than reusing disposed owners.
@@ -140,7 +163,9 @@ At review, current Root SHA256s (recheck before splice; no automatic patch):
 - Dashboard WorkRuntime.tsx: 0deca18e9599d24b8e5493f448ff14122a45600d856b2e4ee1c8fe84dfdb4d0d
 - Dashboard src/lib/api.ts: c630f0415c2fc50e8b2b2bba10745ad57363a2cd78de058295a7da36ec3810bb
 
-Authored UNRUN tests cover draft/projectless refusal, distinct IDs, absent
+Authored UNRUN tests cover draft/compatibility/null-server-Project refusal,
+workspace-first lookup without UUID/name/default inference, optional expected
+Project narrowing and use of acquired UUID on later lifecycle calls, distinct IDs, absent
 route/permission, forged binding, revoked permission/epoch drift before send,
 CAS/header/CSRF delegation, lost write/reload/receipt without resend, actor/org/
 scope partition, metadata-only strict journal, quota/corruption/racing records,

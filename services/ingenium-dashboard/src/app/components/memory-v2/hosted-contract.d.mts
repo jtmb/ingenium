@@ -1,7 +1,7 @@
 import type { LearnedMemoryRow } from './LearnedMemoryList';
 import type { MemoryBinding, PendingMemoryChange, PolicyReceipt } from './controller.mjs';
-export interface HostedSelection { actorUserId:string; organizationId:string; projectId:string; workspaceId:string; runtimeId:string; engineSessionId:string }
-export interface HostedBinding extends HostedSelection { schemaVersion:1; available:true; contextConversationId:string; scopeHash:string; bindingHash:string; bindingEpoch:number; canChange:boolean; canForget:boolean }
+export interface HostedSelection { actorUserId:string; organizationId:string; workspaceId:string; runtimeId:string; engineSessionId:string; expectedProjectId?:string }
+export interface HostedBinding extends Omit<HostedSelection,'expectedProjectId'> { projectId:string; schemaVersion:1; available:true; contextConversationId:string; scopeHash:string; bindingHash:string; bindingEpoch:number; canChange:boolean; canForget:boolean }
 export interface InspectionWindow { candidateOffset:number; limit:number; scanned:number; returned:number; unavailableMemoryCount:number; deferredForSourceBudget:number; hasMore:boolean; nextCandidateOffset:number|null }
 export interface InspectionPage { items:LearnedMemoryRow[]; sourceWindow:InspectionWindow }
 export interface ManagementRecord { operationId:string; scopeHash:string; origin:MemoryBinding; action:'forget'|'reset'; memoryId?:string; expectedVersion?:number; confirmation?:string }

@@ -4,19 +4,27 @@ export const text = v => typeof v === 'string' && v.length > 0 && v.length <= 51
 export const integer = v => Number.isSafeInteger(v) && v >= 0;
 export const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join('|') === [...keys].sort().join('|');
 const hash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
-export const selectionFields = ['actorUserId','organizationId','projectId','workspaceId','runtimeId','engineSessionId'];
-const bindingFields = [...selectionFields,'contextConversationId','scopeHash','bindingHash','bindingEpoch'];
+export const selectionFields = ['actorUserId','organizationId','workspaceId','runtimeId','engineSessionId'];
+// Retain the existing durable comparison layout. Project ID is acquired from
+// the server-owned workspace, never from RuntimeContext.projectName.
+const bindingFields = ['actorUserId','organizationId','projectId','workspaceId','runtimeId','engineSessionId',
+  'contextConversationId','scopeHash','bindingHash','bindingEpoch'];
 export function hostedSelection(value) {
-  if (!exact(value, selectionFields) || selectionFields.some(k => !text(value[k]))) fail();
-  // null Project/session/workspace, draft and compatibility substitutions refuse.
-  return Object.freeze(Object.fromEntries(selectionFields.map(k => [k,value[k]])));
+  const keys=value&&Object.hasOwn(value,'expectedProjectId')?[...selectionFields,'expectedProjectId']:selectionFields;
+  if (!exact(value, keys) || selectionFields.some(k => !text(value[k]))
+    || value.runtimeId==='compatibility'
+    || (value.expectedProjectId!==undefined&&!text(value.expectedProjectId))) fail();
+  // Missing client Project ID is just a workspace lookup, not projectless scope.
+  return Object.freeze(Object.fromEntries([...selectionFields,
+    ...(value.expectedProjectId===undefined?[]:['expectedProjectId'])].map(k => [k,value[k]])));
 }
-export function sameSelection(a,b) { return selectionFields.every(k => a?.[k] === b?.[k]); }
+export function sameSelection(a,b) { return selectionFields.every(k => a?.[k] === b?.[k])
+  && (b?.expectedProjectId===undefined||a?.projectId===b.expectedProjectId); }
 export function hostedBinding(value, selected) {
   hostedSelection(selected);
   if (!exact(value, [...bindingFields,'schemaVersion','available','canChange','canForget'])
     || value.schemaVersion !== 1 || value.available !== true || !sameSelection(value,selected)
-    || !text(value.contextConversationId) || !hash(value.scopeHash) || !hash(value.bindingHash)
+    || !text(value.projectId) || !text(value.contextConversationId) || !hash(value.scopeHash) || !hash(value.bindingHash)
     || !integer(value.bindingEpoch) || typeof value.canChange !== 'boolean' || typeof value.canForget !== 'boolean') fail();
   return Object.freeze({ ...value });
 }

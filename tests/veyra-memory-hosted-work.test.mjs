@@ -6,8 +6,8 @@ import { hostedSelection,hostedBinding,controllerBinding,validateInspection,mana
 import { createHostedJournal } from '../services/ingenium-dashboard/src/app/components/memory-v2/hosted-journal.mjs';
 import { createHostedMemoryHttp } from '../services/ingenium-dashboard/src/app/components/memory-v2/hosted-http.mjs';
 import { createMemoryController } from '../services/ingenium-dashboard/src/app/components/memory-v2/controller.mjs';
-const selected=Object.freeze({actorUserId:'user-a',organizationId:'org-a',projectId:'project-a',workspaceId:'workspace-a',runtimeId:'runtime-a',engineSessionId:'engine-session-a'});
-const original=Object.freeze({...selected,schemaVersion:1,available:true,contextConversationId:'canonical-context-b',scopeHash:'a'.repeat(64),bindingHash:'b'.repeat(64),bindingEpoch:2,canChange:true,canForget:true});
+const selected=Object.freeze({actorUserId:'user-a',organizationId:'org-a',workspaceId:'workspace-a',runtimeId:'runtime-a',engineSessionId:'engine-session-a'});
+const original=Object.freeze({...selected,projectId:'project-a',schemaVersion:1,available:true,contextConversationId:'canonical-context-b',scopeHash:'a'.repeat(64),bindingHash:'b'.repeat(64),bindingEpoch:2,canChange:true,canForget:true});
 const policy={revision:0,enabled:true,generate:false,useMemory:true,externalContext:false},chat={revision:0,useMemory:true,contribute:false};
 const change=(b,id='memory-op-a')=>({identity:controllerBinding(b),operationId:id,change:{target:'chat',expectedRevision:0,values:{...chat,contribute:true}}});
 const management=(b,id='memory-forget-a')=>({scopeHash:b.scopeHash,origin:controllerBinding(b),operationId:id,action:'forget',memoryId:'memory-original-a',expectedVersion:4});
@@ -27,13 +27,38 @@ function transport(handler=()=>null) {
   };
   return {http:createHostedMemoryHttp({dashboardFetch,base:'/api/v1'}),calls};
 }
-test('draft/projectless/partial selectors refuse rather than adopting a default Project',()=>{
-  for(const input of [null,{}, {...selected,projectId:null},{...selected,engineSessionId:null},{...selected,workspaceId:''},{...selected,project:'global-default'}])assert.throws(()=>hostedSelection(input));
+test('draft/compatibility/partial/name selectors refuse rather than adopting a default Project',()=>{
+  for(const input of [null,{}, {...selected,projectId:null},{...selected,engineSessionId:null},{...selected,workspaceId:''},
+    {...selected,project:'global-default'},{...selected,projectName:'Displayed name'},{...selected,runtimeId:'compatibility'},{...selected,expectedProjectId:null}])assert.throws(()=>hostedSelection(input));
+});
+test('initial binding request uses actual workspace/runtime/engine without a client Project ID',async()=>{
+  assert.equal(Object.hasOwn(hostedSelection({...selected,expectedProjectId:undefined}),'expectedProjectId'),false);
+  const {http,calls}=transport();const b=await http.loadBinding(selected),url=calls[0].path;
+  assert.equal(url.searchParams.get('workspaceId'),selected.workspaceId);assert.equal(url.searchParams.get('runtimeId'),selected.runtimeId);
+  assert.equal(url.searchParams.get('engineSessionId'),selected.engineSessionId);
+  for(const key of ['projectId','projectName','project','projectless','expectedProjectId','actorUserId','organizationId'])assert.equal(url.searchParams.has(key),false);
+  assert.equal(b.projectId,original.projectId);
+});
+test('optional expected Project ID only narrows server-derived original, never provides authority',async()=>{
+  const {http,calls}=transport();const b=await http.loadBinding({...selected,expectedProjectId:original.projectId});
+  assert.equal(calls[0].path.searchParams.get('expectedProjectId'),original.projectId);assert.equal(b.projectId,original.projectId);
+  await assert.rejects(http.loadBinding({...selected,expectedProjectId:'other-project'}));
+});
+test('server-derived null Project remains unavailable even when client Project ID is absent',async()=>{
+  const {http,calls}=transport(path=>path.pathname.endsWith('/work-binding')?json({data:{...original,projectId:null}}):null);
+  await assert.rejects(http.loadBinding(selected));assert.equal(calls.length,1);
+});
+test('all later lifecycle requests use acquired real Project; refresh narrows the same original',async()=>{
+  const {http,calls}=transport();const b=await http.loadBinding(selected);await http.forBinding(b).controller.read(controllerBinding(b));
+  const refresh=calls.find((c,i)=>i>0&&c.path.pathname.endsWith('/work-binding'));
+  assert.equal(refresh.path.searchParams.get('expectedProjectId'),original.projectId);assert.equal(refresh.path.searchParams.has('projectId'),false);
+  const policyRead=calls.find(c=>c.path.pathname.endsWith('/policy'));
+  assert.equal(policyRead.path.searchParams.get('projectId'),original.projectId);assert.equal(policyRead.path.searchParams.has('expectedProjectId'),false);
 });
 test('server mapping keeps engine and canonical Context IDs distinct; missing grants refuse',()=>{
   const b=hostedBinding(original,selected);assert.equal(controllerBinding(b).chatId,selected.engineSessionId);
   assert.notEqual(b.engineSessionId,b.contextConversationId);
-  for(const patch of [{actorUserId:'other'},{organizationId:'other'},{canChange:undefined},{contextConversationId:null},{bindingEpoch:-1}])assert.throws(()=>hostedBinding({...original,...patch},selected));
+  for(const patch of [{actorUserId:'other'},{organizationId:'other'},{projectId:null},{canChange:undefined},{contextConversationId:null},{bindingEpoch:-1}])assert.throws(()=>hostedBinding({...original,...patch},selected));
 });
 test('missing binding route is unavailable and never falls back to policy/guessed Context',async()=>{
   const {http,calls}=transport(()=>json({error:{code:'NOT_FOUND'}},404));

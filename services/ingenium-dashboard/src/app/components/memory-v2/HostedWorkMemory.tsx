@@ -12,14 +12,15 @@ import type { ResetPreview } from './LearnedMemoryList';
 
 type Http = ReturnType<typeof createHostedMemoryHttp>;
 
-/** Root must supply a genuine selected Project ID, workspace/runtime and actual
- * created engine session. This prop is a selector, never a grant or Context ID. */
+/** Root supplies actual workspace/runtime/created engine session and expected
+ * actor/org. Server derives Project ID; an optional known UUID only narrows it.
+ * A project display name is never sent. This selector is never a grant. */
 export function HostedWorkMemory({ selected }: { selected: HostedSelection | null }) {
   let selection: HostedSelection | null = null;
-  try { if (selected) selection = hostedSelection(selected); } catch { /* fail closed for drafts/projectless */ }
+  try { if (selected) selection = hostedSelection(selected); } catch { /* fail closed for drafts/malformed selectors */ }
   const key = selection ? JSON.stringify(selection) : null;
   return key && selection ? <AcquireMemory key={key} selected={selection} />
-    : <p role="status">Memory controls need a confirmed project workspace and an existing chat.</p>;
+    : <p role="status">Memory controls need a confirmed workspace, runtime and existing chat.</p>;
 }
 
 function AcquireMemory({ selected }: { selected: HostedSelection }) {

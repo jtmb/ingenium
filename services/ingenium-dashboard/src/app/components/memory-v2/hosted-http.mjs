@@ -7,7 +7,9 @@ const error=(status,code)=>Object.assign(new Error('Hosted memory request unavai
 export function createHostedMemoryHttp({dashboardFetch,base}) {
   if(typeof dashboardFetch!=='function'||typeof base!=='string'||!base.startsWith('/')||base.startsWith('//')||/[?#\\]/.test(base))throw new TypeError('Canonical dashboard HTTP owner required');
   const root=base.replace(/\/$/,'')+'/memory/lifecycle', owned=new WeakSet();
-  const query=(selection,extra={})=>new URLSearchParams({projectId:selection.projectId,workspaceId:selection.workspaceId,runtimeId:selection.runtimeId,...extra});
+  const query=(selection,extra={})=>new URLSearchParams({workspaceId:selection.workspaceId,runtimeId:selection.runtimeId,
+    ...(typeof selection.projectId==='string'?{projectId:selection.projectId}:{}),
+    ...(typeof selection.expectedProjectId==='string'?{expectedProjectId:selection.expectedProjectId}:{}),...extra});
   async function request(path,selection,{method='GET',body,extra={},binding,signal}={}) {
     const headers={Accept:'application/json'};
     if(binding)Object.assign(headers,{
@@ -37,7 +39,8 @@ export function createHostedMemoryHttp({dashboardFetch,base}) {
   }
   function requireOwned(binding){if(!owned.has(binding))throw new Error('Binding was not acquired by this HTTP owner');}
   async function fresh(binding,permission='read',signal) {
-    requireOwned(binding);const selected=hostedSelection(Object.fromEntries(['actorUserId','organizationId','projectId','workspaceId','runtimeId','engineSessionId'].map(k=>[k,binding[k]])));
+    requireOwned(binding);const selected=hostedSelection({actorUserId:binding.actorUserId,organizationId:binding.organizationId,
+      workspaceId:binding.workspaceId,runtimeId:binding.runtimeId,engineSessionId:binding.engineSessionId,expectedProjectId:binding.projectId});
     const current=await loadBinding(selected,signal);
     if(!sameBinding(current,binding))throw error(409,'BINDING_CHANGED');
     if(permission==='change'&&!current.canChange||permission==='forget'&&!current.canForget)throw error(403,'FORBIDDEN');
