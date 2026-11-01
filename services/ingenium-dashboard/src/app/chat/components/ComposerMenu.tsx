@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ComposerAddButton } from "./ComposerPrimitives";
 
 export default function ComposerMenu({ onAttach, canAttach, children, onFocusNext }: {
   onAttach: () => void;
@@ -44,9 +45,7 @@ export default function ComposerMenu({ onAttach, canAttach, children, onFocusNex
     return () => { document.removeEventListener("pointerdown", outside); };
   }, [open]);
   return <>
-    <button ref={trigger} type="button" className="veyra-composer-plus-trigger" aria-label="Add to conversation" title="Add to conversation" aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)} onKeyDown={event => { if (open && event.key === "Escape") { event.preventDefault(); close(); } }}>
-      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 2v12M2 8h12" strokeLinecap="round"/></svg>
-    </button>
+    <ComposerAddButton ref={trigger} aria-label="Add to conversation" title="Add to conversation" aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)} onKeyDown={event => { if (open && event.key === "Escape") { event.preventDefault(); close(); } }} />
     {open && createPortal(<div ref={panel} id={id} role="dialog" aria-label="Add to conversation" className="veyra-chat-plus-panel" style={{ left: position.left, top: position.top, maxHeight: position.maxHeight }} onKeyDown={event => {
       // Child popovers consume Escape before it reaches this layer.
       if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); return; }

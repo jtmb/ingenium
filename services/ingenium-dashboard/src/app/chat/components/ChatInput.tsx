@@ -1,6 +1,7 @@
 "use client";
 
 import ComposerMenu from "./ComposerMenu";
+import { ComposerSurface, ComposerInput, ComposerSendButton } from "./ComposerPrimitives";
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
 
 export interface SendOptions {
@@ -281,7 +282,7 @@ export default function ChatInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!hasSelectableModel) return;
       handleSend();
@@ -447,12 +448,8 @@ export default function ChatInput({
       {attachmentSelectionError && <div role="alert"><p>{attachmentSelectionError}</p><button type="button" onClick={() => setAttachmentSelectionError(null)}>Dismiss attachment notice</button></div>}
 
       {/* Composer bar */}
-      <div
-        className={[
-          "max-w-3xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] shadow-sm transition-colors",
-          isDragOver ? "border-blue-400 ring-2 ring-blue-400/20" : "",
-        ].join(" ")}
-        data-testid="chat-composer-shell"
+      <ComposerSurface
+        className={isDragOver ? "border-blue-400 ring-2 ring-blue-400/20" : ""}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -500,11 +497,11 @@ export default function ChatInput({
                 strokeWidth="1.5"
                 aria-hidden="true"
               >
-                {home ? <path
+                <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   d="M9.96 3.54L5.45 8.05a2 2 0 102.83 2.83L12.79 6.37a4 4 0 10-5.66-5.66L2.62 5.22a6 6 0 108.49 8.49"
-                /> : <path d="M8 2v12M2 8h12" strokeLinecap="round" />}
+                />
               </svg>
               {home && <span>Attach</span>}
             </button>
@@ -522,7 +519,7 @@ export default function ChatInput({
           </div>
 
           {/* Textarea */}
-          <textarea
+          <ComposerInput
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -530,9 +527,7 @@ export default function ChatInput({
             placeholder={home ? "Ask anything…" : "Ask Veyra"}
             rows={1}
             disabled={isLoading || sending}
-            className="min-w-0 flex-1 resize-none bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none py-1 min-h-[24px] max-h-[200px] disabled:opacity-50"
             aria-label="Chat message input"
-            data-testid="chat-composer"
           />
 
           {!home && modelControl}
@@ -541,81 +536,9 @@ export default function ChatInput({
           </button>}
           {/* Send / Stop button */}
           <div className="veyra-send-controls">
-          {isLoading ? (
-            <button
-              type="button"
-              onClick={onStop}
-              className="rounded-lg bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] p-2 transition-colors hover:bg-[var(--color-surface-selected)] shrink-0"
-              aria-label="Stop generating"
-              title="Stop generating"
-              data-testid="chat-stop-btn"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="10" height="10" rx="1.5" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void handleSend()}
-              disabled={!hasText || !hasSelectableModel || sending || attachmentsBlocked}
-              className={[
-                "rounded-lg p-2 transition-colors shrink-0 flex items-center justify-center",
-                hasText && !sending
-                  ? "bg-blue-600 text-white hover:bg-blue-700"
-                  : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] cursor-not-allowed",
-              ].join(" ")}
-              aria-label="Send message"
-              title="Send message"
-              data-testid="chat-send-btn"
-            >
-              {sending ? (
-                <svg
-                  className="animate-spin"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <circle
-                    cx="8"
-                    cy="8"
-                    r="6"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeDasharray="28"
-                    strokeDashoffset="10"
-                    strokeLinecap="round"
-                    opacity="0.5"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M8 13V3M3 8l5-5 5 5"
-                  />
-                </svg>
-              )}
-              {home && <span>Send</span>}
-            </button>
-          )}
+          <ComposerSendButton mode={isLoading ? "stop" : "send"} pending={sending} hasContent={hasText} showLabel={home}
+            onClick={isLoading ? onStop : () => void handleSend()}
+            disabled={!isLoading && (!hasText || !hasSelectableModel || sending || attachmentsBlocked)} />
           {home && !isLoading && <details className="veyra-home-send-options">
             <summary aria-label="Send options">⌄</summary>
             <div>
@@ -627,7 +550,7 @@ export default function ChatInput({
           </details>}
           </div>
         </div>
-      </div>
+      </ComposerSurface>
 
       {showSuggestions && <div className="veyra-chat-suggestions max-w-3xl mx-auto mt-5 flex flex-col items-start gap-1">
         {["Draft release notes", "Summarize a document"].map((prompt, index) => <button key={prompt} type="button" disabled={isLoading || sending} onClick={() => { setValue(prompt); textareaRef.current?.focus(); }} className="veyra-chat-suggestion rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]">

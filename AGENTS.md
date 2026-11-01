@@ -246,3 +246,5 @@ the outer header and site sidebar. Feature pages may supply contextual panels,
 but must not render another application rail or rebrand the outer navigation.
 Use ModelEffortPicker for model/effort choices in conversational composers;
 keep catalogs, selection state and capabilities in their existing owners.
+
+Composer input, surface, attachment trigger and send/stop icons belong to ComposerPrimitives. Chat, Home and Work reuse these assets; keep draft, attachment and execution authority in their existing feature controllers. Do not fork their styles or copy SVGs into another composer.

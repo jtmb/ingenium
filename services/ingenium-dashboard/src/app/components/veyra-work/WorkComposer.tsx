@@ -3,6 +3,7 @@
 import { useRef, type ReactNode } from "react";
 import { canSendWork, type WorkDraft, type WorkModel } from "./work-state";
 import ModelEffortPicker, { effortLabel } from "../../chat/components/ModelEffortPicker";
+import { ComposerSurface, ComposerInput, ComposerAddButton, ComposerSendButton } from "../../chat/components/ComposerPrimitives";
 export type { WorkModel } from "./work-state";
 
 export default function WorkComposer({ draft, onChange, onSend, onStop, ready, pending, streaming,
@@ -19,11 +20,12 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
   const selectionAvailable = Boolean(selectedModel && (!draft.variant || selectedModel.variants?.includes(draft.variant)));
   const sendable = canSendWork({ ready: ready && selectionAvailable, pending: pending || streaming, draft });
   return <div className="mx-auto w-full max-w-[740px] px-3 pb-4">
-    <div className="mx-3 flex flex-wrap items-center gap-3 rounded-t-xl bg-[#262424] px-3 py-2 text-xs text-neutral-300">
+    <div className="mx-3 flex flex-wrap items-center gap-3 rounded-t-xl bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
       {projectControl}{environmentControl}{memoryControl}
     </div>
     <form aria-label="Work composer" onSubmit={(event) => { event.preventDefault(); if (sendable) onSend(); }}
-      className="rounded-[22px] border border-white/5 bg-[#333131] p-3 shadow-sm">
+      className="veyra-work-composer">
+      <ComposerSurface className="p-3">
       {draft.attachments.length > 0 && <ul aria-label="Attachments" className="flex flex-wrap gap-2 pb-2">
         {draft.attachments.map((attachment) => <li key={attachment.id} className="rounded-lg bg-white/10 px-2 py-1 text-xs">
           {attachment.name} <button type="button" aria-label={`Remove ${attachment.name}`} disabled={pending}
@@ -31,17 +33,16 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
         </li>)}
       </ul>}
       <label htmlFor="veyra-work-message" className="sr-only">Message the working agent</label>
-      <textarea ref={input} id="veyra-work-message" value={draft.text} rows={2} placeholder="Ask Veyra to build something…"
-        disabled={pending} className="max-h-48 min-h-12 w-full resize-y bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-400 focus-visible:ring-2 focus-visible:ring-blue-400"
+      <ComposerInput ref={input} id="veyra-work-message" value={draft.text} rows={2} placeholder="Ask Veyra to build something…"
+        disabled={pending} className="min-h-12 w-full resize-y focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         onChange={(event) => onChange({ ...draft, text: event.target.value })}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault(); if (sendable) onSend();
           }
         }} />
-      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
-        {onAttach && <button type="button" onClick={onAttach} aria-label="Attach files" disabled={pending || streaming}
-          className="h-8 w-8 rounded-full text-lg hover:bg-white/10 disabled:opacity-40 focus-visible:outline-blue-400">＋</button>}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+        {onAttach && <ComposerAddButton onClick={onAttach} aria-label="Attach files" title="Attach files" disabled={pending || streaming} />}
         {permissionControl}
         <ModelEffortPicker className="ml-auto" model={draft.providerId && draft.modelId ? JSON.stringify([draft.providerId, draft.modelId]) : ""}
           models={[
@@ -57,9 +58,11 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
           onEffortChange={variant => onChange({ ...draft, variant, selectionOrigin: "explicit" })} />
 
         {voiceControl}
-        {streaming ? <button type="button" onClick={onStop} aria-label="Stop response" className="h-8 w-8 rounded-full bg-white text-black">■</button>
-          : <button type="submit" disabled={!sendable} aria-label="Send message" className="h-8 w-8 rounded-full bg-blue-500 text-lg text-white disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-blue-300">↑</button>}
+        <ComposerSendButton mode={streaming ? "stop" : "send"} type={streaming ? "button" : "submit"} onClick={streaming ? onStop : undefined}
+          aria-label={streaming ? "Stop response" : "Send message"} title={streaming ? "Stop response" : "Send message"}
+          hasContent={Boolean(draft.text.trim())} disabled={!streaming && !sendable} />
       </div>
+      </ComposerSurface>
     </form>
   </div>;
 }
