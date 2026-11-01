@@ -510,6 +510,10 @@ candidate rendered correctly at 794 pixels in the integrated browser.
 Fresh-chat model verification also accepts OpenCode's explicit `default` variant
 for an omitted default choice. Model and provider identities and explicit effort
 choices still require exact confirmation. The original API compiler passed for
-this observed startup defect. Runtime fresh-chat verification remains required.
+this observed startup defect. Actual browser fresh-chat creation now succeeds in
+the running revision6e36a383 candidate. The original conversation and login remain
+accessible at localhost:17888 after an image-only update with the same Pod UID.
 The user's existing compatibility-preview conversation and installation were
 preserved; these checks do not establish full release acceptance.
+
+The exact compatibility candidate digest32ee7d41431a41724bee614e7f05e39c1c65459bc5344258d14600bda74deea3 and control-plane digest4cd658d7eb9d832406c781e16b17b6168366d8754dd262a8cdf773161fd13bff were published from revision6e36a383923a5530a4e1d21e79c94588fab791f2. Both preview roles started normally; production was unchanged. Work still requires a qualified managed runtime. The consumed frontend compiler view109,942,973bytes and standalone77,128,431bytes were removed after preservation and lifetime checks; minimal hashes, source, recipes and screenshot evidence remain. No new tests were added and full release acceptance remains open.
