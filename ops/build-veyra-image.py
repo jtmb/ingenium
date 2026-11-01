@@ -131,7 +131,8 @@ def main():
  for name in['supervisord.conf','control-plane-supervisord.conf','runtime-supervisord.conf']:add(a/name,'/app/'+name,0o444)
  add(a/'scripts/docker-entrypoint.sh','/app/entrypoint.sh',0o555)
  rows['/app/scripts']={'type':'directory','target':'/app/scripts','targetMode':0o555}
- for name in['/app/packages/ingenium-extension/dist/scripts/init-project.js','/app/scripts/normalize-agent-profiles.sh','/app/scripts/project-agent-profiles.mjs','/app/scripts/run-init-project.sh']:
+ rows['/app/.opencode/agents/execution/ingenium-llm-broker.md']['targetMode']=0o444
+ for name in['/app/packages/ingenium-extension/dist/scripts/init-project.js','/app/scripts/normalize-agent-profiles.sh','/app/scripts/run-init-project.sh']:
   need(name in rows,'Required CLI executable missing');rows[name]['targetMode']=0o555
  rows['/app/packages/ingenium-extension/scripts/source-snapshot.mjs']['targetMode']=0o444
  if not app_layer.exists():
@@ -163,6 +164,8 @@ def main():
  vendor_manifest=json.loads((vendor/'manifest.json').read_text())
  for number,item in enumerate(vendor_manifest['packages']):
   need(item['target']=='/usr/local/lib/node_modules/npm/node_modules/undici','Unexpected vendor overlay')
+  directory(item['target'])
+  data(item['target']+'/.wh..wh..opq',b'',0)
   package=vendor/str(number)/'package'
   for file in sorted(package.rglob('*')):
    if file.is_dir():directory(item['target']+'/'+str(file.relative_to(package)))
