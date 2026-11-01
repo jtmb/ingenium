@@ -77,6 +77,7 @@ def main():
     artifact.add_argument("--image")
     artifact.add_argument("--oci-archive", type=Path)
     parser.add_argument("--revision", required=True)
+    parser.add_argument("--role", choices=["compatibility", "control-plane", "user-runtime", "runtime-manager", "runtime-gateway"], default="compatibility")
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--probe", action="store_true")
     args = parser.parse_args()
@@ -99,13 +100,14 @@ def main():
         image = json.loads(command(["docker", "image", "inspect", args.image]))[0]
     labels = image["Config"].get("Labels", {})
     source_hash = labels.get("org.ingenium.source.sha256", "")
+    need(labels.get("org.veyra.image.role", "compatibility") == args.role, "image_role_mismatch")
     need(labels.get("org.opencontainers.image.revision") == args.revision and labels.get("org.opencontainers.image.source") == SOURCE and re.fullmatch(r"[a-f0-9]{64}", source_hash), "image_provenance_mismatch")
     helper = Path(__file__).resolve().with_name("windows-docker-credential.py")
     lock = os.open(root / "publisher.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    record = {"revision": args.revision, "source": SOURCE, "sourceSha256": source_hash, "localImageId": image["Id"], "repository": REPOSITORY, "credentialsSaved": False, "deployed": False, "startedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(), "helperSha256": hashlib.sha256(helper.read_bytes()).hexdigest()}
+    record = {"revision": args.revision, "role": args.role, "source": SOURCE, "sourceSha256": source_hash, "localImageId": image["Id"], "repository": REPOSITORY, "credentialsSaved": False, "deployed": False, "startedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(), "helperSha256": hashlib.sha256(helper.read_bytes()).hexdigest()}
     client = root / "client"
-    name = "git-" + args.revision
+    name = "git-" + args.revision + ("" if args.role == "compatibility" else "-" + args.role)
     target = "docker.io/" + REPOSITORY + ":" + name
     try:
         token = registry_token(helper)
