@@ -703,3 +703,22 @@ worker2. It and the operator command are in the Kubernetes runbook. It has not
 staged a configuration, restarted a daemon or installed a RuntimeClass. Actual
 administrator execution, explicit workspace storage, image/bootstrap approval,
 native platform and attended audio gates remain open. The full goal is active.
+
+## Kubernetes start acknowledgement recovery (2026-11-01)
+
+The confirmed original now commits on the existing Core writer before the
+Kubernetes manager's outer reply. A lost reply preserves and returns only that
+unchanged STARTING record; it does not revoke its capability or grant readiness.
+The private callback validates the pending request, original bootstrap,
+current actor/binding/lease and approved image. Duplicate acknowledgement has
+no second write, and contradictory decoded originals are refused. Docker,
+Core schema, the single writer and production remain unchanged.
+
+The ordinary API compiler/copier passes 340 sources/169 compiler roots/298
+runtime files. Four focused orchestration regressions pass with explicit
+doubles; they do not establish physical Kubernetes acceptance. The initial
+unit import resolved the intentionally preserved old APP Core distribution;
+the corrected check uses the real canonical source decoder. The failed record
+is retained. Both runs closed and created no cache files or dependency copies.
+Actual image, bootstrap/restart, unknown creates/uncommitted failures and all
+remaining full-release gates stay open. The frontend source is unchanged.

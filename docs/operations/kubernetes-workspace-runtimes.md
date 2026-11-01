@@ -282,3 +282,33 @@ proposal has not been provisioned or assigned. Fresh disk/replica observations
 and explicit storage-provisioning approval are required before creation through
 the established operator/deployment workflow. Keep the capacity floor and
 replica count intact.
+
+## Original commit before the manager reply
+
+After the original Kubernetes create/start/retained-attach flow, the manager
+uses the existing authenticated private Core connection to commit the original
+before replying to the public start request. Only an in-flight request with
+the original bootstrap acknowledgement, current actor/workspace/lease and
+unchanged approved image can enter that write. The existing Core transaction
+records the original and STARTING together; no schema or writer changes.
+
+The private `/api/v1/internal/workspace-runtime-v2/commit` path accepts only
+the existing manager audience, its exact request identity/hash and the closed
+original DTO. Its body allowance is 16 KiB; other private paths retain 2 KiB.
+A repeated acknowledgement returns the unchanged committed original without
+another transition. If the commit acknowledgement is lost, the same manager
+may read back only its locally retained physical original.
+
+A lost outer reply can return the exact committed STARTING record after fresh
+actor, revision, binding and persisted-original checks. It cannot grant READY,
+adopt an attachment or revoke that committed execution's capability. A decoded
+reply that contradicts the original is refused. Uncommitted failures retain
+credential revocation and unknown-outcome fencing. Docker keeps its original
+response/transaction path. Lost creates and failures before a committed
+original still require their separate reconciliation.
+
+The normal API compiler/copier passes 340 source inputs/169 compiler roots/298
+runtime files. Four focused orchestration controls pass for lost replies,
+ordinary/duplicate acknowledgements, missing bootstrap and contradictory replies.
+They use explicit identity/storage/manager doubles and do not qualify a physical
+runtime, image or live restart. No Core rebuild or dependency copies were needed.

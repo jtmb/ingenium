@@ -18,9 +18,9 @@ export interface WorkspaceManagerRetiredV2 extends WorkspaceManagerOriginalV2 {
 /** The original private Core endpoint/token owner. No caller-provided URL,
  * credentials, transport, positive response or database connection is accepted. */
 export async function workspaceManagerCoreV2(operation:"admission",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2>;
-export async function workspaceManagerCoreV2(operation:"original"|"retirement",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerOriginalV2>;
+export async function workspaceManagerCoreV2(operation:"original"|"retirement"|"commit",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerOriginalV2>;
 export async function workspaceManagerCoreV2(operation:"retired",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerRetiredV2>;
-export async function workspaceManagerCoreV2(operation:"admission"|"original"|"retirement"|"retired",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2|WorkspaceManagerRetiredV2> {
+export async function workspaceManagerCoreV2(operation:"admission"|"original"|"retirement"|"retired"|"commit",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2|WorkspaceManagerRetiredV2> {
   const setting=process.env.INGENIUM_RUNTIME_API_URL;
   if(typeof setting!=="string"||!setting||setting!==setting.trim())throw Error("WORKSPACE_V2_CORE_URL");
   const base=new URL(setting);

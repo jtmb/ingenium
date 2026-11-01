@@ -106,6 +106,19 @@ export class KubernetesWorkspaceManager {
       await this.#predecessors(request,admission.retiredPredecessors,mapping,signal);this.#config();
       const original=await provisionKubernetesWorkspace(this.#client,{request,mapping,nodePidPolicy:policy,image:immutableImage(admission.definition),
         apiUrl:process.env.INGENIUM_RUNTIME_API_URL!,capability,capabilityExpiresAt,bootstrapNonce,credentialId:admission.credentialId,admissionSha256:provisionHash(admission),signal});
+      // The existing Core writer owns the original before the public reply can
+      // disappear. A lost commit acknowledgement permits only a readback of
+      // this SAME locally retained physical original, never attachment adoption.
+      let committed;
+      try{committed=await workspaceManagerCoreV2("commit",{runtimeId,requestId:request.originalRequestId,
+        requestSha256:provisionHash(request),originalProvision:original},signal);}
+      catch{committed=await workspaceManagerCoreV2("original",{runtimeId},signal);}
+      this.#config();
+      if(committed.runtime.id!==runtimeId||committed.runtime.state!=="STARTING"||committed.runtime.revision!==request.revision+1||
+        committed.runtime.backendContainerId!==original.parentContainerId||committed.workspace.id!==request.workspaceId||
+        committed.workspace.storageMappingHash!==request.storageMappingHash||committed.workspace.securityEpoch!==request.securityEpoch||
+        provisionHash(committed.original)!==provisionHash(original)||!committed.definition||
+        provisionHash(committed.definition)!==provisionHash(admission.definition))return fail("KUBERNETES_ORIGINAL_COMMIT_CHANGED");
       return {disposition:"new_created",runtimeId,backendId:original.parentContainerId,backendName:request.backendName,
         imageRevision:admission.definition.sourceRevision,state:"running",health:"starting",originalProvision:original};
     }finally{input.capability="";this.#inFlight.delete(runtimeId);}

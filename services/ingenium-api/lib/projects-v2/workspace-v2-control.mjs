@@ -51,13 +51,59 @@ export async function provisionWorkspaceRuntimeFromRequestV2(request,selection){
   const originalRequestId=randomUUID(),nonce=randomBytes(32).toString('hex'),w=first.workspace;
   const publicRequest=provision.publicWorkspaceProvisionRequest({schemaVersion:2,scopeKind:'workspace',projectId:null,originalRequestId,runtimeId:runtime.id,backendName:runtime.backendName,organizationId:runtime.organizationId,ownerUserId:runtime.ownerUserId,workspaceId:w.id,storagePath:w.storagePath,storageMappingHash:w.storageMappingHash,securityEpoch:w.securityEpoch,revision:runtime.revision,limits:Object.fromEntries(['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].map(k=>[k,runtime[k]]))});
   entry={request,selection:{...selection},identityKey:first.identityKey,publicRequest,definition,credentialId:credential.id,nonce,deadline:Date.now()+45000,db:dbOf(),bootstrapAcknowledged:false};pending.set(originalRequestId,entry);
-  const result=await postOriginalWorkspaceRuntimeV2({...publicRequest,capability:credential.token,capabilityExpiresAt:credential.expiresAt,bootstrapNonce:nonce});
+  let result;
+  try{result=await postOriginalWorkspaceRuntimeV2({...publicRequest,capability:credential.token,capabilityExpiresAt:credential.expiresAt,bootstrapNonce:nonce});}
+  catch(error){
+   // A lost outer reply cannot undo the original already committed through the
+   // private producer. This recovery is limited to the exact STARTING record.
+   if(entry.committedOriginal)return committedWorkspaceResultV2(entry,request,selection);
+   throw error;
+  }
   credential.token='';
+  if(entry.committedOriginal){
+   if(provision.provisionHash(authenticatedOriginalWorkspaceProvisionV2(result))!==provision.provisionHash(entry.committedOriginal))return fail('WORKSPACE_V2_COMMITTED_ORIGINAL_CHANGED');
+   return committedWorkspaceResultV2(entry,request,selection);
+  }
+  if(definition.backendKind==='kubernetes')return fail('WORKSPACE_V2_ORIGINAL_COMMIT_REQUIRED');
   const same=currentUser(request,selection);if(authenticatedOriginalWorkspaceProvisionV2(result)?.startIdentity!==entry.startIdentity||same.identityKey!==first.identityKey||same.workspace.storageMappingHash!==w.storageMappingHash||same.workspace.securityEpoch!==w.securityEpoch||same.runtime.revision!==runtime.revision||same.runtime.state!=='PROVISIONING'||!entry.bootstrapAcknowledged||Date.now()>=entry.deadline)return fail('WORKSPACE_V2_ORIGINAL_CHANGED');
   runtime=runtimes.transitionWorkspaceRuntimeV2({id:key,expectedRevision:runtime.revision,toState:'STARTING',actorType:'manager',actorId:'runtime-manager',backendContainerId:result.backendId,originalProvision:authenticatedOriginalWorkspaceProvisionV2(result)});
   return runtime; // STARTING is not READY, placement, MCP/voice acceptance or an engine conversation.
- }catch(error){if(credential){credential.token='';credentials.revokeWorkspaceRuntimeCredentialV2(key,credential.id);}throw error;}
- finally{if(entry)pending.delete(entry.publicRequest.originalRequestId);inFlight.delete(key);}
+ }catch(error){
+  if(credential)credential.token='';
+  // A conflicting decoded reply still refuses. A committed execution's
+  // capability belongs to its lifecycle and cannot be revoked by that reply.
+  if(credential&&!entry?.committedOriginal)credentials.revokeWorkspaceRuntimeCredentialV2(key,credential.id);
+  throw error;
+ }
+ finally{if(credential)credential.token='';if(entry)pending.delete(entry.publicRequest.originalRequestId);inFlight.delete(key);}
+}
+function committedWorkspaceResultV2(entry,request,selection){
+ const current=currentUser(request,selection),original=provision.readWorkspaceRuntimeOriginalProvision(dbOf(),entry.publicRequest.runtimeId);
+ if(entry.db!==dbOf()||current.identityKey!==entry.identityKey||current.workspace.storageMappingHash!==entry.publicRequest.storageMappingHash||
+   current.workspace.securityEpoch!==entry.publicRequest.securityEpoch||current.runtime.state!=='STARTING'||
+   current.runtime.revision!==entry.committedRevision||current.runtime.backendContainerId!==entry.committedOriginal.parentContainerId||
+   !original||provision.provisionHash(wireWorkspaceOriginalV2(original))!==provision.provisionHash(entry.committedOriginal))return fail('WORKSPACE_V2_COMMITTED_ORIGINAL_CHANGED');
+ return current.runtime;
+}
+function commitOriginalWorkspaceFromManagerV2(input){
+ if(Object.keys(input).sort().join('|')!=='originalProvision|requestId|requestSha256|runtimeId')return fail('WORKSPACE_V2_COMMIT_INPUT');
+ const entry=pending.get(input.requestId);
+ if(!entry||entry.db!==dbOf()||input.runtimeId!==entry.publicRequest.runtimeId||input.requestSha256!==provision.provisionHash(entry.publicRequest)||
+   entry.definition.backendKind!=='kubernetes')return fail('WORKSPACE_V2_ORIGINAL_ADMISSION_UNAVAILABLE');
+ const original=provision.validateWorkspaceProvisionResponse(input.originalProvision,entry.publicRequest,input.originalProvision?.parentContainerId);
+ if(original.backendKind!=='kubernetes'||!entry.bootstrapAcknowledged||original.startIdentity!==entry.startIdentity||
+   original.imageId!==entry.definition.imageId||original.kubernetes.pullReference!==entry.definition.pullReference)return fail('WORKSPACE_V2_ORIGINAL_CHANGED');
+ if(entry.committedOriginal){
+  if(provision.provisionHash(original)!==provision.provisionHash(entry.committedOriginal))return fail('WORKSPACE_V2_COMMITTED_ORIGINAL_CHANGED');
+  committedWorkspaceResultV2(entry,entry.request,entry.selection);
+ }else{
+  originalWorkspaceAdmissionV2({runtimeId:input.runtimeId,requestId:input.requestId,requestSha256:input.requestSha256});
+  const runtime=runtimes.transitionWorkspaceRuntimeV2({id:input.runtimeId,expectedRevision:entry.publicRequest.revision,toState:'STARTING',
+   actorType:'manager',actorId:'runtime-manager',backendContainerId:original.parentContainerId,originalProvision:original});
+  entry.committedOriginal=provision.decodeWorkspaceRuntimeOriginalProvision(structuredClone(original));
+  entry.committedRevision=runtime.revision;
+ }
+ return originalWorkspaceProfileV2(input.runtimeId);
 }
 function pendingEntry(selector){
  const entry=pending.get(selector.requestId);if(!entry||entry.deadline<=Date.now()||entry.db!==dbOf()||selector.runtimeId!==entry.publicRequest.runtimeId||selector.requestSha256!==provision.provisionHash(entry.publicRequest))return fail('WORKSPACE_V2_ORIGINAL_ADMISSION_UNAVAILABLE');
@@ -101,9 +147,9 @@ function manager(request){
  * Only these exact private paths receive the original manager/bootstrap audiences. */
 export function workspaceV2PrivateIngress(req,res,next){
  const path=req.path;
- if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/internal/workspace-runtime-v2/retired','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
+ if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/commit','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/internal/workspace-runtime-v2/retired','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
  try{
-  if(req.method!=='POST'||req.originalUrl!==path||!req.body||JSON.stringify(req.body).length>2048)return fail('WORKSPACE_V2_PRIVATE_INPUT');
+  if(req.method!=='POST'||req.originalUrl!==path||!req.body||JSON.stringify(req.body).length>(path.endsWith('/commit')?16384:2048))return fail('WORKSPACE_V2_PRIVATE_INPUT');
   let data;
   if(path.endsWith('/bootstrap')){
    if(req.headers.cookie!==undefined||req.headers.origin!==undefined||req.headers['content-type']!=='application/json')return fail('WORKSPACE_V2_BOOTSTRAP_AUTH');
@@ -115,7 +161,8 @@ export function workspaceV2PrivateIngress(req,res,next){
    data={schemaVersion:2,nonce:e.nonce,runtimeId:c.runtimeId,workspaceId:c.workspaceId,bindingHash:c.bindingHash,bindingEpoch:c.bindingEpoch,credentialId:c.credentialId,organizationId:c.organizationId,ownerUserId:c.ownerUserId,projectId:null,startIdentity:e.startIdentity,requestId:e.publicRequest.originalRequestId};
   }else{
    manager(req);
-   if(path.endsWith('/admission')){if(Object.keys(req.body).sort().join('|')!=='requestId|requestSha256|runtimeId')return fail('WORKSPACE_V2_ADMISSION_INPUT');data=originalWorkspaceAdmissionV2(req.body);}
+   if(path.endsWith('/commit'))data=commitOriginalWorkspaceFromManagerV2(req.body);
+   else if(path.endsWith('/admission')){if(Object.keys(req.body).sort().join('|')!=='requestId|requestSha256|runtimeId')return fail('WORKSPACE_V2_ADMISSION_INPUT');data=originalWorkspaceAdmissionV2(req.body);}
    else{if(Object.keys(req.body).join('|')!=='runtimeId')return fail('WORKSPACE_V2_PROFILE_INPUT');data=path.endsWith('/retirement')?originalWorkspaceRetirementProfileV2(req.body.runtimeId):path.endsWith('/retired')?originalWorkspaceRetiredProfileV2(req.body.runtimeId):originalWorkspaceProfileV2(req.body.runtimeId);}
   }
   res.status(200).json({data});
