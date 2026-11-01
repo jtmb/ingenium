@@ -9,6 +9,6 @@ export default function WorkspaceModeSwitch() {
   const chat = pathname === "/chat" || pathname.startsWith("/chat/");
   return <nav aria-label="Workspace mode" className="veyra-mode-switch">
     <Link href="/chat" aria-current={chat ? "page" : undefined}>Chat</Link>
-    <Link href="/work" aria-current={pathname === "/work" ? "page" : undefined}>Work</Link>
+    <Link href="/work" aria-current={pathname === "/work" || pathname.startsWith("/work/") ? "page" : undefined}>Work</Link>
   </nav>;
 }

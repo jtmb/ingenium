@@ -526,3 +526,13 @@ the real model catalog in the same popup. Supported effort values still come
 from the selected model. Existing selection, unavailable-state and send guards
 remain. The original Next production build22 and TypeScript compilation pass.
 Live browser and deployment verification are the next required consumers.
+## Reused site navigation (2026-11-01)
+
+SiteChrome now owns the shared header and Navigation for every authenticated
+route, including Work, saved chats and Customize. The alternate application
+rails have been removed. Work's projects, pinned chats and recents remain in
+its contextual History panel, which starts closed like Chat. The Work/Web
+presentation toggle and its retained conversation state are unchanged. The
+project guide now requires this shared shell and ModelEffortPicker reuse.
+Original Next production build23 and TypeScript compilation pass; actual
+candidate browser verification remains required before declaring UI acceptance.

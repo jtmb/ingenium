@@ -287,6 +287,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Chat", href: "/chat", icon: <IconMessageSquare /> },
       { label: "Work", href: "/work", icon: <IconCode /> },
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
+      { label: "Terminal", href: "/opencode?mode=cli", icon: <IconTerminal /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
       { label: "Tasks", href: "/tasks", icon: <IconCheckSquare /> },
       { label: "Docs", href: "/docs", icon: <IconFile /> },
@@ -801,7 +802,7 @@ export default function Navigation() {
         data-nav-compact={desktopCompact}
       >
         {desktopCompact ? <nav className="flex flex-1 flex-col items-center gap-2 py-3" aria-label="Compact navigation">
-          {[NAV_GROUPS[0]!.items[0]!, NAV_GROUPS[3]!.items[0]!, NAV_GROUPS[0]!.items[1]!].map((item) => <Link key={item.href} href={item.href} prefetch={false} aria-label={item.label} title={item.label} aria-current={isActive(item.href) ? "page" : undefined} className={`veyra-rail-link ${isActive(item.href) ? "is-active" : ""}`}>{item.icon}</Link>)}
+          {[NAV_GROUPS[0]!.items[0]!, NAV_GROUPS[3]!.items[0]!, NAV_GROUPS[0]!.items[1]!, NAV_GROUPS[3]!.items.find(item => item.label === "Customize")!].map((item) => <Link key={item.href} href={item.href} prefetch={false} aria-label={item.label} title={item.label} aria-current={isActive(item.href) ? "page" : undefined} className={`veyra-rail-link ${isActive(item.href) ? "is-active" : ""}`}>{item.icon}</Link>)}
           <Link href="/settings" prefetch={false} aria-label="Settings" title="Settings" className="veyra-rail-link"><IconGear /></Link>
           <button type="button" onClick={toggleDesktopCompact} aria-label="All features" title="All features" className="veyra-rail-link"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="8" r="1"/></svg></button>
           <Link href={HOME_ITEM.href} prefetch={false} aria-label="Home" title="Home" className="veyra-rail-link"><IconHome /></Link>

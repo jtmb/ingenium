@@ -1,26 +1,15 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { visibleWorkFeatures } from "./work-state";
-import SettingsLauncher from "../settings/SettingsLauncher";
 
 export interface WorkConversation { id: string; title: string; pinned?: boolean; busy?: boolean }
 export interface WorkProject { id: string; label: string; conversations: WorkConversation[] }
 
 const sidebarSizes = [{ width: 256, className: "w-64" }, { width: 360, className: "w-[360px]" }, { width: 468, className: "w-[468px]" }] as const;
-function subscribeNarrowScreen(callback: () => void) {
-  if (typeof window.matchMedia !== "function") return () => undefined;
-  const media = window.matchMedia("(max-width: 767px)");
-  media.addEventListener("change", callback);
-  return () => media.removeEventListener("change", callback);
-}
-function narrowScreen() { return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches; }
-function serverScreen() { return false; }
 
 export default function WorkShell({ projectLabel, projects, conversations, activeId, onSelect, onNew,
-  children, composer, web, status, tools, dot, projectCatalog, newPending = false, onPresentationChange, installationAdmin = false,
+  children, composer, web, status, tools, dot, projectCatalog, newPending = false, onPresentationChange,
 }: {
   projectLabel: string; projects: WorkProject[]; conversations: WorkConversation[]; activeId: string | null;
   onSelect: (id: string) => void; onNew: () => void; children: ReactNode; composer: ReactNode;
@@ -30,13 +19,10 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
 }) {
   const [view, setView] = useState<"work" | "web">("work");
   const [webVisited, setWebVisited] = useState(false);
-  const narrow = useSyncExternalStore(subscribeNarrowScreen, narrowScreen, serverScreen);
-  const [sidebarOverride, setSidebar] = useState<boolean | null>(null);
-  const sidebar = sidebarOverride ?? !narrow;
+  const [sidebar, setSidebar] = useState(false);
   const [sidebarSize, setSidebarSize] = useState(1);
   const dragOrigin = useRef<{ x: number; width: number } | null>(null);
   const selectedSize = sidebarSizes[sidebarSize]!;
-  const [features, setFeatures] = useState(false);
   const [search, setSearch] = useState("");
   const renderConversation = (conversation: WorkConversation) => <li key={conversation.id}>
     <button type="button" onClick={() => onSelect(conversation.id)} aria-current={activeId === conversation.id ? "page" : undefined}
@@ -45,22 +31,15 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
     </button>
   </li>;
   const matches = (conversation: WorkConversation) => conversation.title.toLocaleLowerCase().includes(search.toLocaleLowerCase());
-  return <div data-testid="veyra-work-shell" className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[#181616] text-neutral-200">
-    <nav aria-label="Work applications" className="flex w-[52px] shrink-0 flex-col items-center gap-3 border-r border-white/5 bg-[#202020] py-3">
-      <button type="button" aria-label="Toggle conversation sidebar" aria-expanded={sidebar} aria-controls="veyra-work-sidebar"
-        onClick={() => setSidebar(!sidebar)} className="rounded-lg p-2 hover:bg-white/10 focus-visible:outline-blue-400">
-        <Image src="/veyra-blue.png" alt="Veyra" width={24} height={24} />
-      </button>
-      <Link href="/chat" aria-label="Chat" className="rounded p-2 hover:bg-white/10">◧</Link>
-      <Link href="/tasks" aria-label="Tasks" className="rounded p-2 hover:bg-white/10">▤</Link>
-      <Link href="/jobs" aria-label="Jobs" className="rounded p-2 hover:bg-white/10">◷</Link>
-      <Link href="/customize/plugins" aria-label="Customize" className="rounded p-2 hover:bg-white/10">⊞</Link>
-      <button type="button" aria-label="Browse features" aria-expanded={features} onClick={() => setFeatures(!features)} className="rounded p-2 hover:bg-white/10">•••</button>
-      <div className="mt-auto"><SettingsLauncher /></div>
-    </nav>
-    {sidebar && <aside id="veyra-work-sidebar" aria-label="Projects and conversations" className={`flex ${selectedSize.className} max-w-[40vw] shrink-0 flex-col border-r border-white/5 bg-[#1c1a1a] p-2 max-sm:max-w-[45vw]`}>
-      <div className="px-2 py-2 text-sm font-semibold">Veyra</div>
-      <button type="button" onClick={onNew} disabled={newPending} className="rounded-lg px-3 py-2 text-left text-xs hover:bg-white/5 disabled:opacity-40">＋ New chat</button>
+  return <div data-testid="veyra-work-shell" className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[var(--color-surface-muted)] text-[var(--color-text-primary)]">
+    {sidebar && <aside id="veyra-work-sidebar" aria-label="Projects and conversations" className={`flex ${selectedSize.className} max-w-[40vw] shrink-0 flex-col border-r border-[var(--color-nav-border)] bg-[var(--color-nav-bg)] p-2 max-sm:max-w-[45vw]`}>
+      <div className="flex items-center gap-2 px-2 py-2 text-sm font-medium">
+        <span className="flex-1">Projects and chats</span>
+        <button type="button" aria-label="Close projects and conversations" onClick={() => setSidebar(false)}
+          className="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-blue-400">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="m4 4 6 6m0-6-6 6" stroke="currentColor" strokeLinecap="round"/></svg>
+        </button>
+      </div>
       <Link href="/work/history" className="rounded-lg px-3 py-2 text-xs text-neutral-400 hover:bg-white/5 focus-visible:outline-blue-400">Saved chats</Link>
       {dot}
       <label className="px-2 py-2"><span className="sr-only">Search conversations</span><input type="search" value={search}
@@ -99,7 +78,11 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
       onPointerCancel={() => { dragOrigin.current = null; }}
       onLostPointerCapture={() => { dragOrigin.current = null; }} />}
     <section aria-label="Work workspace" className="relative flex min-w-0 flex-1 flex-col">
-      <header className="flex min-h-12 flex-wrap items-center gap-2 px-4 py-2">
+      <header className="flex min-h-12 flex-wrap items-center gap-4 px-5 py-2 text-xs text-[var(--color-text-secondary)]">
+        <button type="button" aria-expanded={sidebar} aria-controls="veyra-work-sidebar" onClick={() => setSidebar(!sidebar)}
+          className="rounded px-2 py-1 hover:text-[var(--color-text-primary)] focus-visible:outline-blue-400">History</button>
+        <button type="button" onClick={onNew} disabled={newPending}
+          className="rounded px-2 py-1 hover:text-[var(--color-text-primary)] disabled:opacity-40 focus-visible:outline-blue-400">New conversation</button>
         <span className="min-w-0 flex-1 truncate text-xs text-neutral-400">{projectLabel}</span>
         <div role="group" aria-label="Workspace presentation" className="flex rounded-lg border border-white/10 p-1 text-xs">
           <button type="button" aria-pressed={view === "work"} onClick={() => { if (view !== "work") onPresentationChange?.("work"); setView("work"); }} className={`rounded px-3 py-1 ${view === "work" ? "bg-white/10" : ""}`}>Work</button>
@@ -107,11 +90,6 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
         </div>{tools}
       </header>
       {status}
-      {features && <section aria-label="Feature directory" className="max-h-64 overflow-auto border-y border-white/10 bg-[#242222] p-4">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{visibleWorkFeatures(installationAdmin).map((feature) => feature.href === "/settings" ? <div key={feature.href} className="rounded-lg p-2"><SettingsLauncher /><p className="text-xs text-neutral-400">{feature.description}</p></div> : <Link key={feature.href} href={feature.href} className="rounded-lg p-2 hover:bg-white/5 focus-visible:outline-blue-400">
-          <strong className="text-sm">{feature.label}</strong><p className="text-xs text-neutral-400">{feature.description}</p>
-        </Link>)}</div>
-      </section>}
       {/* Keep both viewport boxes full size: hidden iframe geometry can reset
           upstream virtual lists even when the frame itself remains mounted. */}
       <div className="relative min-h-0 flex-1">

@@ -238,3 +238,11 @@ frameworks, receipts, or proof infrastructure.
 - A plan, library-only milestone, receipt, or passing test suite is not product
   delivery. Continue toward the full approved product and acceptance criteria.
 - Preserve mandatory data, security, approval, storage, and cleanup safeguards.
+
+## Shared site interface
+
+All authenticated routes use the same SiteChrome and Navigation components for
+the outer header and site sidebar. Feature pages may supply contextual panels,
+but must not render another application rail or rebrand the outer navigation.
+Use ModelEffortPicker for model/effort choices in conversational composers;
+keep catalogs, selection state and capabilities in their existing owners.

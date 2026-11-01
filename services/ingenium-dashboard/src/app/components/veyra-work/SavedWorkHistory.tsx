@@ -5,13 +5,12 @@ import {useRouter}from'next/navigation';
 import {useAuth}from'../../../lib/AuthContext';
 import {useOrganization}from'../../../lib/OrganizationContext';
 import {request}from'../../../lib/api';
-import ApplicationRail from'../ApplicationRail';
 import {createSavedHistoryClient,type SavedHistoryClient,type SavedHistoryConversation,type SavedHistoryList,type SavedHistoryPage}from'./saved-history-client.mjs';
 const button='rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/5 focus-visible:outline-blue-400 disabled:opacity-40';
 function href(workspaceId:string|null,id:string|null){const query=new URLSearchParams();if(workspaceId)query.set('workspaceId',workspaceId);if(id)query.set('chat',id);return '/work/history'+(query.size?'?'+query:'')}
 export default function SavedWorkHistory({workspaceId=null,conversationId=null,routeError=null}:{workspaceId?:string|null;conversationId?:string|null;routeError?:string|null}){
  const {user}=useAuth(),{active}=useOrganization();
- return <div className="flex h-full min-h-0 bg-[#181616] text-neutral-200"><ApplicationRail />{routeError?<p role="alert" className="p-6">{routeError}</p>:active?<ActorHistory key={JSON.stringify([user.id,active.id,workspaceId])} ownerUserId={user.id} organizationId={active.id} workspaceId={workspaceId} conversationId={conversationId}/>:<p role="status" className="p-6">Choose an organization to view saved chats.</p>}</div>;
+ return <div className="flex h-full min-h-0 bg-[var(--color-surface-muted)] text-[var(--color-text-primary)]">{routeError?<p role="alert" className="p-6">{routeError}</p>:active?<ActorHistory key={JSON.stringify([user.id,active.id,workspaceId])} ownerUserId={user.id} organizationId={active.id} workspaceId={workspaceId} conversationId={conversationId}/>:<p role="status" className="p-6">Choose an organization to view saved chats.</p>}</div>;
 }
 function ActorHistory({ownerUserId,organizationId,workspaceId,conversationId}:{ownerUserId:string;organizationId:string;workspaceId:string|null;conversationId:string|null}){
  const router=useRouter(),client=useMemo(()=>createSavedHistoryClient(request,{ownerUserId,organizationId}),[ownerUserId,organizationId]);
