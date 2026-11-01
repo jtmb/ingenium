@@ -677,3 +677,29 @@ unavailable execution target, so live Work/Web and full release acceptance remai
 open. The consumed compiler view, standalone, OCI archive and application layer
 were safely removed: 1,112,788,992 Linux allocated bytes in this generation.
 No Windows disk recovery is inferred. Production is unchanged.
+
+## Live-data Core upgrade qualification (2026-11-01)
+
+The ordinary compiled Core startup and reopen passed against one consistent
+read-only SQLite Backup API snapshot of the current production installation.
+All175 legacy ordinary-table projections retained their row counts, storage
+classes and data fingerprints. This includes the existing account, organization,
+27 projects,16 skills,759 MCP credential records and2 runtime records. Foreign
+keys/integrity passed and all75 Kubernetes evolution objects verified. Raw
+database bytes and credential values were never logged, and the original
+production Pod UID/image and writer remained unchanged.
+
+The sole temporary snapshot was removed after Windows exclusive-handle and
+Linux ownership, source, hash, process, mount and container checks:
+979,349,504 logical bytes /979,353,600 Linux allocated bytes. Minimal source,
+fingerprints and regeneration evidence remain. No Windows recovery is inferred.
+This qualifies the current live-data Core schema upgrade/reopen; it does not
+replace coordinated cold backup, independent full restore, populated historical
+original-provision migration, actual API/runtime or production release acceptance.
+No new tests, dependencies, model, GPU, microphone or audio session were added.
+
+The reviewed worker configuration helper also passed its read-only check on
+worker2. It and the operator command are in the Kubernetes runbook. It has not
+staged a configuration, restarted a daemon or installed a RuntimeClass. Actual
+administrator execution, explicit workspace storage, image/bootstrap approval,
+native platform and attended audio gates remain open. The full goal is active.

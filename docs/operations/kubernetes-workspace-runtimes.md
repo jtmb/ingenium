@@ -267,3 +267,18 @@ retrying. Preserve the original backup until the actual handler startup,
 kernel PID enforcement, bootstrap and controlled rollback consumers finish.
 The coordinator still owns RuntimeClass installation, explicit PVC assignment,
 image approval and the composed Work/restart/retirement acceptance.
+
+The2026-11-01 storage review proposes one4GiB encrypted, retained,
+ReadWriteOncePod qualification claim using the existing `longhorn` class and
+its unchanged two replicas. Source/dependencies and observed frontend outputs
+occupy about1.4GiB; the remaining space is for qualification work and headroom.
+No existing installation data, models or Windows engine would be copied into it.
+
+Both worker disks currently report Longhorn DiskPressure and are not schedulable
+at the existing25-percent free-space floor. A healthy redundant placement is not
+available now; logical reservations or a Bound claim alone would not qualify it.
+The existing11GiB `ingenium-state` claim and its UID remain unchanged. The
+proposal has not been provisioned or assigned. Fresh disk/replica observations
+and explicit storage-provisioning approval are required before creation through
+the established operator/deployment workflow. Keep the capacity floor and
+replica count intact.
