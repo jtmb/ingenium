@@ -28,7 +28,7 @@ export function RuntimeProvider({ children, projectless = false }: { children: R
 function WorkspaceRuntimeProvider({children}:{children:ReactNode}) {
  const {user}=useAuth(),organization=useOrganization(),params=useSearchParams();
  const values=params.getAll('runtime'),requestedRuntime=values.length===1&&values[0] ? values[0] : null;
- const {workspace,confirmed}=useWorkspaceExecution(user.id,organization.active?.id??null,requestedRuntime);
+ const {workspace,confirmed}=useWorkspaceExecution(user.id,organization.active?.id??null,requestedRuntime,organization.loading);
  const runtimeId=confirmed?.runtimeId??null;
  const client=useMemo(()=>confirmed?createOpenCodeClient(confirmed.runtimeId):null,[confirmed]);
  return <RuntimeContext.Provider value={{workspace,client,runtimeId,projectName:null,execution:confirmed,projectless:true}}>{children}</RuntimeContext.Provider>;

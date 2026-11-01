@@ -7,6 +7,10 @@ canonical catalog and selects the prepared workspace. Starting it remains a
 separate action. Changing account or organization clears pending selection and
 discards late responses from the previous scope.
 
+Work keeps the shared picker in its loading state until organization discovery
+finishes. Pending discovery must not show a missing-organization or empty-workspace
+message, and registration remains unavailable until the current scope is loaded.
+
 Discovery uses the private manager's configured account mappings and fresh,
 authenticated namespace/PVC observations. The browser submits only a workspace ID.
 It cannot choose storage paths, claims, nodes, credentials or backend identities.

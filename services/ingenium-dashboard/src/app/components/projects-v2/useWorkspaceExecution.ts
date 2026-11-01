@@ -5,16 +5,17 @@ import type {RuntimeWorkspaceController,RuntimeWorkspaceOption} from '@/lib/use-
 import {createWorkspaceExecutionClient,createWorkspaceExecutionJournal,type ConfirmedWorkspaceExecution} from './workspace-execution-client.mjs';
 import {createWorkspaceExecutionController,type WorkspaceExecutionState} from './workspace-execution-controller.mjs';
 const initial:WorkspaceExecutionState={status:'loading',options:[],selectedWorkspaceId:null,confirmed:null,error:null};
-export function useWorkspaceExecution(ownerUserId:string,organizationId:string|null,requestedRuntime:string|null){
+export function useWorkspaceExecution(ownerUserId:string,organizationId:string|null,requestedRuntime:string|null,organizationsLoading=false){
  const scopeKey=JSON.stringify([ownerUserId,organizationId]);
  const [owned,setOwned]=useState<{scope:string;state:WorkspaceExecutionState}>({scope:'',state:initial});
  const owner=useRef<ReturnType<typeof createWorkspaceExecutionController>|null>(null);
  const currentScope=useRef(scopeKey);currentScope.current=scopeKey;
  const routeRuntime=useRef(requestedRuntime),lastRequested=useRef(requestedRuntime);routeRuntime.current=requestedRuntime;
  const scopeState=owned.scope===scopeKey?owned.state:initial;
- const state=requestedRuntime && requestedRuntime!==scopeState.confirmed?.runtimeId && lastRequested.current!==requestedRuntime ? initial : scopeState;
+ const state=organizationsLoading || requestedRuntime && requestedRuntime!==scopeState.confirmed?.runtimeId && lastRequested.current!==requestedRuntime ? initial : scopeState;
  useEffect(()=>{
   const setState=(next:WorkspaceExecutionState)=>setOwned({scope:scopeKey,state:next});
+  if(organizationsLoading){setState(initial);return}
   if(!organizationId){setState({...initial,status:'empty',error:'Choose an organization before selecting an execution target.'});return}
   lastRequested.current=routeRuntime.current;
   let controller:ReturnType<typeof createWorkspaceExecutionController>;
@@ -24,7 +25,7 @@ export function useWorkspaceExecution(ownerUserId:string,organizationId:string|n
   }catch(error){setState({...initial,status:'error',error:error instanceof Error?error.message:'Execution selection is unavailable.'});return}
   owner.current=controller;setState(controller.getSnapshot());const unsubscribe=controller.subscribe(()=>setState(controller.getSnapshot()));void controller.load(routeRuntime.current);
   return()=>{unsubscribe();controller.close();if(owner.current===controller)owner.current=null};
- },[ownerUserId,organizationId]);
+ },[ownerUserId,organizationId,organizationsLoading]);
  useEffect(()=>{
   if(lastRequested.current===requestedRuntime)return;lastRequested.current=requestedRuntime;
   if(requestedRuntime && owner.current?.getSnapshot().confirmed?.runtimeId!==requestedRuntime)void owner.current?.load(requestedRuntime);
@@ -35,7 +36,7 @@ export function useWorkspaceExecution(ownerUserId:string,organizationId:string|n
  const restart=useCallback(async()=>{await owner.current?.restart()},[]);
  const selected=state.options.find(row=>row.workspaceId===state.selectedWorkspaceId);
  const retry=useCallback(()=>{void owner.current?.load(requestedRuntime)},[requestedRuntime]);
- const registration=useMemo(()=>organizationId?{
+ const registration=useMemo(()=>organizationId&&!organizationsLoading?{
   async available(){
    if(currentScope.current!==scopeKey||!owner.current)throw Error('Choose a current account and organization.');
    const rows=await createWorkspaceExecutionClient(request,{ownerUserId,organizationId}).available();
@@ -48,7 +49,7 @@ export function useWorkspaceExecution(ownerUserId:string,organizationId:string|n
    await controller.load();
    if(currentScope.current===scopeKey&&owner.current===controller)controller.select(workspaceId);
   },
- }:undefined,[ownerUserId,organizationId,scopeKey]);
+ }:undefined,[ownerUserId,organizationId,scopeKey,organizationsLoading]);
  const workspace:RuntimeWorkspaceController={mode:'isolated',status:state.status,executionScope:state.confirmed??undefined,
   workspaces:state.options.map((row):RuntimeWorkspaceOption=>({id:row.workspaceId,organizationName:'Managed workspace',projectName:row.label,
    status:['READY','IDLE'].includes(row.claimedState)?'ready':['PROVISIONING','STARTING'].includes(row.claimedState)?'starting':['ABSENT','STOPPED','FAILED'].includes(row.claimedState)?'stopped':'unavailable',runtimeId:row.runtimeId})),
