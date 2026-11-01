@@ -648,3 +648,17 @@ manager restart. It grants no placement or bootstrap adoption. The original
 API compiler/copier passes340 sources/169 compiler roots/298 runtime files.
 Actual composed recovery and all remaining Windows/native, voice, migration,
 production and full release gates remain open. No new tests were added.
+
+## Reused conversation navigation (2026-11-01)
+
+ConversationNavigation now owns Chat and Work's History panel frame, panel
+header, conversation-row styles and History/New conversation toolbar. The
+shared components use the existing theme tokens. Work retains its project
+grouping, search, resize controls and mounted Work/Web presentations; Chat
+retains its selection, deletion, loading/error states and mobile drawer.
+Their existing controllers continue to own all conversation and navigation
+state. The repository guide requires reuse of these assets for future changes.
+This extends the common SiteChrome/Navigation and composer assets to the
+contextual panels. No new test suite or dependency tree was added.
+The original production Next/TypeScript build27 passes all316 first-party inputs.
+Preview deployment and visual acceptance of these contextual panels are pending.

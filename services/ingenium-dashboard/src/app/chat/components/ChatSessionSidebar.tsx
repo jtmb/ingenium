@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ConversationSidebar, conversationRowClass } from "../../components/ConversationNavigation";
 
 const LOADING_SKELETON_WIDTHS = [64, 78, 70, 84] as const;
 
@@ -19,7 +20,7 @@ interface ChatSessionSidebarProps {
 }
 
 /**
- * Collapsible session history sidebar adapted from Aurora's design.
+ * Session history using the same navigation assets as Work.
  *
  * - Collapsed: icon-stack (expand, new chat)
  * - Expanded: full session list with hover-reveal/touch-visible delete,
@@ -122,63 +123,8 @@ export default function ChatSessionSidebar({
 
   // Expanded state — full sidebar
   return (
-    <aside
-      className="flex flex-col w-[260px] shrink-0 h-full border-r border-[var(--color-border)] bg-[var(--color-nav-bg)]"
-      aria-label="Chat sessions"
-      data-testid="session-sidebar"
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--color-border)]">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
-          data-testid="session-sidebar-toggle"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M10 3L5 8L10 13"
-            />
-          </svg>
-        </button>
-
-        <button
-          type="button"
-          onClick={onNew}
-          disabled={newDisabled}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-border)] transition-colors disabled:cursor-wait disabled:opacity-50"
-          aria-label="New conversation"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8 3.33v9.34M3.33 8h9.34"
-            />
-          </svg>
-          <span>New Chat</span>
-        </button>
-      </div>
+    <ConversationSidebar label="Chat sessions" testId="session-sidebar" toggleTestId="session-sidebar-toggle"
+      onClose={onToggle} onNew={onNew} newDisabled={newDisabled}>
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto py-2">
@@ -231,12 +177,7 @@ export default function ChatSessionSidebar({
               return (
                 <li key={session.id}>
                   <div
-                    className={[
-                      "group flex items-center w-full gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
-                      isActive
-                        ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                        : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-                    ].join(" ")}
+                    className={conversationRowClass(isActive)}
                   >
                     <button
                       type="button"
@@ -304,6 +245,6 @@ export default function ChatSessionSidebar({
         )}
       </div>
 
-    </aside>
+    </ConversationSidebar>
   );
 }

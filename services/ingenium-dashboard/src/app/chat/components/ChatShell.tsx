@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useId, useMemo, useLayoutEffect } from "react";
 import Link from "next/link";
 import ChatSessionSidebar from "./ChatSessionSidebar";
+import { ConversationToolbar } from "../../components/ConversationNavigation";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput, { type Attachment, type SendOptions } from "./ChatInput";
@@ -990,10 +991,8 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
 
       {/* Main chat area */}
       <div className="veyra-chat-main flex-1 flex-col min-w-0 min-h-0 flex">
-        <div className="flex items-center gap-2 px-4 py-2">
-          <button type="button" onClick={() => setCollapsed((value) => !value)} className="hidden md:inline-flex rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]" aria-expanded={!collapsed}>History</button>
-          <button type="button" onClick={handleNew} disabled={isCreating || navigationPending} className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">New conversation</button>
-        </div>
+        <ConversationToolbar expanded={!collapsed} onToggle={() => setCollapsed((value) => !value)}
+          onNew={handleNew} newDisabled={isCreating || navigationPending} desktopHistoryOnly />
 
         {contextSearchError && (
           <div

@@ -258,3 +258,8 @@ Use ModelEffortPicker for model/effort choices in conversational composers;
 keep catalogs, selection state and capabilities in their existing owners.
 
 Composer input, surface, attachment trigger and send/stop icons belong to ComposerPrimitives. Chat, Home and Work reuse these assets; keep draft, attachment and execution authority in their existing feature controllers. Do not fork their styles or copy SVGs into another composer.
+
+ConversationNavigation owns the contextual History panel frame, panel header,
+conversation-row styles and History/New conversation toolbar. Chat and Work
+reuse these components; keep their session operations, project grouping, resize
+state and presentation state in their existing feature controllers.
