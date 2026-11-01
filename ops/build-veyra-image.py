@@ -79,7 +79,9 @@ def main():
   file=Path(file);need(file.resolve()==file and file.is_file()and file.is_relative_to(root),'Build source alias or escape')
   body=file.read_bytes();st=file.stat()
   item={'type':'file','source':str(file.relative_to(root)),'target':target,'bytes':len(body),'sha256':hashlib.sha256(body).hexdigest(),'sourceMode':st.st_mode&0o777,'targetMode':mode if mode is not None else(st.st_mode&0o755)}
-  if target in rows:need(all(rows[target].get(k)==item.get(k)for k in('type','bytes','sha256','targetMode')),'Conflicting artifact target: '+target)
+  if target in rows:
+   need(all(rows[target].get(k)==item.get(k)for k in('type','bytes','sha256')),'Conflicting artifact target: '+target)
+   if mode is not None:rows[target]['targetMode']=mode
   else:rows[target]=item
  def tree(directory,target):
   directory=Path(directory);need(directory.is_dir()and directory.resolve()==directory,'Missing artifact directory: '+str(directory))
