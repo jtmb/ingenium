@@ -1,6 +1,7 @@
 "use client";
 
 import type { RuntimeWorkspaceController } from "@/lib/use-runtime-launch";
+import WorkspaceRegistration from "./projects-v2/WorkspaceRegistration";
 
 export default function RuntimeWorkspacePicker({
   controller,
@@ -39,6 +40,7 @@ export default function RuntimeWorkspacePicker({
             {status === "empty" ? "No authorized workspaces" : "Workspace picker unavailable"}
           </h2>
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{error}</p>
+          {controller.registration&&<WorkspaceRegistration registration={controller.registration}/>}
           {status !== "empty" && (
             <button
               type="button"
@@ -115,6 +117,7 @@ export default function RuntimeWorkspacePicker({
             {controller.canRestart ? "Reopen workspace" : "Open workspace"}
           </button>
         </div>
+        {controller.registration&&<WorkspaceRegistration registration={controller.registration}/>}
       </form>
     </div>
   );

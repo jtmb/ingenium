@@ -26,7 +26,10 @@ export function startKubernetesRuntimeManager(){
       if(url.search||url.hash)throw Error("KUBERNETES_MANAGER_PATH");
       if(request.method==="GET"&&url.pathname==="/health"){response.writeHead(200).end(JSON.stringify({data:{backendKind:"kubernetes",configured:true}}));return;}
       let data:unknown;
-      if(request.method==="POST"&&url.pathname==="/v2/workspace-runtimes/preflight"){
+      if(request.method==="POST"&&url.pathname==="/v2/workspace-mappings"){
+        if(request.headers["content-type"]!=="application/json")throw Error("KUBERNETES_MANAGER_CONTENT_TYPE");
+        data={workspaces:await manager.registrationOffers(await body(request),controller.signal)};
+      }else if(request.method==="POST"&&url.pathname==="/v2/workspace-runtimes/preflight"){
         if(request.headers["content-type"]!=="application/json")throw Error("KUBERNETES_MANAGER_CONTENT_TYPE");
         data=await manager.preflight(await body(request),controller.signal);
       }else if(request.method==="POST"&&url.pathname==="/v2/workspace-runtimes"){

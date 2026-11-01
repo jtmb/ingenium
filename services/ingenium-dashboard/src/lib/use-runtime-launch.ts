@@ -272,7 +272,11 @@ export function useRuntimeWorkspace(scope: RuntimeWorkspaceScope, enabled = true
   return { mode, status, workspaces, selectedWorkspaceId, confirmedWorkspaceId, confirmedRuntimeId, confirmedProjectName, error, selectWorkspace, start, retry };
 }
 
-export type RuntimeWorkspaceController = ReturnType<typeof useRuntimeWorkspace> & {stop?:()=>Promise<void>;restart?:()=>Promise<void>;canStop?:boolean;canRestart?:boolean;executionScope?:{schemaVersion:2;instanceId:string;organizationId:string;workspaceId:string;runtimeId:string;bindingHash:string;bindingEpoch:number}};
+export interface RuntimeWorkspaceRegistration {
+  available():Promise<Array<{workspaceId:string;label:string;kind:'cluster'}>>;
+  prepare(workspaceId:string):Promise<void>;
+}
+export type RuntimeWorkspaceController = ReturnType<typeof useRuntimeWorkspace> & {registration?:RuntimeWorkspaceRegistration;stop?:()=>Promise<void>;restart?:()=>Promise<void>;canStop?:boolean;canRestart?:boolean;executionScope?:{schemaVersion:2;instanceId:string;organizationId:string;workspaceId:string;runtimeId:string;bindingHash:string;bindingEpoch:number}};
 
 export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWorkspaceController, enabled = true) {
   const [status, setStatus] = useState<RuntimeLaunchStatus>("loading");

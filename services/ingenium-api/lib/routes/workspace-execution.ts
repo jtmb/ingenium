@@ -2,7 +2,7 @@ import {Router,type Request,type Response,type NextFunction} from 'express';
 import {z} from 'zod';
 import {ProjectError} from '../projects-v2/catalog.mjs';
 import {RequestExecutionError} from '../projects-v2/request-execution-owner.mjs';
-import {listRequestWorkspaceExecutions,confirmRequestWorkspaceExecution,launchRequestWorkspaceExecution,controlRequestWorkspaceExecution} from '../projects-v2/request-execution-catalog.js';
+import {listRequestWorkspaceExecutions,listRequestWorkspaceRegistration,prepareRequestWorkspaceExecution,confirmRequestWorkspaceExecution,launchRequestWorkspaceExecution,controlRequestWorkspaceExecution} from '../projects-v2/request-execution-catalog.js';
 export function createWorkspaceExecutionRouter(){
  const router=Router(),id=z.string().uuid(),workspace=z.string().min(1).max(256);
  const run=(work:(request:Request)=>unknown|Promise<unknown>)=>async(request:Request,response:Response,next:NextFunction)=>{
@@ -24,6 +24,14 @@ export function createWorkspaceExecutionRouter(){
  router.get('/confirm',run(async request=>{
   const q=z.object({organizationId:id,workspaceId:workspace,runtimeId:id}).strict().parse(request.query);
   return {data:await confirmRequestWorkspaceExecution(request,q.organizationId,{projectId:null,workspaceId:q.workspaceId,runtimeId:q.runtimeId})};
+ }));
+ router.get('/available',run(request=>{
+  const q=z.object({organizationId:id}).strict().parse(request.query);
+  return listRequestWorkspaceRegistration(request,q.organizationId);
+ }));
+ router.post('/prepare',run(async request=>{
+  const q=z.object({organizationId:id}).strict().parse(request.query),body=z.object({workspaceId:workspace}).strict().parse(request.body);
+  return {data:await prepareRequestWorkspaceExecution(request,q.organizationId,body.workspaceId)};
  }));
  router.post('/launch',run(async request=>{
   const q=z.object({organizationId:id}).strict().parse(request.query);

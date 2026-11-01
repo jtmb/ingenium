@@ -52,6 +52,10 @@ export interface KubernetesWorkspacePodPlan {
   pod: Record<string, unknown>;
   specSha256: string;
 }
+export interface KubernetesWorkspaceOffer {
+  schemaVersion:1;workspaceId:string;organizationId:string;ownerUserId:string;storagePath:string;storageMappingHash:string;
+  namespace:string;namespaceUid:string;apiCaSha256:string;claimName:string;claimUid:string;claimBytes:number;
+}
 
 function storageBytes(value: unknown): number {
   if (typeof value !== "string") return fail("KUBERNETES_CLAIM_CAPACITY");
@@ -85,17 +89,7 @@ export function planKubernetesWorkspacePod(input: {
     !DNS.test(mapping.claimName) || !UUID.test(mapping.claimUid) || !Number.isSafeInteger(mapping.claimBytes) ||
     mapping.claimBytes < 64 * 1024 * 1024 || mapping.claimBytes > request.limits.diskBytes) return fail("KUBERNETES_WORKSPACE_MAPPING");
 
-  const annotations = claim.metadata.annotations ?? {};
-  if (claim.metadata.namespace !== mapping.namespace || claim.metadata.name !== mapping.claimName ||
-    claim.metadata.uid !== mapping.claimUid || claim.metadata.deletionTimestamp || claim.status?.phase !== "Bound" ||
-    !claim.spec.volumeName || !["ReadWriteOnce", "ReadWriteOncePod"].some(mode =>
-      claim.spec.accessModes?.length === 1 && claim.spec.accessModes[0] === mode) ||
-    storageBytes(claim.spec.resources?.requests?.storage) !== mapping.claimBytes ||
-    storageBytes(claim.status.capacity?.storage) !== mapping.claimBytes ||
-    annotations["com.ingenium.runtime.workspace"] !== request.workspaceId ||
-    annotations["com.ingenium.runtime.organization"] !== request.organizationId ||
-    annotations["com.ingenium.runtime.owner"] !== request.ownerUserId ||
-    annotations["com.ingenium.runtime.storage"] !== request.storageMappingHash) return fail("KUBERNETES_CLAIM_BINDING");
+  observeKubernetesWorkspaceClaim(mapping,identity,claim,request.organizationId,request.ownerUserId,request.limits.diskBytes);
 
   const info = node.status?.nodeInfo;
   if (!info || node.metadata.deletionTimestamp || !UUID.test(node.metadata.uid) ||
@@ -195,4 +189,23 @@ export function planKubernetesWorkspacePod(input: {
     enforcedPodPidsLimit: policy.podPidsLimit, imageId: image.imageId, pullReference: image.pullReference,
     pod, specSha256: provisionHash(pod.spec),
   });
+}
+
+/** Actual assigned storage discovery is descriptive. It grants no workspace
+ * authorization, credential, image approval, Pod creation or execution. */
+export function observeKubernetesWorkspaceClaim(mapping:KubernetesWorkspaceMapping,identity:KubernetesClusterIdentity,claim:KubernetesClaim,organizationId:string,ownerUserId:string,diskBytes:number):KubernetesWorkspaceOffer{
+  if(mapping.schemaVersion!==1||mapping.namespace!==identity.namespace||!DNS.test(mapping.namespace)||!UUID.test(identity.namespaceUid)||!HEX.test(identity.apiCaSha256)||
+    mapping.organizationId!==organizationId||mapping.ownerUserId!==ownerUserId||!UUID.test(organizationId)||!UUID.test(ownerUserId)||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(mapping.workspaceId)||typeof mapping.storagePath!=="string"||mapping.storagePath.length>1024||
+    !mapping.storagePath.startsWith("/")||mapping.storagePath!==mapping.storagePath.trim()||/[\u0000-\u001f\u007f]/.test(mapping.storagePath)||
+    mapping.storagePath.includes("//")||mapping.storagePath.includes("/../")||mapping.storagePath.includes("/./")||mapping.storagePath.endsWith("/..")||mapping.storagePath.endsWith("/.")||
+    !DNS.test(mapping.claimName)||!UUID.test(mapping.claimUid)||!Number.isSafeInteger(mapping.claimBytes)||mapping.claimBytes<67108864||mapping.claimBytes>diskBytes)return fail("KUBERNETES_WORKSPACE_MAPPING");
+  const storageMappingHash=provisionHash(mapping.workspaceId+"\0"+mapping.storagePath),annotations=claim.metadata.annotations??{};
+  if(claim.metadata.namespace!==mapping.namespace||claim.metadata.name!==mapping.claimName||claim.metadata.uid!==mapping.claimUid||claim.metadata.deletionTimestamp||
+    claim.status?.phase!=="Bound"||!claim.spec.volumeName||!["ReadWriteOnce","ReadWriteOncePod"].some(mode=>claim.spec.accessModes?.length===1&&claim.spec.accessModes[0]===mode)||
+    storageBytes(claim.spec.resources?.requests?.storage)!==mapping.claimBytes||storageBytes(claim.status.capacity?.storage)!==mapping.claimBytes||
+    annotations["com.ingenium.runtime.workspace"]!==mapping.workspaceId||annotations["com.ingenium.runtime.organization"]!==organizationId||
+    annotations["com.ingenium.runtime.owner"]!==ownerUserId||annotations["com.ingenium.runtime.storage"]!==storageMappingHash)return fail("KUBERNETES_CLAIM_BINDING");
+  return Object.freeze({schemaVersion:1,workspaceId:mapping.workspaceId,organizationId,ownerUserId,storagePath:mapping.storagePath,storageMappingHash,
+    namespace:identity.namespace,namespaceUid:identity.namespaceUid,apiCaSha256:identity.apiCaSha256,claimName:mapping.claimName,claimUid:mapping.claimUid,claimBytes:mapping.claimBytes});
 }

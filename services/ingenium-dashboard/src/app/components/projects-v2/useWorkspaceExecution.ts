@@ -1,5 +1,5 @@
 "use client";
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {request} from '@/lib/api';
 import type {RuntimeWorkspaceController,RuntimeWorkspaceOption} from '@/lib/use-runtime-launch';
 import {createWorkspaceExecutionClient,createWorkspaceExecutionJournal,type ConfirmedWorkspaceExecution} from './workspace-execution-client.mjs';
@@ -9,6 +9,7 @@ export function useWorkspaceExecution(ownerUserId:string,organizationId:string|n
  const scopeKey=JSON.stringify([ownerUserId,organizationId]);
  const [owned,setOwned]=useState<{scope:string;state:WorkspaceExecutionState}>({scope:'',state:initial});
  const owner=useRef<ReturnType<typeof createWorkspaceExecutionController>|null>(null);
+ const currentScope=useRef(scopeKey);currentScope.current=scopeKey;
  const routeRuntime=useRef(requestedRuntime),lastRequested=useRef(requestedRuntime);routeRuntime.current=requestedRuntime;
  const scopeState=owned.scope===scopeKey?owned.state:initial;
  const state=requestedRuntime && requestedRuntime!==scopeState.confirmed?.runtimeId && lastRequested.current!==requestedRuntime ? initial : scopeState;
@@ -34,10 +35,24 @@ export function useWorkspaceExecution(ownerUserId:string,organizationId:string|n
  const restart=useCallback(async()=>{await owner.current?.restart()},[]);
  const selected=state.options.find(row=>row.workspaceId===state.selectedWorkspaceId);
  const retry=useCallback(()=>{void owner.current?.load(requestedRuntime)},[requestedRuntime]);
+ const registration=useMemo(()=>organizationId?{
+  async available(){
+   if(currentScope.current!==scopeKey||!owner.current)throw Error('Choose a current account and organization.');
+   const rows=await createWorkspaceExecutionClient(request,{ownerUserId,organizationId}).available();
+   if(currentScope.current!==scopeKey)throw Error('The account or organization changed.');return rows;
+  },
+  async prepare(workspaceId:string){
+   const controller=owner.current;if(currentScope.current!==scopeKey||!controller)throw Error('Choose a current account and organization.');
+   await createWorkspaceExecutionClient(request,{ownerUserId,organizationId}).prepare(workspaceId);
+   if(currentScope.current!==scopeKey||owner.current!==controller)return;
+   await controller.load();
+   if(currentScope.current===scopeKey&&owner.current===controller)controller.select(workspaceId);
+  },
+ }:undefined,[ownerUserId,organizationId,scopeKey]);
  const workspace:RuntimeWorkspaceController={mode:'isolated',status:state.status,executionScope:state.confirmed??undefined,
   workspaces:state.options.map((row):RuntimeWorkspaceOption=>({id:row.workspaceId,organizationName:'Managed workspace',projectName:row.label,
    status:['READY','IDLE'].includes(row.claimedState)?'ready':['PROVISIONING','STARTING'].includes(row.claimedState)?'starting':['ABSENT','STOPPED','FAILED'].includes(row.claimedState)?'stopped':'unavailable',runtimeId:row.runtimeId})),
   selectedWorkspaceId:state.selectedWorkspaceId,confirmedWorkspaceId:state.confirmed?.workspaceId??null,confirmedRuntimeId:state.confirmed?.runtimeId??null,
-  confirmedProjectName:null,error:state.error,selectWorkspace,start,retry,stop,restart,canStop:Boolean(selected&&['STARTING','READY','IDLE','STOPPING','FAILED'].includes(selected.claimedState)),canRestart:Boolean(selected&&['STOPPED','FAILED'].includes(selected.claimedState))};
+  confirmedProjectName:null,error:state.error,selectWorkspace,start,retry,stop,restart,registration,canStop:Boolean(selected&&['STARTING','READY','IDLE','STOPPING','FAILED'].includes(selected.claimedState)),canRestart:Boolean(selected&&['STOPPED','FAILED'].includes(selected.claimedState))};
  return {workspace,confirmed:state.confirmed as ConfirmedWorkspaceExecution|null};
 }

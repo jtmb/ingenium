@@ -57,11 +57,12 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--phase-root',type=Path,required=True)
  parser.add_argument('--source-manifest',type=Path,required=True)
- parser.add_argument('--frontend-build',type=int,default=19,help='Completed frontend build receipt to package')
+ parser.add_argument('--frontend-build',type=int,default=25,help='Completed frontend build receipt to package')
  parser.add_argument('--role',choices=['compatibility','control-plane','user-runtime','runtime-manager','runtime-gateway'],default='compatibility')
  args=parser.parse_args();p=args.phase_root.resolve();a=Path(__file__).resolve().parents[1];root=p.parents[1]
  need(a==p.parent/'prd-ui-fixes'and root.name=='skill-zen-fix-1792810845','Existing task/source roots required')
  source=json.loads(args.source_manifest.read_text());epoch=source['sourceDateEpoch'];revision=source['revision']
+ committed={v['path']:v for v in source['files']}
  need(re.fullmatch('[a-f0-9]{40}',revision)and re.fullmatch('[a-f0-9]{64}',source['sourceSha256']),'Exact source manifest required')
  need(command(['git','rev-parse','HEAD'],cwd=a).decode().strip()==revision,'Source revision changed')
  need(not command(['git','status','--porcelain=v1','--untracked-files=all'],cwd=a).strip(),'Commit the integrated source before building')
@@ -99,6 +100,20 @@ def main():
   rows[row['target']]=row
  c=a/'tests/artifacts/current-core-api-capsule-r1'
  extension=a/'packages/ingenium-extension/tests/artifacts/current-extension-memory-build-r1'
+ # Package the same current Core/API inputs accepted by their original compilers.
+ # This binds the existing compiler view to committed source without rebuilding it.
+ owned=json.loads((c/'.task-owner.json').read_text());frozen=p/'coordination/integration'
+ need(owned['owner']==OWNER and owned['currentCoreCompiledFreeze']=='kubernetes-core-build.json'and owned['currentApiInputFreeze']=='kubernetes-api-input-freeze-r7.json','Current Kubernetes Core/API compiler view required')
+ core_build=json.loads((frozen/'kubernetes-core-build.json').read_text())
+ api_build=json.loads((frozen/'kubernetes-api-build-r7.json').read_text())
+ api_inputs=json.loads((frozen/owned['currentApiInputFreeze']).read_text())
+ core_runtime=json.loads((frozen/owned['currentCoreRuntimeFreeze']).read_text())
+ need(core_build['complete']and core_build['compilerStatus']==0 and api_build['complete']and api_build['compilerStatus']==0 and api_build['inventorySha256']==api_inputs['apiInventorySha256']and core_runtime['complete'],'Successful current Core/API builds required')
+ for entry in core_build['coreInputs']+api_inputs['apiContentInputs']+core_runtime['coreRuntimeInputs']:
+  need(entry['source']in committed and committed[entry['source']]['sha256']==entry['sha256'],'Compiler input differs from committed source: '+entry['source'])
+ for entry in core_build['data']:
+  name='packages/ingenium-core/data/'+entry['path'];copied=c/'node_modules/ingenium-core/dist/data'/entry['path']
+  need(name in committed and committed[name]['sha256']==entry['sha256']and copied.is_file()and hashlib.sha256(copied.read_bytes()).hexdigest()==entry['sha256'],'Core migration/data bytes differ: '+name)
  for directory,target in [
   (c/'node_modules/ingenium-core/dist','/app/packages/ingenium-core/dist'),
   (c/'services/ingenium-api/dist','/app/services/ingenium-api/dist'),
@@ -114,7 +129,6 @@ def main():
  front_plan=json.loads((front/('current-dashboard-build-view-plan-r'+number+'.json')).read_text())
  moved=json.loads((front/('dashboard-standalone-move-r'+number+'.json')).read_text());server=moved['relativeAppDir']
  need(front_build['complete']and front_build['status']==0 and front_build['inventorySha256']==front_plan['sourceInventorySha256'],'Completed frontend build required')
- committed={v['path']:v for v in source['files']}
  need(all(row['source']in committed and committed[row['source']]['sha256']==row['sha256']for row in front_plan['files']),'Frontend build differs from committed release source')
  need(moved['to']==str(standalone)and moved['owner']==OWNER and hashlib.sha256((standalone/server/'server.js').read_bytes()).hexdigest()==moved['entrySha256'],'Moved frontend identity changed')
  need((standalone/server/'.next/BUILD_ID').read_text().strip()=='veyra-'+front_plan['sourceInventorySha256'],'Frontend build ID changed')

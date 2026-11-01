@@ -109,7 +109,7 @@ export function runtimeNumberSetting(name: string, fallback: number, minimum: nu
   return parsed;
 }
 
-function defaultLimits(): runtimes.RuntimeLimits {
+export function defaultLimits(): runtimes.RuntimeLimits {
   return {
     cpuMillis: runtimeNumberSetting("INGENIUM_RUNTIME_CPU_MILLIS", 1_000, 100),
     memoryBytes: runtimeNumberSetting("INGENIUM_RUNTIME_MEMORY_BYTES", 1_073_741_824, 134_217_728),

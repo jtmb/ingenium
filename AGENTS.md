@@ -30,6 +30,16 @@ Ingenium is a local-first, self-hosted AI developer workspace built around OpenC
 - The compatibility container mounts the host `~/repos` tree at `/workspace`; do not treat `/workspace` as a database project name or shared authority.
 - The repository's default local profile is loopback-oriented. LAN or remote access requires the separately documented authenticated TLS/operator profile.
 
+### Reusable interface assets
+
+Use the same components and theme tokens wherever the same interface appears.
+Chat, Home and Work share the composer primitives and combined model/effort
+picker; authenticated pages share SiteChrome and Navigation. Workspace selection
+and registration belong in the shared RuntimeWorkspacePicker. Keep route-specific
+state and callbacks in their existing owners, and pass them into these shared
+components. Fix the common component when changing a repeated control; do not
+create another chat bar, sidebar shell or route-specific copy of the same panel.
+
 ### Key directories
 
 | Path | Purpose |

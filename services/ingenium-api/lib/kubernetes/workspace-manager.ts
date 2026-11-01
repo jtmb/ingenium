@@ -7,7 +7,7 @@ import {publicWorkspaceProvisionRequest,decodeWorkspaceRuntimeOriginalProvision,
 import {workspaceManagerCoreV2} from "../projects-v2/workspace-manager-core-client.js";
 import type {WorkspaceV2ImageDefinition} from "../projects-v2/workspace-v2-image.mjs";
 import {KubernetesApiClient} from "./api-client.js";
-import {planKubernetesWorkspacePod,type KubernetesWorkspaceMapping,type KubernetesNodePidPolicy} from "./workspace-pod.js";
+import {planKubernetesWorkspacePod,observeKubernetesWorkspaceClaim,type KubernetesWorkspaceMapping,type KubernetesNodePidPolicy,type KubernetesWorkspaceOffer} from "./workspace-pod.js";
 import {provisionKubernetesWorkspace,inspectKubernetesWorkspaceOriginal,retireKubernetesWorkspaceOriginal} from "./workspace-lifecycle.js";
 
 const CONFIG="/run/ingenium-kubernetes-runtime/config.json",UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -43,6 +43,16 @@ export class KubernetesWorkspaceManager {
   readonly #inFlight=new Set<string>();
   constructor(){if(this.#configuration.value.namespace!==this.#client.namespace)return fail("KUBERNETES_MANAGER_NAMESPACE");}
   #config(){const current=configuration();if(current.sha256!==this.#configuration.sha256)return fail("KUBERNETES_MANAGER_CONFIGURATION_CHANGED");return current.value;}
+  async registrationOffers(input:Record<string,unknown>,signal?:AbortSignal):Promise<KubernetesWorkspaceOffer[]>{
+    if(Object.keys(input).sort().join("|")!=="diskBytes|organizationId|ownerUserId"||typeof input.organizationId!=="string"||!UUID.test(input.organizationId)||
+      typeof input.ownerUserId!=="string"||!UUID.test(input.ownerUserId)||!Number.isSafeInteger(input.diskBytes)||Number(input.diskBytes)<67108864)return fail("KUBERNETES_WORKSPACE_DISCOVERY_SCOPE");
+    const identity=await this.#client.identify(signal),mappings=this.#config().workspaceMappings.filter(row=>row.organizationId===input.organizationId&&row.ownerUserId===input.ownerUserId),offers:KubernetesWorkspaceOffer[]=[];
+    for(const mapping of mappings){
+      const claim=await this.#client.claim(mapping.claimName,signal);
+      offers.push(observeKubernetesWorkspaceClaim(mapping,identity,claim,input.organizationId,input.ownerUserId,Number(input.diskBytes)));
+    }
+    this.#config();return offers;
+  }
   #profile(request:PublicWorkspaceProvisionRequest){
     const config=this.#config(),mapping=config.workspaceMappings.find(row=>row.workspaceId===request.workspaceId);
     if(!mapping)return fail("KUBERNETES_WORKSPACE_MAPPING");

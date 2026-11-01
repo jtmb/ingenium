@@ -21,6 +21,21 @@ export function createWorkspaceExecutionClient(request,scope){
   }
   throw Error('Execution registry exceeds the bounded page limit.');
  }
+ async function available(){
+  const rows=(await request(base+'/available'+query))?.data;
+  if(!Array.isArray(rows)||rows.length>128||new Set(rows.map(row=>row?.workspaceId)).size!==rows.length)throw Error('Assigned workspaces could not be verified.');
+  let instance=null;
+  return rows.map(row=>{
+   if(!row||Object.keys(row).sort().join('|')!=='instanceId|kind|label|organizationId|ownerUserId|projectId|schemaVersion|scopeKind|workspaceId'||row.schemaVersion!==2||!hex(row.instanceId,32)||row.scopeKind!=='workspace'||row.projectId!==null||row.kind!=='cluster'||row.ownerUserId!==owner||row.organizationId!==org||!text(row.workspaceId,256)||!text(row.label,256)||instance!==null&&row.instanceId!==instance)throw Error('Assigned workspace scope changed.');
+   instance=row.instanceId;return Object.freeze({...row});
+  });
+ }
+ async function prepare(workspaceId){
+  if(!text(workspaceId,256))throw Error('Select an assigned workspace.');
+  const row=option((await request(base+'/prepare'+query,{method:'POST',body:JSON.stringify({workspaceId})}))?.data);
+  if(row.workspaceId!==workspaceId||row.runtimeId===null)throw Error('The registered workspace changed. Refresh the list.');
+  return row; // Descriptive metadata only; this never confirms or starts it.
+ }
  const selection=row=>{option(row);if(!uuid(row.runtimeId))throw Error('This target has no prepared runtime.');return {projectId:null,workspaceId:row.workspaceId,runtimeId:row.runtimeId}};
  async function confirm(row){
   selection(row);if(!['READY','IDLE'].includes(row.claimedState))throw Error('This target is not ready for confirmation.');
@@ -40,7 +55,7 @@ export function createWorkspaceExecutionClient(request,scope){
  async function stop(row){selection(row);if(!['STARTING','READY','IDLE','STOPPING','FAILED'].includes(row.claimedState))throw Error('This workspace is not running.');return request(base+'/stop'+query,{method:'POST',body:JSON.stringify({workspaceId:row.workspaceId,runtimeId:row.runtimeId})})}
  async function successor(row){selection(row);if(!['STOPPED','FAILED'].includes(row.claimedState))throw Error('Stop the workspace before reopening it.');const data=(await request(base+'/successor'+query,{method:'POST',body:JSON.stringify({workspaceId:row.workspaceId,runtimeId:row.runtimeId})}))?.data;
   if(!data||data.schemaVersion!==2||data.scopeKind!=='workspace'||data.projectId!==null||!uuid(data.id)||data.id===row.runtimeId||data.workspaceId!==row.workspaceId||data.organizationId!==org||data.ownerUserId!==owner||data.securityEpoch!==row.bindingEpoch||data.state!=='ABSENT'||data.backendContainerId!==null)throw Error('The new execution could not be verified. Refresh before starting it.');return Object.freeze({...data});}
- return {list,confirm,provision,refresh,stop,successor,option};
+ return {list,available,prepare,confirm,provision,refresh,stop,successor,option};
 }
 export function createWorkspaceExecutionJournal(storage,scope){
  if(!storage||!uuid(scope?.ownerUserId)||!uuid(scope?.organizationId))throw Error('Durable execution intent storage is required.');

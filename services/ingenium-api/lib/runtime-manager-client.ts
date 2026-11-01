@@ -249,6 +249,18 @@ export async function preflightOriginalWorkspaceRuntimeV2(input:{publicRequest:r
  const request=runtimeProvision.publicWorkspaceProvisionRequest(input.publicRequest),raw=await originalWorkspaceManagerV2('/v2/workspace-runtimes/preflight',input);
  if(Object.keys(raw).sort().join('|')!=='available|definitionSha256|requestSha256'||raw.available!==true||raw.requestSha256!==runtimeProvision.provisionHash(request)||raw.definitionSha256!==runtimeProvision.provisionHash(input.definition))throw Error('WORKSPACE_V2_PHYSICAL_PREFLIGHT_UNAVAILABLE');
 }
+export async function discoverWorkspaceMappingsV2(scope:{organizationId:string;ownerUserId:string;diskBytes:number}):Promise<readonly import('./kubernetes/workspace-pod.js').KubernetesWorkspaceOffer[]>{
+ if(!UUID.test(scope.organizationId)||!UUID.test(scope.ownerUserId)||!Number.isSafeInteger(scope.diskBytes)||scope.diskBytes<67108864)throw Error('WORKSPACE_V2_DISCOVERY_SCOPE');
+ const raw=await originalWorkspaceManagerV2('/v2/workspace-mappings',scope),rows=raw.workspaces;
+ if(Object.keys(raw).join('|')!=='workspaces'||!Array.isArray(rows)||rows.length>128||new Set(rows.map(row=>row?.workspaceId)).size!==rows.length)throw Error('WORKSPACE_V2_DISCOVERY_RESPONSE');
+ for(const row of rows){
+  if(!row||Object.keys(row).sort().join('|')!=='apiCaSha256|claimBytes|claimName|claimUid|namespace|namespaceUid|organizationId|ownerUserId|schemaVersion|storageMappingHash|storagePath|workspaceId'||row.schemaVersion!==1||row.organizationId!==scope.organizationId||row.ownerUserId!==scope.ownerUserId||
+   typeof row.workspaceId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(row.workspaceId)||typeof row.storagePath!=='string'||!row.storagePath.startsWith('/')||row.storagePath.length>1024||row.storagePath!==row.storagePath.trim()||/[\u0000-\u001f\u007f]/.test(row.storagePath)||row.storagePath.includes('//')||row.storagePath.includes('/../')||row.storagePath.includes('/./')||row.storagePath.endsWith('/..')||row.storagePath.endsWith('/.')||
+   row.storageMappingHash!==runtimeProvision.provisionHash(row.workspaceId+'\0'+row.storagePath)||![row.namespaceUid,row.claimUid].every(value=>typeof value==='string'&&UUID.test(value))||typeof row.apiCaSha256!=='string'||!SHA256.test(row.apiCaSha256)||
+   ![row.namespace,row.claimName].every(value=>typeof value==='string'&&/^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$/.test(value))||!Number.isSafeInteger(row.claimBytes)||row.claimBytes<67108864||row.claimBytes>scope.diskBytes)throw Error('WORKSPACE_V2_DISCOVERY_RESPONSE');
+ }
+ return Object.freeze(rows.map(row=>Object.freeze({...row}))) as readonly import('./kubernetes/workspace-pod.js').KubernetesWorkspaceOffer[];
+}
 export async function postOriginalWorkspaceRuntimeV2(payload:runtimeProvision.PublicWorkspaceProvisionRequest&{capability:string;capabilityExpiresAt:string;bootstrapNonce:string}):Promise<RuntimeManagerInspect>{
  const {capability:_capability,capabilityExpiresAt:_expires,bootstrapNonce:_nonce,...publicRequest}=payload;
  const expected=runtimeProvision.publicWorkspaceProvisionRequest(publicRequest),raw=await originalWorkspaceManagerV2('/v2/workspace-runtimes',payload);

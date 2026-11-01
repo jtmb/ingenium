@@ -51,7 +51,21 @@ case "$restore_staging_dir" in
   *) restore_staging_dir="/app/.ingenium/restore-staging" ;;
 esac
 
+# Forward only these explicit role settings when supplied. Absence preserves
+# legacy manager/image selection; an explicit empty override remains invalid.
+set --
+if [ "${INGENIUM_WORKSPACE_RUNTIME_MANAGER_URL+x}" = x ]; then
+  set -- "$@" "INGENIUM_WORKSPACE_RUNTIME_MANAGER_URL=$INGENIUM_WORKSPACE_RUNTIME_MANAGER_URL"
+fi
+if [ "${INGENIUM_WORKSPACE_RUNTIME_IMAGE+x}" = x ]; then
+  set -- "$@" "INGENIUM_WORKSPACE_RUNTIME_IMAGE=$INGENIUM_WORKSPACE_RUNTIME_IMAGE"
+fi
+if [ "${INGENIUM_USER_RUNTIME_IMAGE+x}" = x ]; then
+  set -- "$@" "INGENIUM_USER_RUNTIME_IMAGE=$INGENIUM_USER_RUNTIME_IMAGE"
+fi
+
 exec env -i \
+  "$@" \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   HOME="/home/ingenium-api" \
   NODE_ENV="production" \
