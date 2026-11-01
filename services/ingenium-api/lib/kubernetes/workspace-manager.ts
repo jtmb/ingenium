@@ -8,7 +8,7 @@ import {workspaceManagerCoreV2} from "../projects-v2/workspace-manager-core-clie
 import type {WorkspaceV2ImageDefinition} from "../projects-v2/workspace-v2-image.mjs";
 import {KubernetesApiClient} from "./api-client.js";
 import {planKubernetesWorkspacePod,observeKubernetesWorkspaceClaim,type KubernetesWorkspaceMapping,type KubernetesNodePidPolicy,type KubernetesWorkspaceOffer} from "./workspace-pod.js";
-import {provisionKubernetesWorkspace,inspectKubernetesWorkspaceOriginal,retireKubernetesWorkspaceOriginal} from "./workspace-lifecycle.js";
+import {provisionKubernetesWorkspace,inspectKubernetesWorkspaceOriginal,retireKubernetesWorkspaceOriginal,finishKubernetesWorkspaceRetirement} from "./workspace-lifecycle.js";
 
 const CONFIG="/run/ingenium-kubernetes-runtime/config.json",UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{code,status:503});};
@@ -133,10 +133,22 @@ export class KubernetesWorkspaceManager {
     try{
       this.#config();const before=await workspaceManagerCoreV2("retirement",{runtimeId},signal);
       if(before.runtime.state!=="STOPPING"||before.original.backendKind!=="kubernetes"||before.runtime.backendContainerId!==before.original.parentContainerId)return fail("KUBERNETES_RETIREMENT_SCOPE");
-      const proof=await retireKubernetesWorkspaceOriginal(runtimeId,signal);
+      const proof=await retireKubernetesWorkspaceOriginal(this.#client,before.original,signal);
       const after=await workspaceManagerCoreV2("retirement",{runtimeId},signal);this.#config();
       if(provisionHash(before)!==provisionHash(after)||proof.parentContainerId!==before.original.parentContainerId)return fail("KUBERNETES_RETIREMENT_SCOPE_CHANGED");
       return proof;
+    }finally{this.#inFlight.delete(runtimeId);}
+  }
+  async finishRetirement(runtimeId:string,signal?:AbortSignal){
+    if(!UUID.test(runtimeId)||this.#inFlight.has(runtimeId))return fail("KUBERNETES_ORIGINAL_REQUEST");
+    this.#inFlight.add(runtimeId);
+    try{
+      this.#config();const before=await workspaceManagerCoreV2("retired",{runtimeId},signal);
+      if(before.original.backendKind!=="kubernetes"||before.runtime.id!==runtimeId||before.runtime.backendContainerId!==before.original.parentContainerId)return fail("KUBERNETES_RETIREMENT_SCOPE");
+      const result=await finishKubernetesWorkspaceRetirement(this.#client,before.original,before.retirement.finishedAt,signal);
+      const after=await workspaceManagerCoreV2("retired",{runtimeId},signal);this.#config();
+      if(provisionHash(before)!==provisionHash(after))return fail("KUBERNETES_RETIREMENT_SCOPE_CHANGED");
+      return result;
     }finally{this.#inFlight.delete(runtimeId);}
   }
 }

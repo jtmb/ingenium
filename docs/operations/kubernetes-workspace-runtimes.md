@@ -157,8 +157,40 @@ Changing the live file invalidates the manager rather than silently adopting a
 new configuration. Mount only the manager's projected Kubernetes credentials;
 workspace Pods retain `automountServiceAccountToken: false`.
 
-Still open: actual composed manager startup, failed/unknown outcome recovery
-across restart, Core failure/successor reconciliation, scoped workspace
-registration, exact candidate packaging, runtime policy installation and the
-full Work/Web/terminal/Git workflow. Source compilation and the separate actual
-transport checks do not close those gates.
+Scoped workspace registration now uses the shared RuntimeWorkspacePicker. Its
+discovery API exposes only the current account/organization's explicitly
+assigned PVC mappings; preparation creates the authorized workspace/runtime
+records without starting a Pod. The optional chart foundation is prepared and
+disabled by default. No PVC assignment or runtime approval is fabricated.
+
+## Retirement after a manager restart
+
+The manager can stop a persisted original after losing its in-memory attachment.
+This is a negative recovery operation: the authenticated private Core owner must
+return the already recorded original while the runtime is STOPPING. Namespace,
+CA, original node UID/boot, Pod UID, complete Pod profile, CRI container, image
+and start time are checked against fresh API observations. A terminal phase or
+404 alone cannot produce a stopped receipt. The manager never reconnects the
+old bootstrap or returns a new placement grant from stored metadata.
+
+The Pod remains under Veyra's retirement finalizer while Core commits the
+physical stopped receipt. Only then does the API call the manager's private
+`finish-retirement` operation. That operation reads the immutable Core receipt,
+checks the same terminal container/finish time, conditionally removes only
+Veyra's finalizer and observes absence. A lost response or manager restart can
+retry cleanup from the stored receipt. It cannot erase the only physical
+witness before Core records it. Other controllers' finalizers are preserved.
+
+Core's `recordedAt` metadata is omitted from the closed physical-original wire
+DTO. The original identity/hash fields are validated and preserved; otherwise
+the persistence timestamp would invalidate placement and predecessor checks.
+The original API compiler/copier passes all340 source inputs/169 compiler roots
+and298 runtime files for this change. No Core migration, dependency copy or new
+test was added. Actual composed-manager restart/retirement acceptance remains
+open; the previous transport smoke is not represented as proof of this change.
+
+Still open: actual composed manager startup, unknown create/start outcomes
+without a committed original, Core failure/successor reconciliation, assigned
+PVC/configuration installation, finite PID qualification, exact image/bootstrap
+approval and the full Work/Web/terminal/Git workflow. Source compilation does
+not close those gates.

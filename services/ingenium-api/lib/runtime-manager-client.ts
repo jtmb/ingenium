@@ -283,6 +283,12 @@ export async function stopOriginalWorkspaceRuntimeV2(runtimeId:string):Promise<i
  ||!Number.isSafeInteger(raw.observedAt)||!Number.isSafeInteger(raw.expiresAt))throw Error('WORKSPACE_V2_RETIREMENT_RESPONSE');
  const proof=Object.freeze({...raw}) as unknown as import('ingenium-core').runtimes.WorkspaceRuntimeRetirementV2;workspaceRetirementResponses.add(proof);return proof;
 }
+/** Negative cleanup only, after the original Core writer has committed retirement. */
+export async function finishOriginalWorkspaceRetirementV2(runtimeId:string):Promise<void>{
+ if(!UUID.test(runtimeId))throw Error('WORKSPACE_V2_RUNTIME_ID');
+ const raw=await originalWorkspaceManagerV2('/v2/workspace-runtimes/'+runtimeId+'/finish-retirement',{});
+ if(Object.keys(raw).sort().join('|')!=='podRemoved|podUid|runtimeId|workspaceId'||raw.runtimeId!==runtimeId||raw.podRemoved!==true||typeof raw.podUid!=='string'||!UUID.test(raw.podUid)||typeof raw.workspaceId!=='string')throw Error('WORKSPACE_V2_RETIREMENT_CLEANUP_RESPONSE');
+}
 
 // Fixed read-only original manager connection; no execution/image/Core grant.
 export {openOriginalManagerConnection,readOriginalManagerConnection,closeOriginalManagerConnection} from "./dot-v2/manager-connection-source.mjs";

@@ -71,6 +71,7 @@ interface Original {
   state: "creating" | "starting" | "stopping" | "stopped" | "unknown";
   failedCleanup?:{podUid:string;podRemoved:boolean;observedAt:number};
   cleanupFailure?:string;
+  attachmentJoined?:boolean;
 }
 const originals = new Map<string, Original>();
 function running(state: Original, pod: KubernetesPod, node: KubernetesNode, identity: KubernetesClusterIdentity): {containerId:string;startedAt:string} {
@@ -231,42 +232,76 @@ export async function inspectKubernetesWorkspaceOriginal(runtimeId: string, sign
   return {original,pod,ready};
 }
 
-/** Retain the API object until this same original CRI container reports a
- * terminal state on the original healthy node. A 404/Failed phase is insufficient. */
-export async function retireKubernetesWorkspaceOriginal(runtimeId: string, signal?: AbortSignal) {
-  const state = originals.get(runtimeId);
-  if (!state?.original || !["starting","stopping"].includes(state.state)) return fail("KUBERNETES_RETIREMENT_ORIGINAL_UNAVAILABLE");
-  const original = state.original, k = original.kubernetes;
-  let pod = await state.client.pod(runtimeId,signal);
-  if (!pod || pod.metadata.uid !== k.podUid || pod.spec.nodeName !== k.nodeName) return fail("KUBERNETES_RETIREMENT_ORIGINAL_CHANGED");
-  state.state = "stopping";
-  if (!pod.metadata.deletionTimestamp) await state.client.deletePod(runtimeId,{uid:pod.metadata.uid,resourceVersion:pod.metadata.resourceVersion},signal);
+/** Negative recovery uses Core's retained original and fresh physical facts.
+ * It cannot recreate an attachment, return placement or adopt a running agent. */
+async function retirementContainer(client:KubernetesApiClient,original:KubernetesWorkspaceRuntimeOriginalProvision,pod:KubernetesPod,signal?:AbortSignal){
+  const k=original.kubernetes,identity=await client.identify(signal),node=await client.node(k.nodeName,signal);
+  const statuses=pod.status?.containerStatuses,container=statuses?.length===1&&statuses[0]?.name==="workspace"?statuses[0]:undefined;
+  const startedAt=container?.state.running?.startedAt??container?.state.terminated?.startedAt;
+  if(identity.namespace!==k.namespace||identity.namespaceUid!==k.namespaceUid||identity.apiCaSha256!==k.apiCaSha256||
+    pod.metadata.namespace!==k.namespace||pod.metadata.name!==k.podName||pod.metadata.uid!==k.podUid||pod.spec.nodeName!==k.nodeName||
+    provisionHash(pod.spec)!==original.publicProfileSha256||node.metadata.uid!==k.nodeUid||node.status?.nodeInfo?.bootID!==k.nodeBootId||
+    !node.status.conditions?.some(c=>c.type==="Ready"&&c.status==="True")||container?.restartCount!==0||
+    container.containerID!=="containerd://"+k.containerId||startedAt!==k.startedAt||
+    ![original.imageId,k.pullReference,"docker-pullable://"+k.pullReference].includes(container.imageID))return fail("KUBERNETES_RETIREMENT_ORIGINAL_CHANGED");
+  return container;
+}
+export async function retireKubernetesWorkspaceOriginal(client:KubernetesApiClient,original:KubernetesWorkspaceRuntimeOriginalProvision,signal?:AbortSignal) {
+  if(!(client instanceof KubernetesApiClient)||decodeWorkspaceRuntimeOriginalProvision(original).backendKind!=="kubernetes")return fail("KUBERNETES_RETIREMENT_ORIGINAL_UNAVAILABLE");
+  const runtimeId=original.runtimeId,state=originals.get(runtimeId),k=original.kubernetes;
+  if(state&&(!state.original||!equal(state.original,original)))return fail("KUBERNETES_RETIREMENT_ORIGINAL_CHANGED");
+  let pod=await client.pod(runtimeId,signal);
+  if(!pod||!pod.metadata.finalizers?.includes(FINALIZER))return fail("KUBERNETES_RETIREMENT_UNCONFIRMED");
+  await retirementContainer(client,original,pod,signal);
+  if(state)state.state="stopping";
+  if (!pod.metadata.deletionTimestamp) await client.deletePod(runtimeId,{uid:pod.metadata.uid,resourceVersion:pod.metadata.resourceVersion},signal);
   const deadline = Date.now()+35000;let finishedAt: string | undefined;
   while (Date.now() < deadline) {
-    signal?.throwIfAborted();pod = await state.client.pod(runtimeId,signal);
+    signal?.throwIfAborted();pod = await client.pod(runtimeId,signal);
     if (!pod || pod.metadata.uid !== k.podUid || pod.spec.nodeName !== k.nodeName || !pod.metadata.finalizers?.includes(FINALIZER)) return fail("KUBERNETES_RETIREMENT_UNCONFIRMED");
-    const statuses = pod.status?.containerStatuses, container = statuses?.length === 1 && statuses[0]?.name === "workspace" ? statuses[0] : undefined;
-    const terminated = container?.state.terminated;
+    const container=await retirementContainer(client,original,pod,signal),terminated=container.state.terminated;
     if (terminated) {
-      const node = await state.client.node(k.nodeName,signal), identity = await state.client.identify(signal);
-      if (node.metadata.uid !== k.nodeUid || node.status?.nodeInfo?.bootID !== k.nodeBootId ||
-        !node.status.conditions?.some(condition => condition.type === "Ready" && condition.status === "True") ||
-        identity.namespaceUid !== k.namespaceUid || identity.apiCaSha256 !== k.apiCaSha256 ||
-        container?.restartCount !== 0 || container.containerID !== "containerd://"+k.containerId ||
-        terminated.containerID !== "containerd://"+k.containerId || terminated.startedAt !== k.startedAt ||
+      if (terminated.containerID !== "containerd://"+k.containerId || terminated.startedAt !== k.startedAt ||
         !stamp(terminated.finishedAt) || Date.parse(terminated.finishedAt) < Date.parse(k.startedAt) ||
+        Date.parse(terminated.finishedAt)>Date.now()||
         !Number.isSafeInteger(terminated.exitCode) || !["Failed","Succeeded"].includes(pod.status?.phase ?? "")) return fail("KUBERNETES_RETIREMENT_TERMINATION_CHANGED");
       finishedAt = terminated.finishedAt;break;
     }
     await pause(250,undefined,{signal});
   }
   if (!finishedAt || !pod) return fail("KUBERNETES_RETIREMENT_TIMEOUT");
-  await joinStoppedKubernetesWorkspaceAttach(runtimeId,k.podUid);
+  if(state&&!state.attachmentJoined){await joinStoppedKubernetesWorkspaceAttach(runtimeId,k.podUid);state.attachmentJoined=true;}
   const observedAt = Date.now();
-  await state.client.finishPodRetirement(runtimeId,pod,signal);
-  state.state = "stopped";originals.delete(runtimeId);
+  // Keep the API object/finalizer until Core durably stores this receipt. A lost
+  // HTTP response or manager restart can re-observe this same terminal original.
   return Object.freeze({schemaVersion:2,kind:"original-workspace-runtime-v2-retirement",runtimeId,workspaceId:original.workspaceId,
     parentContainerId:original.parentContainerId,daemonId:original.daemonId,startIdentity:original.startIdentity,
     publicProfileSha256:original.publicProfileSha256,requestSha256:original.requestSha256,state:"stopped",finishedAt,
     observedAt,expiresAt:observedAt+5000});
+}
+
+/** Core's immutable stopped receipt is required before API-object cleanup. A
+ * 404 here is idempotent cleanup of a recorded retirement, never proof of death. */
+export async function finishKubernetesWorkspaceRetirement(client:KubernetesApiClient,original:KubernetesWorkspaceRuntimeOriginalProvision,finishedAt:string,signal?:AbortSignal){
+  if(!(client instanceof KubernetesApiClient)||decodeWorkspaceRuntimeOriginalProvision(original).backendKind!=="kubernetes"||!stamp(finishedAt))return fail("KUBERNETES_RETIREMENT_RECEIPT_REQUIRED");
+  const runtimeId=original.runtimeId,k=original.kubernetes,state=originals.get(runtimeId),identity=await client.identify(signal);
+  if(identity.namespace!==k.namespace||identity.namespaceUid!==k.namespaceUid||identity.apiCaSha256!==k.apiCaSha256||
+    state&&(!state.original||!equal(state.original,original)))return fail("KUBERNETES_RETIREMENT_ORIGINAL_CHANGED");
+  let pod=await client.pod(runtimeId,signal);
+  if(pod){
+    const container=await retirementContainer(client,original,pod,signal),terminated=container.state.terminated;
+    if(!pod.metadata.deletionTimestamp||!terminated||terminated.containerID!=="containerd://"+k.containerId||terminated.finishedAt!==finishedAt||
+      !Number.isSafeInteger(terminated.exitCode)||!["Failed","Succeeded"].includes(pod.status?.phase??""))return fail("KUBERNETES_RETIREMENT_RECEIPT_CHANGED");
+    if(state&&!state.attachmentJoined){await joinStoppedKubernetesWorkspaceAttach(runtimeId,k.podUid);state.attachmentJoined=true;}
+    // A previous successful patch may have lost its response. Other finalizers
+    // remain intact and absence is still observed before reporting cleanup.
+    if(pod.metadata.finalizers?.includes(FINALIZER))await client.finishPodRetirement(runtimeId,pod,signal);
+    const deadline=Date.now()+5000;
+    while((pod=await client.pod(runtimeId,signal))){
+      if(pod.metadata.uid!==k.podUid||Date.now()>=deadline)return fail("KUBERNETES_RETIREMENT_DELETE_UNCONFIRMED");
+      await pause(100,undefined,{signal});
+    }
+  }
+  originals.delete(runtimeId);
+  return {runtimeId,workspaceId:original.workspaceId,podUid:k.podUid,podRemoved:true as const};
 }

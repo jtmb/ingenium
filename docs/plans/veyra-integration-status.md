@@ -608,3 +608,43 @@ no new checkout, worker or application publisher was created. Actual manager
 deployment/configuration, finite PID qualification, image/bootstrap approval,
 workspace registration, live Work/Web/native/audio and full release acceptance
 remain open. See the [Kubernetes runbook](../operations/kubernetes-workspace-runtimes.md).
+
+## Shared workspace assets deployed; managed recovery source (2026-11-01)
+
+The shared SiteChrome/Navigation, ComposerPrimitives and ModelEffortPicker are
+deployed to both compatibility previews. The repository guide now requires
+those reusable assets and the common RuntimeWorkspacePicker for site features.
+Scoped assigned-workspace discovery/preparation is implemented; it does not
+automatically start execution. Organization discovery has an explicit loading
+state, preventing a transient empty-workspace message before scope is known.
+
+The original Next production build26 passes all315 source inputs. Immutable
+image sha256:c5a5452041aeee76f71f3b3f1a4dc939ed864be61e6b4266d27a3a0079fb3785
+contains source527243e6a9e246ff42bc64bfb0889226d8edf8c2. Both previews retain
+their original Pod UIDs, account/project/conversation/configuration data and
+credential material. Actual IAB readback at localhost:17888 confirms the common
+header/rail on Chat and Work and the single model/effort pill in Chat. The
+expired browser session was signed in again through the existing login form.
+The original conversation remains selected. Work still reports its unavailable
+execution target; no Work turn, model, microphone or audio run is claimed.
+
+The two consumed build generations were safely removed after preservation and
+lifetime checks: compiler views, standalone outputs, OCI archives and compressed
+application layers. Their exact paths/bytes are in the phase cleanup records;
+2,225,455,104 Linux allocated bytes were removed across the two generations.
+No Windows recovery is inferred. Published images, reviewed source/locks and
+minimal regeneration/evidence remain; required active consumers and previously
+protected outputs remain retained under their existing rules.
+
+The optional Kubernetes chart foundation is published on its existing branch
+at ce68259b4fd6306596e1034f167b74b1dd0f4c78, disabled by default. Its ordinary
+validator passes30 charts/31 releases/75 foundation resources. No chart main
+merge, production deployment, runtime policy or host change occurred.
+
+Subsequent manager recovery source fixes the persisted-original timestamp
+mismatch and retains the Pod finalizer until Core records physical retirement.
+Cleanup can then resume from the immutable receipt after a lost response or
+manager restart. It grants no placement or bootstrap adoption. The original
+API compiler/copier passes340 sources/169 compiler roots/298 runtime files.
+Actual composed recovery and all remaining Windows/native, voice, migration,
+production and full release gates remain open. No new tests were added.

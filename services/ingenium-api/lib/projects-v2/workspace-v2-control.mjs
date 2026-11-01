@@ -8,7 +8,7 @@ import {runtimeNumberSetting} from '../runtime-provisioner.js';
 import {deploymentMode} from '../runtime-mode.js';
 import {loadManagerToken} from '../runtime-manager-auth.js';
 import {loadInstalledWorkspaceRuntimeV2ImageDefinition,configuredWorkspaceRuntimeImageV2} from '../dot-v2/core126-installed-image-owner.js';
-import {preflightOriginalWorkspaceRuntimeV2,postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2} from '../runtime-manager-client.js';
+import {preflightOriginalWorkspaceRuntimeV2,postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2,finishOriginalWorkspaceRetirementV2} from '../runtime-manager-client.js';
 import {qualifyWorkspaceV2Placement} from './workspace-v2-placement.mjs';
 const pending=new Map(),inFlight=new Map(),notDispatchedStarts=new WeakMap();
 export function workspaceStartWasNotDispatched(error,runtimeId){return !!error&&typeof error==='object'&&notDispatchedStarts.get(error)===runtimeId;}
@@ -71,13 +71,19 @@ export function originalWorkspaceAdmissionV2(selector){
  if(JSON.stringify(current)!==JSON.stringify(e.definition))return fail('WORKSPACE_V2_IMAGE_APPROVAL_CHANGED');
  return {publicRequest:e.publicRequest,definition:e.definition,nonce:e.nonce,credentialId:e.credentialId,retiredPredecessors:retiredPredecessorsV2(e.db,e.publicRequest)};
 }
+// The stored receipt's recordedAt is database metadata, not a field in the
+// closed physical-original protocol or its hash.
+function wireWorkspaceOriginalV2(stored){
+ const {recordedAt,...original}=stored;
+ return provision.decodeWorkspaceRuntimeOriginalProvision(original);
+}
 function retiredPredecessorsV2(db,publicRequest){
  const rows=db.prepare('SELECT r.id,r.backend_name,r.state FROM runtime_instances r WHERE r.workspace_id=? AND r.id<>? ORDER BY r.id LIMIT 513').all(publicRequest.workspaceId,publicRequest.runtimeId);
  if(rows.length>512)return fail('WORKSPACE_V2_PREDECESSOR_BOUND');
  return rows.map(row=>{
   const original=provision.readWorkspaceRuntimeOriginalProvision(db,row.id),receipt=db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(row.id);
   if(!original||!receipt||!['STOPPED','FAILED','REVOKED'].includes(row.state)||receipt.workspace_id!==publicRequest.workspaceId||receipt.parent_container_id!==original.parentContainerId||receipt.daemon_id!==original.daemonId||receipt.start_identity!==original.startIdentity||receipt.public_profile_sha256!==original.publicProfileSha256||receipt.original_request_sha256!==original.requestSha256)return fail('WORKSPACE_V2_PREDECESSOR_RETIREMENT_REQUIRED');
-  return {runtimeId:row.id,backendName:row.backend_name,original,finishedAt:receipt.finished_at,proofSha256:receipt.proof_sha256};
+  return {runtimeId:row.id,backendName:row.backend_name,original:wireWorkspaceOriginalV2(original),finishedAt:receipt.finished_at,proofSha256:receipt.proof_sha256};
  });
 }
 export function originalWorkspaceProfileV2(runtimeId){
@@ -85,7 +91,7 @@ export function originalWorkspaceProfileV2(runtimeId){
  if(!r||!raw||!['STARTING','READY','IDLE'].includes(r.state))return fail('WORKSPACE_V2_ORIGINAL_PROFILE_UNAVAILABLE');
  const w=runtimes.getAuthorizedWorkspaceV2(r.workspaceId),original=provision.readWorkspaceRuntimeOriginalProvision(db,runtimeId);
  if(!w||!original||w.status!=='authorized'||w.securityEpoch!==r.securityEpoch||w.storageMappingHash!==original.bindingHash||w.ownerUserId!==r.ownerUserId||w.organizationId!==r.organizationId||r.backendContainerId!==original.parentContainerId)return fail('WORKSPACE_V2_ORIGINAL_PROFILE_CHANGED');
- return {runtime:r,workspace:w,original,definition:loadInstalledWorkspaceRuntimeV2ImageDefinition(original.imageId)};
+ return {runtime:r,workspace:w,original:wireWorkspaceOriginalV2(original),definition:loadInstalledWorkspaceRuntimeV2ImageDefinition(original.imageId)};
 }
 function manager(request){
  if(request.headers.cookie!==undefined||request.headers.origin!==undefined||request.headers['content-type']!=='application/json')return fail('WORKSPACE_V2_MANAGER_AUTH');
@@ -95,7 +101,7 @@ function manager(request){
  * Only these exact private paths receive the original manager/bootstrap audiences. */
 export function workspaceV2PrivateIngress(req,res,next){
  const path=req.path;
- if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
+ if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/internal/workspace-runtime-v2/retired','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
  try{
   if(req.method!=='POST'||req.originalUrl!==path||!req.body||JSON.stringify(req.body).length>2048)return fail('WORKSPACE_V2_PRIVATE_INPUT');
   let data;
@@ -110,7 +116,7 @@ export function workspaceV2PrivateIngress(req,res,next){
   }else{
    manager(req);
    if(path.endsWith('/admission')){if(Object.keys(req.body).sort().join('|')!=='requestId|requestSha256|runtimeId')return fail('WORKSPACE_V2_ADMISSION_INPUT');data=originalWorkspaceAdmissionV2(req.body);}
-   else{if(Object.keys(req.body).join('|')!=='runtimeId')return fail('WORKSPACE_V2_PROFILE_INPUT');data=path.endsWith('/retirement')?originalWorkspaceRetirementProfileV2(req.body.runtimeId):originalWorkspaceProfileV2(req.body.runtimeId);}
+   else{if(Object.keys(req.body).join('|')!=='runtimeId')return fail('WORKSPACE_V2_PROFILE_INPUT');data=path.endsWith('/retirement')?originalWorkspaceRetirementProfileV2(req.body.runtimeId):path.endsWith('/retired')?originalWorkspaceRetiredProfileV2(req.body.runtimeId):originalWorkspaceProfileV2(req.body.runtimeId);}
   }
   res.status(200).json({data});
  }catch(error){res.status(error.status??503).json({error:{code:error.code??'WORKSPACE_V2_PRIVATE_UNAVAILABLE'}});}
@@ -138,16 +144,32 @@ export function requireOriginalWorkspaceMcpAdmissionV2(c,nonce){
 function originalWorkspaceRetirementProfileV2(runtimeId){
  const r=runtimes.getWorkspaceRuntimeV2(runtimeId),db=dbOf(),o=provision.readWorkspaceRuntimeOriginalProvision(db,runtimeId),w=o&&runtimes.getAuthorizedWorkspaceV2(o.workspaceId);
  if(!r||!o||!w||r.state!=='STOPPING'||r.backendContainerId!==o.parentContainerId||r.workspaceId!==o.workspaceId||w.id!==o.workspaceId||r.ownerUserId!==o.ownerUserId||r.organizationId!==o.organizationId||w.ownerUserId!==o.ownerUserId||w.organizationId!==o.organizationId||w.storageMappingHash!==o.bindingHash) return fail('WORKSPACE_V2_RETIREMENT_PROFILE_UNAVAILABLE');
- return {runtime:r,workspace:w,original:o};
+ return {runtime:r,workspace:w,original:wireWorkspaceOriginalV2(o)};
+}
+function originalWorkspaceRetiredProfileV2(runtimeId){
+ const db=dbOf(),r=runtimes.getWorkspaceRuntimeV2(runtimeId),o=provision.readWorkspaceRuntimeOriginalProvision(db,runtimeId),w=o&&runtimes.getAuthorizedWorkspaceV2(o.workspaceId);
+ const receipt=db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(runtimeId);
+ if(!r||!o||!w||o.backendKind!=='kubernetes'||!['STOPPED','FAILED','REVOKED'].includes(r.state)||!receipt||r.backendContainerId!==o.parentContainerId||r.workspaceId!==o.workspaceId||r.ownerUserId!==o.ownerUserId||r.organizationId!==o.organizationId||w.ownerUserId!==o.ownerUserId||w.organizationId!==o.organizationId||w.storageMappingHash!==o.bindingHash||receipt.workspace_id!==o.workspaceId||receipt.parent_container_id!==o.parentContainerId||receipt.daemon_id!==o.daemonId||receipt.start_identity!==o.startIdentity||receipt.public_profile_sha256!==o.publicProfileSha256||receipt.original_request_sha256!==o.requestSha256||!Number.isFinite(Date.parse(receipt.finished_at))||!(/^[a-f0-9]{64}$/).test(receipt.proof_sha256))return fail('WORKSPACE_V2_RETIRED_PROFILE_UNAVAILABLE');
+ return {runtime:r,workspace:w,original:wireWorkspaceOriginalV2(o),retirement:{finishedAt:receipt.finished_at,proofSha256:receipt.proof_sha256}};
 }
 export async function stopWorkspaceRuntimeFromRequestV2(request,selection){
  const first=currentUser(request,selection);if(inFlight.has(first.runtime.id))return fail('WORKSPACE_V2_IN_FLIGHT');
  inFlight.set(first.runtime.id,'retirement');
  try{
+  const original=provision.readWorkspaceRuntimeOriginalProvision(dbOf(),first.runtime.id);
+  if(original?.backendKind==='kubernetes'&&['STOPPED','FAILED'].includes(first.runtime.state)){
+   originalWorkspaceRetiredProfileV2(first.runtime.id);
+   await finishOriginalWorkspaceRetirementV2(first.runtime.id);
+   return currentUser(request,selection).runtime;
+  }
   const stopping=runtimes.beginWorkspaceRuntimeRetirementV2(first.runtime.id,first.runtime.revision,first.workspace.ownerUserId);
   const proof=await stopOriginalWorkspaceRuntimeV2(stopping.id),same=currentUser(request,selection);
   if(!authenticatedWorkspaceRetirementV2(proof)||same.identityKey!==first.identityKey||same.workspace.storageMappingHash!==first.workspace.storageMappingHash||same.workspace.securityEpoch!==first.workspace.securityEpoch||same.runtime.revision!==stopping.revision||same.runtime.state!=='STOPPING')return fail('WORKSPACE_V2_RETIREMENT_SCOPE_CHANGED');
-  return runtimes.recordWorkspaceRuntimeRetirementV2(stopping.id,stopping.revision,proof,'runtime-manager');
+  const stopped=runtimes.recordWorkspaceRuntimeRetirementV2(stopping.id,stopping.revision,proof,'runtime-manager');
+  // Persist the physical stopped receipt before releasing Kubernetes' finalizer.
+  // An interrupted cleanup can then be retried without replaying an old start.
+  if(original?.backendKind==='kubernetes')await finishOriginalWorkspaceRetirementV2(stopped.id);
+  return stopped;
  }finally{inFlight.delete(first.runtime.id);}
 }
 export function prepareWorkspaceSuccessorFromRequestV2(request,selection){

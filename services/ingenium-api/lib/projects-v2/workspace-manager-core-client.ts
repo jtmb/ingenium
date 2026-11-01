@@ -12,11 +12,15 @@ export interface WorkspaceManagerOriginalV2 {
   workspace:{id:string;organizationId:string;ownerUserId:string;storageMappingHash:string;securityEpoch:number;[key:string]:unknown};
   original:WorkspaceRuntimeOriginalProvision;definition?:WorkspaceV2ImageDefinition;
 }
+export interface WorkspaceManagerRetiredV2 extends WorkspaceManagerOriginalV2 {
+  retirement:{finishedAt:string;proofSha256:string};
+}
 /** The original private Core endpoint/token owner. No caller-provided URL,
  * credentials, transport, positive response or database connection is accepted. */
 export async function workspaceManagerCoreV2(operation:"admission",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2>;
 export async function workspaceManagerCoreV2(operation:"original"|"retirement",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerOriginalV2>;
-export async function workspaceManagerCoreV2(operation:"admission"|"original"|"retirement",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2> {
+export async function workspaceManagerCoreV2(operation:"retired",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerRetiredV2>;
+export async function workspaceManagerCoreV2(operation:"admission"|"original"|"retirement"|"retired",body:unknown,signal?:AbortSignal):Promise<WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2|WorkspaceManagerRetiredV2> {
   const setting=process.env.INGENIUM_RUNTIME_API_URL;
   if(typeof setting!=="string"||!setting||setting!==setting.trim())throw Error("WORKSPACE_V2_CORE_URL");
   const base=new URL(setting);
@@ -30,7 +34,7 @@ export async function workspaceManagerCoreV2(operation:"admission"|"original"|"r
   for await(const chunk of response.body){size+=chunk.length;if(size>1024*1024)throw Error("WORKSPACE_V2_CORE_BOUND");chunks.push(Buffer.from(chunk));}
   const bytes=Buffer.concat(chunks);
   try{
-    const envelope=parseStrictJobJson(bytes,1024*1024) as {data?:WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2};
+    const envelope=parseStrictJobJson(bytes,1024*1024) as {data?:WorkspaceManagerAdmissionV2|WorkspaceManagerOriginalV2|WorkspaceManagerRetiredV2};
     if(!envelope.data||typeof envelope.data!=="object"||Array.isArray(envelope.data))throw Error("WORKSPACE_V2_CORE_RESPONSE");
     return envelope.data;
   }finally{bytes.fill(0);}
