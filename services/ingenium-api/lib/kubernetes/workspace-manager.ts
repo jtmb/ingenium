@@ -64,7 +64,8 @@ export class KubernetesWorkspaceManager {
     if(Object.keys(input).sort().join("|")!=="definition|publicRequest|retiredPredecessors")return fail("KUBERNETES_PREFLIGHT_INPUT");
     const request=publicWorkspaceProvisionRequest(input.publicRequest as PublicWorkspaceProvisionRequest),definition=input.definition as WorkspaceV2ImageDefinition;
     const {mapping,policy}=this.#profile(request),identity=await this.#client.identify(signal),node=await this.#client.node(policy.nodeName,signal),claim=await this.#client.claim(mapping.claimName,signal);
-    planKubernetesWorkspacePod({request,mapping,nodePidPolicy:policy,identity,node,claim,image:immutableImage(definition),apiUrl:process.env.INGENIUM_RUNTIME_API_URL!});
+    const runtimeClass=policy.schemaVersion===2?await this.#client.runtimeClass(policy.runtimeClassName,signal):undefined;
+    planKubernetesWorkspacePod({request,mapping,nodePidPolicy:policy,identity,node,claim,runtimeClass,image:immutableImage(definition),apiUrl:process.env.INGENIUM_RUNTIME_API_URL!});
     await this.#predecessors(request,input.retiredPredecessors,mapping,signal);
     this.#config();return {available:true,requestSha256:provisionHash(request),definitionSha256:provisionHash(definition)};
   }

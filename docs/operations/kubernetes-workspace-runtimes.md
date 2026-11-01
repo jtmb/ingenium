@@ -194,3 +194,40 @@ without a committed original, Core failure/successor reconciliation, assigned
 PVC/configuration installation, finite PID qualification, exact image/bootstrap
 approval and the full Work/Web/terminal/Git workflow. Source compilation does
 not close those gates.
+
+## Dedicated Work runtime class
+
+The planner also supports an explicitly qualified node PID policy2 with
+`runtimeClassName`, its actual `runtimeClassUid`, `runtimeHandler` and the
+node-local `baseRuntimeSpecSha256`. All original node/boot/version, finite
+limit, configuration digest and expiry fields remain required. It reads the
+named RuntimeClass through verified Kubernetes transport and refuses changed
+UID/handler, deletion, overhead or scheduling mutation. Policy1 retains the
+existing qualified kubelet path. Neither policy accepts an unlimited limit.
+
+Policy2 adds the class to the Pod profile and requires the bootstrap to read
+the actual finite `/sys/fs/cgroup/pids.max` before consuming its capability
+frame. A missing, unlimited, changed or inaccessible leaf limit aborts before
+bootstrap authority is used. This selects a dedicated containerd handler for
+Work instead of changing the default handler or every Pod's kubelet setting.
+See [Kubernetes RuntimeClass](https://kubernetes.io/docs/concepts/containers/runtime-class/)
+and the versioned [containerd2.4.2 configuration](https://github.com/containerd/containerd/blob/v2.4.2/docs/cri/config.md).
+
+The explicit RuntimeClass manifest is in
+`ops/kubernetes/veyra-workspace-runtime-class.yaml`; the proposed handler
+fragment is `config/kubernetes/containerd-workspace-runtime.toml`. These are
+reviewable deployment inputs, not an installed or qualified handler. The
+existing worker2 runtime is `/opt/containerd-k8s/bin/containerd`, unit
+`containerd-k8s.service`, configuration `/etc/containerd-k8s/config.toml`.
+Generate the base OCI spec with that runtime's `ctr oci spec` and set its Linux
+resource PID limit to128, preserving all other generated defaults. Confirm
+the effective configuration retains every original handler/default, record
+both file digests, review the daemon restart and qualify actual kernel
+enforcement, original bootstrap and retirement before approval/activation.
+Do not touch the retired Docker/Swarm runtime or substitute another daemon.
+
+No host configuration, runtime class, daemon, kubelet or live approval has
+been changed. The current operator SSH identity cannot perform noninteractive
+sudo on worker2; applying the reviewed host configuration still requires
+that actual host authorization. A failed authorization must not be bypassed
+with a privileged Pod, a different identity or a weaker process limit.

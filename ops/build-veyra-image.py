@@ -103,13 +103,13 @@ def main():
  # Package the same current Core/API inputs accepted by their original compilers.
  # This binds the existing compiler view to committed source without rebuilding it.
  owned=json.loads((c/'.task-owner.json').read_text());frozen=p/'coordination/integration'
- need(owned['owner']==OWNER and owned['currentCoreCompiledFreeze']=='kubernetes-core-build.json'and owned['currentApiInputFreeze']=='kubernetes-api-input-freeze-r8.json','Current Kubernetes Core/API compiler view required')
+ need(owned['owner']==OWNER and owned['currentCoreCompiledFreeze']=='kubernetes-core-build.json'and owned['currentApiInputFreeze']=='kubernetes-api-input-freeze-r9.json','Current Kubernetes Core/API compiler view required')
  core_build=json.loads((frozen/'kubernetes-core-build.json').read_text())
- api_build=json.loads((frozen/'kubernetes-api-build-r8.json').read_text())
+ api_build=json.loads((frozen/'kubernetes-api-build-r9.json').read_text())
  api_inputs=json.loads((frozen/owned['currentApiInputFreeze']).read_text())
  core_runtime=json.loads((frozen/owned['currentCoreRuntimeFreeze']).read_text())
  need(core_build['complete']and core_build['compilerStatus']==0 and api_build['complete']and api_build['compilerStatus']==0 and api_build['inventorySha256']==api_inputs['apiInventorySha256']and core_runtime['complete'],'Successful current Core/API builds required')
- for entry in core_build['coreInputs']+api_inputs['apiContentInputs']+core_runtime['coreRuntimeInputs']:
+ for entry in core_build['coreInputs']+api_inputs['apiContentInputs']+api_inputs.get('apiRuntimeOverlayInputs',[])+core_runtime['coreRuntimeInputs']:
   need(entry['source']in committed and committed[entry['source']]['sha256']==entry['sha256'],'Compiler input differs from committed source: '+entry['source'])
  for entry in core_build['data']:
   name='packages/ingenium-core/data/'+entry['path'];copied=c/'node_modules/ingenium-core/dist/data'/entry['path']

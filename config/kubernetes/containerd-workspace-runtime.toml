@@ -1,0 +1,9 @@
+# Reviewed input fragment only. Do not replace the existing containerd config.
+# Install/qualify the node-local OCI base spec before activating this handler.
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.veyra-workspace]
+  runtime_type = 'io.containerd.runc.v2'
+  base_runtime_spec = '/etc/containerd-k8s/veyra-workspace-base.json'
+  cgroup_writable = false
+  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.veyra-workspace.options]
+    BinaryName = '/opt/containerd-k8s/bin/runc'
+    SystemdCgroup = true

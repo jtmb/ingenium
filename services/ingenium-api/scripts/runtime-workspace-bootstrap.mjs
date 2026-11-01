@@ -3,12 +3,23 @@ import {open,lstat,mkdir} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {deriveWorkspaceRuntimeOpenCodePasswordV2} from '/app/packages/ingenium-core/dist/lib/tools/workspace-runtime-auth.mjs';
 import {spawn} from 'node:child_process';
-import {parseStrictJobJson} from '../lib/dot-v2/job-bootstrap-frame.mjs';
+import {parseStrictJobJson} from "../lib/dot-v2/job-bootstrap-frame.mjs";
 const fail=()=>{throw Error('Workspace runtime bootstrap unavailable');};
 const env=name=>{const v=process.env[name];if(typeof v!=='string'||!v||v!==v.trim()||/[\u0000-\u001f]/.test(v))return fail();return v;};
 async function frame(){return await new Promise((resolve,reject)=>{let bytes=Buffer.alloc(0);const t=setTimeout(()=>done(Error('bootstrap deadline')),10000);const done=(e,v)=>{bytes.fill(0);clearTimeout(t);process.stdin.off('data',data);process.stdin.off('error',error);process.stdin.pause();e?reject(e):resolve(v);};const error=()=>done(Error('bootstrap input unavailable'));const data=b=>{bytes=Buffer.concat([bytes,b]);if(bytes.length>1024)return done(Error('bootstrap bound'));const n=bytes.indexOf(10);if(n<0)return;if(n!==bytes.length-1)return done(Error('bootstrap frame boundary'));try{const v=parseStrictJobJson(bytes,1024);bytes.fill(0);done(null,v);}catch{bytes.fill(0);done(Error('bootstrap frame invalid'));}};process.stdin.on('data',data);process.stdin.once('error',error);process.stdin.resume();});}
+async function requireRuntimeClassPidLimit(){
+ const expected=process.env.INGENIUM_KUBERNETES_PIDS_LIMIT;if(expected===undefined)return;
+ if(!/^[1-9]\d{1,3}$/.test(expected)||Number(expected)<16||Number(expected)>4096)return fail();
+ const fd=await open('/sys/fs/cgroup/pids.max',constants.O_RDONLY|constants.O_NOFOLLOW);
+ try{
+  const st=await fd.stat();if(!st.isFile()||st.uid!==0||(st.mode&0o022))return fail();
+  const bytes=Buffer.alloc(33),read=await fd.read(bytes,0,bytes.length,0);
+  if(read.bytesRead<2||read.bytesRead>32||bytes.subarray(0,read.bytesRead).toString('ascii')!==expected+'\n')return fail();
+ }finally{await fd.close();}
+}
 async function main(){
  if(process.getuid?.()!==1000||process.getgid?.()!==1000||process.env.INGENIUM_EXECUTION_SCOPE!=='workspace'||['INGENIUM_PROJECT','INGENIUM_PROJECT_ID','INGENIUM_PROJECT_NAME'].some(k=>Object.hasOwn(process.env,k)))return fail();
+ await requireRuntimeClassPidLimit();
  const f=await frame();if(!f||Object.keys(f).sort().join('|')!=='capability|nonce|protocol|requestId|schemaVersion|startIdentity'||f.schemaVersion!==2||f.protocol!=='workspace-runtime-v2'||!/^[a-f0-9]{64}$/.test(f.nonce)||!/^[a-f0-9]{64}$/.test(f.startIdentity)||typeof f.requestId!=='string'||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(f.capability))return fail();
  const api=new URL(env('INGENIUM_API_URL'));if(api.protocol!=='http:'||api.pathname!=='/api/v1'||api.username||api.password||api.search||api.hash)return fail();
  const url=new URL(api);url.pathname+='/runtime/workspace-v2/bootstrap';

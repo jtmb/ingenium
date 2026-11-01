@@ -1,7 +1,7 @@
 import type { PublicWorkspaceProvisionRequest } from "ingenium-core/lib/tools/runtime-original-provision";
 import { publicWorkspaceProvisionRequest, provisionHash } from "ingenium-core/lib/tools/runtime-original-provision";
 import { workspaceRuntimeEnvironmentV2 } from "../runtime-manager-contract.js";
-import type { KubernetesClaim, KubernetesClusterIdentity, KubernetesNode } from "./api-client.js";
+import type { KubernetesClaim, KubernetesClusterIdentity, KubernetesNode, KubernetesRuntimeClass } from "./api-client.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX = /^[a-f0-9]{64}$/;
@@ -25,10 +25,9 @@ export interface KubernetesWorkspaceImage {
   sourceRevision: string;
   validUntil: number;
 }
-/** Operator qualification of the actual node's kubelet setting. This input is
+/** Operator qualification of the actual node's process enforcement. This input is
  * descriptive configuration, never a runtime/bootstrap or readiness proof. */
-export interface KubernetesNodePidPolicy {
-  schemaVersion: 1;
+interface KubernetesNodePidFacts {
   nodeName: string;
   nodeUid: string;
   nodeBootId: string;
@@ -39,6 +38,9 @@ export interface KubernetesNodePidPolicy {
   configurationSha256: string;
   validUntil: number;
 }
+export type KubernetesNodePidPolicy=KubernetesNodePidFacts&({schemaVersion:1}|{
+  schemaVersion:2;runtimeClassName:string;runtimeClassUid:string;runtimeHandler:string;baseRuntimeSpecSha256:string;
+});
 export interface KubernetesWorkspacePodPlan {
   schemaVersion: 1;
   backendKind: "kubernetes";
@@ -76,6 +78,7 @@ export function planKubernetesWorkspacePod(input: {
   claim: KubernetesClaim;
   node: KubernetesNode;
   nodePidPolicy: KubernetesNodePidPolicy;
+  runtimeClass?:KubernetesRuntimeClass;
   image: KubernetesWorkspaceImage;
   apiUrl: string;
 }): KubernetesWorkspacePodPlan {
@@ -94,12 +97,21 @@ export function planKubernetesWorkspacePod(input: {
   const info = node.status?.nodeInfo;
   if (!info || node.metadata.deletionTimestamp || !UUID.test(node.metadata.uid) ||
     !node.status?.conditions?.some(condition => condition.type === "Ready" && condition.status === "True") ||
-    policy.schemaVersion !== 1 || policy.nodeName !== node.metadata.name || policy.nodeUid !== node.metadata.uid ||
+    ![1,2].includes(policy.schemaVersion) || policy.nodeName !== node.metadata.name || policy.nodeUid !== node.metadata.uid ||
     policy.nodeBootId !== info.bootID || policy.kubeletVersion !== info.kubeletVersion ||
     policy.kernelVersion !== info.kernelVersion || policy.containerRuntimeVersion !== info.containerRuntimeVersion ||
     !HEX.test(policy.configurationSha256) || !Number.isSafeInteger(policy.validUntil) || policy.validUntil <= now + 45000 ||
     !Number.isSafeInteger(policy.podPidsLimit) || policy.podPidsLimit < 16 ||
     policy.podPidsLimit > Math.min(request.limits.pidsLimit, request.limits.processLimit)) return fail("KUBERNETES_POD_PID_LIMIT_UNQUALIFIED");
+  const keys=["schemaVersion","nodeName","nodeUid","nodeBootId","kubeletVersion","kernelVersion","containerRuntimeVersion","podPidsLimit","configurationSha256","validUntil"];
+  if(policy.schemaVersion===2){
+    keys.push("runtimeClassName","runtimeClassUid","runtimeHandler","baseRuntimeSpecSha256");
+    const runtime=input.runtimeClass;
+    if(!DNS.test(policy.runtimeClassName)||!DNS.test(policy.runtimeHandler)||!UUID.test(policy.runtimeClassUid)||!HEX.test(policy.baseRuntimeSpecSha256)||
+      !runtime||runtime.metadata.name!==policy.runtimeClassName||runtime.metadata.uid!==policy.runtimeClassUid||runtime.metadata.deletionTimestamp||
+      runtime.handler!==policy.runtimeHandler||runtime.overhead!==undefined||runtime.scheduling!==undefined)return fail("KUBERNETES_RUNTIME_CLASS_UNQUALIFIED");
+  }else if(input.runtimeClass!==undefined)return fail("KUBERNETES_RUNTIME_CLASS_UNQUALIFIED");
+  if(Object.keys(policy).sort().join("|")!==keys.sort().join("|"))return fail("KUBERNETES_POD_PID_LIMIT_UNQUALIFIED");
   if (!/^sha256:[a-f0-9]{64}$/.test(image.imageId) ||
     !/^[a-z0-9][a-z0-9./:_-]{0,254}@sha256:[a-f0-9]{64}$/.test(image.pullReference) ||
     !/^[a-f0-9]{40}$/.test(image.sourceRevision) ||
@@ -118,6 +130,9 @@ export function planKubernetesWorkspacePod(input: {
     const split = value.indexOf("=");
     return { name: value.slice(0, split), value: value.slice(split + 1) };
   });
+  // The runtime-class bootstrap must observe this finite kernel leaf limit
+  // before reading any capability frame. Kubelet policy1 remains unchanged.
+  if(policy.schemaVersion===2)environment.push({name:"INGENIUM_KUBERNETES_PIDS_LIMIT",value:String(policy.podPidsLimit)});
   const memory = String(request.limits.memoryBytes), cpu = request.limits.cpuMillis + "m";
   const pod = {
     apiVersion: "v1", kind: "Pod",
@@ -134,6 +149,7 @@ export function planKubernetesWorkspacePod(input: {
       },
     },
     spec: {
+      ...(policy.schemaVersion===2?{runtimeClassName:policy.runtimeClassName}:{}),
       restartPolicy: "Never", terminationGracePeriodSeconds: 30,
       serviceAccountName: "default", automountServiceAccountToken: false, enableServiceLinks: false,
       hostNetwork: false, hostPID: false, hostIPC: false, shareProcessNamespace: false,

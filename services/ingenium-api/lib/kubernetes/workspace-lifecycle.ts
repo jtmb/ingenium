@@ -99,8 +99,9 @@ function running(state: Original, pod: KubernetesPod, node: KubernetesNode, iden
 async function recheck(state: Original, signal?: AbortSignal) {
   const identity = await state.client.identify(signal), node = await state.client.node(state.nodePidPolicy.nodeName,signal);
   const claim = await state.client.claim(state.mapping.claimName,signal);
+  const runtimeClass=state.nodePidPolicy.schemaVersion===2?await state.client.runtimeClass(state.nodePidPolicy.runtimeClassName,signal):undefined;
   const plan = planKubernetesWorkspacePod({request:state.request,mapping:state.mapping,identity,node,claim,
-    nodePidPolicy:state.nodePidPolicy,image:state.image,apiUrl:state.apiUrl});
+    nodePidPolicy:state.nodePidPolicy,runtimeClass,image:state.image,apiUrl:state.apiUrl});
   if (state.plan && !equal(state.plan,plan)) return fail("KUBERNETES_ORIGINAL_CONFIGURATION_CHANGED");
   return {identity,node,plan};
 }

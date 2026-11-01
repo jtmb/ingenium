@@ -77,6 +77,10 @@ export interface KubernetesNode extends KubernetesResource {
     nodeInfo?: { bootID: string; kernelVersion: string; containerRuntimeVersion: string; kubeletVersion: string };
   };
 }
+export interface KubernetesRuntimeClass extends KubernetesResource {
+  apiVersion:"node.k8s.io/v1";kind:"RuntimeClass";handler:string;
+  overhead?:unknown;scheduling?:unknown;
+}
 interface Credentials { token?: string; cert?: string; key?: string; }
 export interface OperatorKubernetesCredentials {
   /** Existing operator credentials, supplied only by a trusted operator command. Never an HTTP input. */
@@ -116,9 +120,9 @@ function origin(server: string): URL {
   return url;
 }
 
-function resource<T extends KubernetesResource>(raw: unknown, kind: string, expectedName: string, namespace?: string): T {
+function resource<T extends KubernetesResource>(raw: unknown, kind: string, expectedName: string, namespace?: string,apiVersion="v1"): T {
   const value = raw as T;
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.apiVersion !== "v1" || value.kind !== kind ||
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.apiVersion !== apiVersion || value.kind !== kind ||
     !value.metadata || value.metadata.name !== expectedName || !value.metadata.resourceVersion ||
     typeof value.metadata.resourceVersion !== "string" || (namespace && value.metadata.namespace !== namespace)) return fail("KUBERNETES_RESOURCE_IDENTITY");
   uid(value.metadata.uid);
@@ -266,6 +270,12 @@ export class KubernetesApiClient {
     const response = await this.#request("GET", "/api/v1/nodes/" + encode(nodeName), undefined, signal);
     if (response.status !== 200) throw new KubernetesRequestError("KUBERNETES_NODE_UNAVAILABLE", response.status);
     return resource<KubernetesNode>(response.value, "Node", nodeName);
+  }
+
+  async runtimeClass(className:string,signal?:AbortSignal):Promise<KubernetesRuntimeClass>{
+    const response=await this.#request("GET","/apis/node.k8s.io/v1/runtimeclasses/"+encode(className),undefined,signal);
+    if(response.status!==200)throw new KubernetesRequestError("KUBERNETES_RUNTIME_CLASS_UNAVAILABLE",response.status);
+    return resource<KubernetesRuntimeClass>(response.value,"RuntimeClass",className,undefined,"node.k8s.io/v1");
   }
 
   async createPod(runtimeId: string, spec: Record<string, unknown>, signal?: AbortSignal): Promise<KubernetesPod> {
