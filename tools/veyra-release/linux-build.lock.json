@@ -49,34 +49,98 @@
     "chromiumRevision": "1232",
     "headlessRevision": "1232",
     "ffmpegRevision": "1011",
-    "qualification": "Coordinator artifact checksum/immutable acquisition receipt required; no fabricated digest",
+    "qualification": "Complete immutable image artifact content verified; browser launch, source/OS build provenance and independent rebuild remain required",
     "artifacts": [
       {
         "revision": "1232",
-        "sha256": null,
+        "sha256": "4be26ee568b98215034f83c0561f31e7eb8ff9f74fb74b190ee38c36744eb329",
         "name": "chromium",
-        "hashKind": "sha256-archive"
+        "hashKind": "sha256-tree-manifest-v1",
+        "root": "/opt/ingenium-playwright/browsers/chromium-1232",
+        "entries": 318,
+        "regularFiles": 305,
+        "logicalFileBytes": 406616326
       },
       {
         "revision": "1232",
-        "sha256": null,
+        "sha256": "2bc0818bb7441ea8c3582ca3da7869fb3827a29a74d777a8deca00ac546487f3",
         "name": "chromium-headless-shell",
-        "hashKind": "sha256-archive"
+        "hashKind": "sha256-tree-manifest-v1",
+        "root": "/opt/ingenium-playwright/browsers/chromium_headless_shell-1232",
+        "entries": 293,
+        "regularFiles": 289,
+        "logicalFileBytes": 273275810
       },
       {
         "revision": "1011",
-        "sha256": null,
+        "sha256": "8f63660aa113f6b7488d9ae0758f8f8faa39da158dbf376b04f5f901bdc1d188",
         "name": "ffmpeg",
-        "hashKind": "sha256-archive"
+        "hashKind": "sha256-tree-manifest-v1",
+        "root": "/opt/ingenium-playwright/browsers/ffmpeg-1011",
+        "entries": 5,
+        "regularFiles": 4,
+        "logicalFileBytes": 5127582
       }
-    ]
+    ],
+    "contentManifest": {
+      "version": 1,
+      "encoding": "UTF-8 ASCII-escaped sorted-key compact JSON",
+      "payload": "{version:1,entries:rows sorted by absolute image path}",
+      "rowFields": [
+        "path",
+        "type",
+        "mode",
+        "uid",
+        "gid",
+        "bytes",
+        "sha256 for files",
+        "link and resolvedImagePath for symlinks"
+      ],
+      "extendedMetadataAndHardlinks": "refused",
+      "producer": "ops/registry_artifact_projection.py"
+    },
+    "immutableAcquisition": {
+      "repository": "docker.io/jtmb92/ingenium",
+      "imageDigest": "sha256:792f18c3bece144028df8b79772b4928e73c4ff2e1ef625f20ce85ca796d9e8b",
+      "configDigest": "sha256:3d08affe9fc9bd0d5f737e9187c5c982c8d6d4a1170222f19aff88006027965e",
+      "browserLayerDigest": "sha256:19ffffd22a0028ca1b47d7c12d32c7e510363c0234f3d77aff1fb1262077847e",
+      "completeImageLayersVerified": 71,
+      "packageMetadata": [
+        {
+          "imagePath": "/app/node_modules/@playwright/mcp/package.json",
+          "sourceLayerIndex": 20,
+          "bytes": 1539,
+          "sha256": "d1d7d6d08a2c8b10ac95a04fc358f8ca55b8855fabb8d6fa8c7cf26dfd5378b7"
+        },
+        {
+          "imagePath": "/app/node_modules/@playwright/mcp/node_modules/playwright/package.json",
+          "sourceLayerIndex": 20,
+          "bytes": 1456,
+          "sha256": "7cc410b3783bad3241ad0fa44aef6f2ff254c87f80e7b4963b1c94c1b994d095"
+        },
+        {
+          "imagePath": "/app/node_modules/@playwright/mcp/node_modules/playwright-core/package.json",
+          "sourceLayerIndex": 20,
+          "bytes": 896,
+          "sha256": "ed0b4d56b0aa233883de75190aa2a726bf4704ede4360be477f7e509cf0355a2"
+        },
+        {
+          "imagePath": "/app/node_modules/@playwright/mcp/node_modules/playwright-core/browsers.json",
+          "sourceLayerIndex": 20,
+          "bytes": 1941,
+          "sha256": "612a100346f104d83de93de79fe9510e0b5f47435688bb0ba7ebb34409efad51"
+        }
+      ]
+    }
   },
   "verification": {
-    "mode": "metadata-only",
+    "mode": "metadata-and-streamed-artifact-content",
     "registryManifestsAndConfigBytes": 13918,
     "aptInReleaseBytes": 241248,
-    "layersOrPackagesDownloaded": false,
-    "imageBuilt": false
+    "layersOrPackagesDownloaded": true,
+    "imageBuilt": false,
+    "layerBodiesRetained": false,
+    "compressedLayerBytesStreamed": 1211535460
   },
   "references": [
     "https://snapshot.debian.org/",
