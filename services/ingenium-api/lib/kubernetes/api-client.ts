@@ -181,7 +181,9 @@ export class KubernetesApiClient {
     if (payload && payload.length > MAX_REQUEST) return fail("KUBERNETES_REQUEST_BOUND");
     const credentials = this.#credentials();
     const url = new URL(path, this.apiOrigin);
-    if (url.origin !== this.apiOrigin || !path.startsWith("/api/v1/")) return fail("KUBERNETES_REQUEST_PATH");
+    const runtimeClassPrefix = "/apis/node.k8s.io/v1/runtimeclasses/";
+    const runtimeClassRead = method === "GET" && path.startsWith(runtimeClassPrefix) && NAME.test(path.slice(runtimeClassPrefix.length));
+    if (url.origin !== this.apiOrigin || (!path.startsWith("/api/v1/") && !runtimeClassRead)) return fail("KUBERNETES_REQUEST_PATH");
     return await new Promise((resolve, reject) => {
       let settled = false, bytes = 0;
       const options: RequestOptions = {

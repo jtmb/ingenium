@@ -226,11 +226,20 @@ both file digests, review the daemon restart and qualify actual kernel
 enforcement, original bootstrap and retirement before approval/activation.
 Do not touch the retired Docker/Swarm runtime or substitute another daemon.
 
-No host configuration, runtime class, daemon, kubelet or live approval has
-been changed. The current operator SSH identity cannot perform noninteractive
-sudo on worker2; applying the reviewed host configuration still requires
-that actual host authorization. A failed authorization must not be bypassed
-with a privileged Pod, a different identity or a weaker process limit.
+On 2026-11-01, the existing `swarm migration (2)` operator used its established
+password-authenticated sudo path over strict SSH and protected stdin to stage
+the reviewed worker2 configuration and restart containerd once. A refusal from
+`sudo -n` checks passwordless access; it does not establish that this authorized
+maintenance path is unavailable. Consult that owner before declaring an access
+blocker. Never substitute a privileged Pod, another identity or weaker limits.
+
+The restart preserved all 58 native task identities/PIDs/start ticks, 25 shim
+start ticks, 29 relevant Pods and all observed volume identities and health.
+The registered handler and CRI readiness were read back. RuntimeClass
+`veyra-workspace` now has UID `e43b3d8e-293b-42e2-b150-45890af081e5`.
+One cached-image, non-root, model-free Pod observed kernel `pids.max=128` on
+worker2 and was removed after original-UID/terminal-state revalidation. That
+qualifies this host/class limit; actual Veyra bootstrap and approval remain open.
 
 ### Reviewed worker2 staging command
 
@@ -258,7 +267,9 @@ stages the new base and atomically appends the handler to the existing
 configuration. It refuses changed inputs, unsafe ownership, links and existing
 Work staging/recovery files. The original configuration is retained as the
 root-only `config.toml.veyra-workspace-original`; interrupted staging is retained
-for reconciliation. Apply mode has not been qualified or run.
+for reconciliation. The reviewed apply and single restart have now run and
+passed preservation checks; retain the original backup through the remaining
+bootstrap and rollback consumers.
 
 Before restarting `containerd-k8s.service`, the operator must review the staged
 effective configuration and existing node workloads. If staging is interrupted,
@@ -274,9 +285,10 @@ its unchanged two replicas. Source/dependencies and observed frontend outputs
 occupy about1.4GiB; the remaining space is for qualification work and headroom.
 No existing installation data, models or Windows engine would be copied into it.
 
-Both worker disks currently report Longhorn DiskPressure and are not schedulable
-at the existing25-percent free-space floor. A healthy redundant placement is not
-available now; logical reservations or a Bound claim alone would not qualify it.
+The latest observation has worker1 and master schedulable, while worker2 still
+reports Longhorn DiskPressure at the existing 25-percent free-space floor.
+The migration owner is completing cluster cleanup and fresh placement checks.
+Logical reservations or a Bound claim alone do not qualify healthy redundancy.
 The existing11GiB `ingenium-state` claim and its UID remain unchanged. The
 proposal has not been provisioned or assigned. Fresh disk/replica observations
 and explicit storage-provisioning approval are required before creation through

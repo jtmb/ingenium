@@ -740,3 +740,31 @@ OCI820,711,424 and application layer92,803,072 Linux allocated bytes
 (997,736,448 total). Minimal receipts and recipes remain; no Windows disk
 recovery is inferred. Actual bootstrap/restart, unknown creates/uncommitted
 failures, native/audio, production and full-release gates stay open.
+
+## Migration-owner coordination and actual PID qualification (2026-11-01)
+
+The user's standing instruction to consult `swarm migration (2)`, escalate
+blockers and require a completion report/wakeup is recorded in both project
+instruction files and a durable memory update. That owner recovered the existing
+password-authenticated administrator path, staged the reviewed worker2 handler
+and performed one coordinated containerd restart. Native task/shim identities,
+Pods, storage identities and health were preserved. No kubelet restart or node
+reboot was used. The original configuration backup remains protected.
+
+Live qualification found the API client's own path guard rejecting named
+RuntimeClass reads. It now admits only those GETs alongside the existing core
+API paths. The original API compiler/copier passes 340 inputs/169 roots/298
+runtime files without new tests, dependency copies or a Core rebuild. The real
+client then read the newly installed RuntimeClass and a cached immutable-image
+Pod observed kernel `pids.max=128`, `pids.current=1`, UID1000 on worker2.
+The first conditional delete was refused; fresh original-UID, owner, terminal
+state and resourceVersion revalidation allowed its removal. Original failures
+and separate reconciliation records remain. This is host/class qualification,
+not actual Veyra image/bootstrap, storage or full Work acceptance.
+
+Local cache retirement removed 12,947,456 Linux allocated bytes from the exact
+task-owned Node compile cache and npm content cache; source, locks, installed
+dependencies and unique logs remain. The initial missing executable lookup is
+preserved separately from the corrected full safety checks and actual removal.
+The migration owner continues separate cluster cleanup; the coordinator owns
+Veyra source, local outputs, claim assignment and subsequent acceptance.
