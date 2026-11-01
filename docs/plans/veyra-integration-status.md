@@ -661,4 +661,19 @@ state. The repository guide requires reuse of these assets for future changes.
 This extends the common SiteChrome/Navigation and composer assets to the
 contextual panels. No new test suite or dependency tree was added.
 The original production Next/TypeScript build27 passes all316 first-party inputs.
-Preview deployment and visual acceptance of these contextual panels are pending.
+Source ad8881a2d8b87adbfa96e1b90f2e8ae0c320c627 is deployed to both previews
+in immutable image sha256:2c7a135c9614b17df60ff11032737ac9e14798aa3700af36419e47d90afe5673.
+Both original Pod UIDs, scoped data and credential material are preserved.
+Actual IAB inspection confirms the matching History headers, collapse controls,
+theme and row styling in Chat and Work, plus Chat's single model/effort pill
+and integrated effort popover. The first Work screenshot captured an incomplete
+redraw; the settled screenshot and DOM geometry confirm the shared header is
+visible without a further source change. The temporary browser tabs were closed
+and control reset. No message, model, microphone or audio session was started.
+
+The preview tunnel was restored after its earlier process exited; the preview
+Pod itself remained healthy with its original UID. Work still reports an
+unavailable execution target, so live Work/Web and full release acceptance remain
+open. The consumed compiler view, standalone, OCI archive and application layer
+were safely removed: 1,112,788,992 Linux allocated bytes in this generation.
+No Windows disk recovery is inferred. Production is unchanged.
