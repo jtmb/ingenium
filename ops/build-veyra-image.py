@@ -119,6 +119,9 @@ def main():
  for directory in ['docs','.opencode/agents','.opencode/commands','.opencode/skills','config/opencode-managed','nginx']:
   tree(a/directory,'/app/'+directory)
  tree(a/'packages/ingenium-core/data/migrations','/app/packages/ingenium-core/data/migrations')
+ # Docker's explicit policy COPY preserves the canonical JSON bytes after tsc.
+ need(json.loads((c/'services/ingenium-api/dist/config/dashboard-safe-reads.json').read_text())==json.loads((a/'services/ingenium-api/config/dashboard-safe-reads.json').read_text()),'Compiled API read policy differs from source')
+ rows.pop('/app/services/ingenium-api/dist/config/dashboard-safe-reads.json')
  add(a/'services/ingenium-api/config/dashboard-safe-reads.json','/app/services/ingenium-api/dist/config/dashboard-safe-reads.json',0o444)
  plugin=json.loads(command(['node',str(a/'packages/ingenium-extension/scripts/plugin-source-closure.mjs'),'--list'],cwd=a))
  for name in plugin['files']:add(a/'packages/ingenium-extension'/name,'/app/packages/ingenium-extension/'+name)
