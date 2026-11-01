@@ -720,5 +720,23 @@ doubles; they do not establish physical Kubernetes acceptance. The initial
 unit import resolved the intentionally preserved old APP Core distribution;
 the corrected check uses the real canonical source decoder. The failed record
 is retained. Both runs closed and created no cache files or dependency copies.
-Actual image, bootstrap/restart, unknown creates/uncommitted failures and all
-remaining full-release gates stay open. The frontend source is unchanged.
+The compatibility image from source `b00b6f5dbd2269295713d4a62a96a6355e96978e`
+is published at
+`sha256:6e4c570909145a95b42bbfb8b47e1cb077c6754aa4e2c3533d2c9f6377830b9c`
+and runs on both preview Pods with their original UIDs. Account, project,
+credential, conversation and configuration fingerprints match; production's
+Pod UID/image and writer are unchanged. The original preview received a fresh
+signed paired backup before the backend update. User-runtime, control-plane,
+manager and gateway candidates share the same application/runtime layers and
+verified source labels; their physical execution and approval remain open.
+
+The unchanged frontend27 was recovered from the verified published image,
+not rebuilt. Chat and Work serve200 on both previews; unauthenticated private
+commit requests refuse401. The first smoke probe incorrectly expected the
+Core503 at the public boundary; that failed expectation is preserved. These
+HTTP checks do not qualify the private callback or physical Work. All three
+consumed local outputs were safely removed: recovered standalone84,221,952,
+OCI820,711,424 and application layer92,803,072 Linux allocated bytes
+(997,736,448 total). Minimal receipts and recipes remain; no Windows disk
+recovery is inferred. Actual bootstrap/restart, unknown creates/uncommitted
+failures, native/audio, production and full-release gates stay open.
