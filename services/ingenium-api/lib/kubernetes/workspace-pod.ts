@@ -129,6 +129,7 @@ export function planKubernetesWorkspacePod(input: {
     apiVersion: "v1", kind: "Pod",
     metadata: {
       name: request.backendName, namespace: mapping.namespace, labels,
+      finalizers: ["ingenium.io/runtime-retirement"],
       annotations: {
         "com.ingenium.runtime.workspace": request.workspaceId,
         "com.ingenium.runtime.storage": request.storageMappingHash,

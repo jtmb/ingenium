@@ -546,3 +546,29 @@ Consumed build24 outputs were removed after the same preservation/lifetime check
 ## Kubernetes workspace backend in progress (2026-11-01)
 
 Implemented the bounded verified-TLS API client, explicit workspace Pod profile, shared Docker/Kubernetes environment and original v5 WebSocket bootstrap owner. The original API compiler/copier passes336 sources/165 compiler inputs/298 runtime files; Core441 and dependency trees remain unchanged. One actual inert Pod on workernode1 completed stdin/stdout over the compiled client, exited0 and was removed using its original UID/resourceVersion. No agent/model/GPU or production writer was started. The existing workers report unlimited kubelet Pod PIDs and kernel5.15; no host settings were changed. Core original-provision/migration141, real bootstrap/image approval, finite PID policy, manager/gateway and actual Work lifecycle remain open. See [Kubernetes workspace runtimes](../operations/kubernetes-workspace-runtimes.md). Full goal remains active.
+
+## Kubernetes original identity and graceful shutdown (2026-11-01)
+
+Migration141 and the explicit Kubernetes original-provision union are implemented.
+Existing Docker wire records, predecessor recipes137/138 and150 data resources
+remain unchanged. The original Core compiler passes101 inputs; the original API
+compiler/copier passes337 source inputs/166 compiler roots/298 runtime files.
+The new lifecycle source owns actual Pod create/start/retained attach, closed
+profile validation, fresh reads and same-container graceful retirement; manager
+composition and real workspace/bootstrap/image qualification remain open.
+
+The focused in-memory SQLite migration installed/reopened141, verified75 schema
+objects, preserved the original projection and passed FK/integrity checks. Its
+canonical fixture has zero historical original rows, so populated migration is
+still unqualified. An initial WAL-format in-memory deserialization failed; a
+read-only SQLite backup and SQLite journal-mode conversion fixed the consumer,
+without changing the source database. Its4,071,424-byte temporary snapshot was
+removed after Windows/Linux preservation and lifetime checks.
+
+One actual model-free Pod on workernode1 verified graceful shutdown while its
+retirement finalizer retained the object. The same CRI container exited0, its
+original attached connection closed, and UID/resourceVersion/timestamp/finalizer
+JSON-patch tests removed only Veyra's key. Absence was confirmed; no smoke Pod
+remains. This is retirement transport evidence, not a real agent/Core retirement
+or READY grant. No tests were added, host settings changed, model/GPU initialized
+or production writer changed. Full delivery remains active and incomplete.

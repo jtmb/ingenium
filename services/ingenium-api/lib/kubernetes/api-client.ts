@@ -32,6 +32,8 @@ export interface KubernetesMetadata {
   deletionTimestamp?: string;
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
+  finalizers?: string[];
+  ownerReferences?: unknown[];
 }
 export interface KubernetesResource {
   apiVersion: string;
@@ -168,7 +170,7 @@ export class KubernetesApiClient {
     return new KubernetesApiClient(input.server, input.namespace, input.ca, () => ({ cert, key }));
   }
 
-  async #request(method: "GET" | "POST" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<{ status: number; value: unknown }> {
+  async #request(method: "GET" | "POST" | "DELETE" | "PATCH", path: string, body?: unknown, signal?: AbortSignal): Promise<{ status: number; value: unknown }> {
     signal?.throwIfAborted();
     const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
     if (payload && payload.length > MAX_REQUEST) return fail("KUBERNETES_REQUEST_BOUND");
@@ -183,7 +185,7 @@ export class KubernetesApiClient {
         headers: {
           Accept: "application/json", "Accept-Encoding": "identity",
           ...(credentials.token ? { Authorization: "Bearer " + credentials.token } : {}),
-          ...(payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : {}),
+          ...(payload ? { "Content-Type": method === "PATCH" ? "application/json-patch+json" : "application/json", "Content-Length": payload.length } : {}),
         },
       };
       const request = httpsRequest(url, options);
@@ -321,5 +323,24 @@ export class KubernetesApiClient {
       { apiVersion: "v1", kind: "DeleteOptions", gracePeriodSeconds: 30, propagationPolicy: "Foreground", preconditions: expected }, signal);
     if (response.status !== 200 && response.status !== 202) throw new KubernetesRequestError("KUBERNETES_POD_DELETE_UNCONFIRMED", response.status);
     // Accepted deletion is deliberately not a stopped/retired witness.
+  }
+
+  /** Remove only our original retirement finalizer, after the lifecycle owner
+   * has observed termination. Optimistic tests prevent changing another Pod or
+   * removing a finalizer added by a different controller. */
+  async finishPodRetirement(runtimeId: string, observed: KubernetesPod, signal?: AbortSignal): Promise<void> {
+    const { metadata } = observed, finalizer = "ingenium.io/runtime-retirement";
+    uid(metadata.uid);
+    if (metadata.name !== this.runtimeName(runtimeId) || metadata.namespace !== this.namespace ||
+      !/^\d+$/.test(metadata.resourceVersion) || !metadata.deletionTimestamp ||
+      !Array.isArray(metadata.finalizers) || metadata.finalizers.filter(value => value === finalizer).length !== 1) return fail("KUBERNETES_RETIREMENT_FINALIZER");
+    const response = await this.#request("PATCH", "/api/v1/namespaces/" + encode(this.namespace) + "/pods/" + this.runtimeName(runtimeId), [
+      { op: "test", path: "/metadata/uid", value: metadata.uid },
+      { op: "test", path: "/metadata/resourceVersion", value: metadata.resourceVersion },
+      { op: "test", path: "/metadata/deletionTimestamp", value: metadata.deletionTimestamp },
+      { op: "test", path: "/metadata/finalizers", value: metadata.finalizers },
+      { op: "remove", path: "/metadata/finalizers/" + metadata.finalizers.indexOf(finalizer) },
+    ], signal);
+    if (response.status !== 200) throw new KubernetesRequestError("KUBERNETES_RETIREMENT_FINALIZER_UNCONFIRMED", response.status);
   }
 }

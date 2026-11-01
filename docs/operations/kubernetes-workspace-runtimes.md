@@ -11,6 +11,8 @@ workspace, account, organization, credential, image and lifecycle requirements.
   bounded JSON requests, rotating in-cluster credentials, namespace identity,
   Pod/PVC/node reads, one-attempt creation, and UID/resourceVersion-conditioned
   deletion. It follows no redirects and writes no credentials.
+  Retirement finalization uses JSON-patch tests for the original UID, resource
+  version, deletion timestamp and finalizer list, removing only Veyra's key.
 - `workspace-pod.ts` constructs a workspace Pod from an explicit PVC binding,
   immutable image and qualified node PID policy. It uses a private container,
   UID/GID1000, dropped capabilities, a read-only root, no service-account token
@@ -20,9 +22,21 @@ workspace, account, organization, credential, image and lifecycle requirements.
   custody when that connection fails or closes. Reconnecting cannot replace it.
 - Docker and Kubernetes reuse `workspaceRuntimeEnvironmentV2`; capabilities
   travel through stdin rather than Pod metadata or environment variables.
+- `workspace-lifecycle.ts` owns actual creation, running-container observation,
+  retained bootstrap attachment, fresh profile reads and graceful retirement.
+  It accepts only the requested profile and closed Kubernetes default forms,
+  comparing resource quantities without changing the recorded raw profile.
+  STARTING metadata is distinct from image approval and READY.
+- Core migration141 adds an explicit backend identity to the existing original
+  provision table. Docker payloads and the137/138 recipe bytes remain unchanged.
+  The new evolution verifies the predecessor receipts and its exact reversible
+  DDL change. Kubernetes metadata binds namespace/CA, Pod UID, original CRI ID,
+  node UID/boot ID, start, immutable image, PVC and finite PID policy.
 
-The original API compiler passes336 source inputs/165 compiler roots without
-copying dependencies or rebuilding Core441. The WebSocket runtime and types are
+The original Core compiler passes101 inputs and copies only the three new141
+resources alongside150 unchanged resources. The API compiler passes337 source
+inputs/166 compiler roots, with298 runtime copier files and no dependency copies.
+The WebSocket runtime and types are
 the already installed, locked versions8.21.3 and8.18.1. Only their two direct
 API dependency references were added to the lockfile. Unrelated npm peer,
 platform/libc and legacy-name changes were rejected and preserved in a minimal
@@ -38,9 +52,27 @@ Pod on workernode1 used the already cached immutable preview image with
 deleted with UID/resourceVersion preconditions. No Core/agent credential,
 workspace/PVC, model, GPU or production writer was involved.
 
-This qualifies transport creation, stdin/stdout and cleanup. It does **not**
-qualify the agent bootstrap, a Work turn, image approval, tenant execution or
-full runtime retirement.
+A second actual inert Pod remained running after the stdin/stdout exchange.
+Graceful deletion retained its API object under Veyra's finalizer while the
+original CRI container exited0. Its exact terminal container ID/start time and
+the original healthy node were observed, and its original attached connection
+closed. Only then did the compiled client remove its own finalizer using
+conditional JSON patch. The Pod was confirmed absent; no smoke Pod remains.
+Kubernetes documents [terminal Pod transitions](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/)
+and [finalizer retention](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/).
+
+Migration141 also installed and reopened against an in-memory SQLite snapshot
+of the existing canonical synthetic fixture. All75 evolution objects verified,
+foreign keys/integrity passed, and the private insert guard worked inside the
+original transaction. This fixture contains zero original provision rows;
+populated historical-original and real Core/bootstrap acceptance remain open.
+The4,071,424-byte temporary snapshot was removed after Windows exclusive-handle
+and Linux ownership/source/process/container/mount checks. Source and minimal
+failure/success evidence remain; no Windows recovery is inferred.
+
+These checks qualify transport and the graceful retirement transport, not the
+agent bootstrap, a Work turn, image approval, tenant execution or complete Core
+retirement. The lifecycle source has not yet been connected to the manager.
 
 Both worker nodes currently report kubelet `podPidsLimit: -1`. Veyra's ordinary
 Docker defaults are256 PIDs and128 processes. The Pod planner rejects a missing
@@ -57,15 +89,11 @@ No host configuration, kernel, kubelet or runtime class was changed.
 
 ## Remaining integration
 
-1. Add the Kubernetes original-provision, placement and retirement branch to
-   the same authenticated Core/API lifecycle. Bind actual namespace, node, Pod,
-   CRI container, start time, immutable image and PVC identities.
-2. Coordinator reserves migration141 for this backend evolution. The existing
-   original-provision table has an explicit Docker host-prefix constraint and
-   migrations137/138 retain exact source/DDL receipts. Preserve those recipes
-   unchanged. A new verified evolution must validate their predecessor hashes,
-   preserve existing rows/storage classes and provide its own invertible schema
-   receipt. Never put a Kubernetes identity into a Docker proof to avoid this.
+1. Connect the Kubernetes original-provision, placement and retirement producer
+   to the same authenticated manager/Core lifecycle. Preserve the private
+   admission, current workspace authority and persisted original identities.
+2. Qualify141 in actual Core startup/reopen and populated historical-original
+   migration. Keep137/138 recipes and their predecessor DDL receipts unchanged.
 3. Complete actual workspace image/bootstrap qualification and independent
    approval before installing a writable runtime policy.
 4. Prepare a reviewed, explicit finite PID configuration for the selected

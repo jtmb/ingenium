@@ -2,6 +2,7 @@
  * No token, capability, Env or raw profile content is returned/stored.
  */
 import {createHash} from "node:crypto";
+import {requireKubernetesWorkspace141} from '../../data/migrations/migration-141.mjs';
 export interface OriginalLimits{cpuMillis:number;memoryBytes:number;pidsLimit:number;diskBytes:number;processLimit:number}
 export interface PublicProvisionRequest{
  originalRequestId:string;runtimeId:string;backendName:string;organizationId:string;projectId:string;projectName:string;
@@ -132,8 +133,16 @@ export function insertRuntimeOriginalProvision(db:OriginalDb,current:ProvisionRu
 
 /** Explicit workspace-scoped v2; v1 stays Project-required. */
 export type PublicWorkspaceProvisionRequest=Omit<PublicProvisionRequest,'projectId'|'projectName'>&{schemaVersion:2;scopeKind:'workspace';projectId:null};
-export type WorkspaceRuntimeOriginalProvision=Omit<RuntimeOriginalProvision,'schemaVersion'|'kind'|'projectId'>&{schemaVersion:2;scopeKind:'workspace';kind:'original-workspace-runtime-provision-v2';projectId:null};
-export interface StoredWorkspaceRuntimeOriginalProvision extends WorkspaceRuntimeOriginalProvision{readonly recordedAt:string}
+type WorkspaceOriginalFields=Omit<RuntimeOriginalProvision,'schemaVersion'|'kind'|'projectId'>&{schemaVersion:2;scopeKind:'workspace';projectId:null};
+export type DockerWorkspaceRuntimeOriginalProvision=WorkspaceOriginalFields&{kind:'original-workspace-runtime-provision-v2';backendKind?:never;kubernetes?:never};
+export interface KubernetesWorkspaceIdentity{
+ schemaVersion:1;namespace:string;namespaceUid:string;apiCaSha256:string;podName:string;podUid:string;containerId:string;
+ nodeName:string;nodeUid:string;nodeBootId:string;startedAt:string;claimName:string;claimUid:string;pullReference:string;
+ enforcedPodPidsLimit:number;nodePidPolicySha256:string;
+}
+export type KubernetesWorkspaceRuntimeOriginalProvision=WorkspaceOriginalFields&{kind:'original-kubernetes-workspace-runtime-provision-v1';backendKind:'kubernetes';kubernetes:KubernetesWorkspaceIdentity};
+export type WorkspaceRuntimeOriginalProvision=DockerWorkspaceRuntimeOriginalProvision|KubernetesWorkspaceRuntimeOriginalProvision;
+export type StoredWorkspaceRuntimeOriginalProvision=WorkspaceRuntimeOriginalProvision&{readonly recordedAt:string};
 export function publicWorkspaceProvisionRequest(input:PublicWorkspaceProvisionRequest):PublicWorkspaceProvisionRequest{
  const keys=['schemaVersion','scopeKind','originalRequestId','runtimeId','backendName','organizationId','projectId','ownerUserId','workspaceId','storagePath','storageMappingHash','securityEpoch','revision','limits'];
  if(!input||Object.keys(input).sort().join('|')!==keys.sort().join('|')||input.schemaVersion!==2||input.scopeKind!=='workspace'||input.projectId!==null
@@ -176,12 +185,31 @@ export function originalWorkspaceProvisionFromNewFlow(input:{request:PublicWorks
 }
 export function decodeWorkspaceRuntimeOriginalProvision(value:unknown):WorkspaceRuntimeOriginalProvision{
  const v=obj(value),keys=['schemaVersion','scopeKind','kind','requestId','requestSha256','runtimeId','parentContainerId','daemonId','hostId','imageId','startIdentity','publicProfileSha256','specSha256','workspaceId','organizationId','projectId','ownerUserId','bindingHash','bindingEpoch','provisioningRevision','limits','containerCreatedAt'];
- if(Object.keys(v).sort().join('|')!==keys.sort().join('|')||v.schemaVersion!==2||v.scopeKind!=='workspace'||v.projectId!==null||v.kind!=='original-workspace-runtime-provision-v2'
+ const kubernetes=v.backendKind==='kubernetes';
+ if(kubernetes)keys.push('backendKind','kubernetes');
+ if(Object.keys(v).sort().join('|')!==keys.sort().join('|')||v.schemaVersion!==2||v.scopeKind!=='workspace'||v.projectId!==null||v.kind!==(kubernetes?'original-kubernetes-workspace-runtime-provision-v1':'original-workspace-runtime-provision-v2')
   ||![v.requestId,v.runtimeId,v.organizationId,v.ownerUserId].every(x=>typeof x==='string'&&UUID.test(x))
   ||![v.requestSha256,v.parentContainerId,v.startIdentity,v.publicProfileSha256,v.specSha256,v.bindingHash].every(x=>typeof x==='string'&&HEX.test(x))
-  ||!text(v.workspaceId,256)||!text(v.daemonId,256)||v.hostId!=='docker-daemon:'+provisionHash('veyra-docker-host-v1\0'+v.daemonId)
+  ||!text(v.workspaceId,256)||!text(v.daemonId,256)
   ||typeof v.imageId!=='string'||!/^sha256:[a-f0-9]{64}$/u.test(v.imageId)||!integer(v.bindingEpoch)||!integer(v.provisioningRevision)||!stamp(v.containerCreatedAt))return fail();
- return frozen({...v,limits:limits(v.limits)}) as unknown as WorkspaceRuntimeOriginalProvision;
+ const checkedLimits=limits(v.limits);
+ if(kubernetes){
+  const k=obj(v.kubernetes),identityKeys=['schemaVersion','namespace','namespaceUid','apiCaSha256','podName','podUid','containerId','nodeName','nodeUid','nodeBootId','startedAt','claimName','claimUid','pullReference','enforcedPodPidsLimit','nodePidPolicySha256'];
+  const dns=/^[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?$/u;
+  if(Object.keys(k).sort().join('|')!==identityKeys.sort().join('|')||k.schemaVersion!==1
+   ||![k.namespace,k.nodeName,k.claimName].every(x=>typeof x==='string'&&dns.test(x))
+   ||typeof k.namespace!=='string'||k.namespace.length>63||k.namespace.includes('.')
+   ||![k.namespaceUid,k.podUid,k.nodeUid,k.nodeBootId,k.claimUid].every(x=>typeof x==='string'&&UUID.test(x))
+   ||![k.apiCaSha256,k.nodePidPolicySha256].every(x=>typeof x==='string'&&HEX.test(x))
+   ||k.containerId!==v.parentContainerId||k.podName!=='ingenium-runtime-'+String(v.runtimeId).replaceAll('-','')
+   ||!stamp(k.startedAt)||Date.parse(k.startedAt)<Date.parse(v.containerCreatedAt as string)
+   ||typeof k.pullReference!=='string'||!/^[a-z0-9][a-z0-9./:_-]{0,254}@sha256:[a-f0-9]{64}$/u.test(k.pullReference)
+   ||!integer(k.enforcedPodPidsLimit)||k.enforcedPodPidsLimit<16||k.enforcedPodPidsLimit>Math.min(checkedLimits.pidsLimit,checkedLimits.processLimit)
+   ||v.daemonId!=='kubernetes-api:'+provisionHash(['veyra-kubernetes-api-v1',k.namespaceUid,k.apiCaSha256])
+   ||v.hostId!=='kubernetes-node:'+provisionHash(['veyra-kubernetes-node-v1',v.daemonId,k.nodeUid,k.nodeBootId])
+   ||v.startIdentity!==provisionHash([k.podUid,k.containerId,k.startedAt,0]))return fail();
+ }else if(v.hostId!=='docker-daemon:'+provisionHash('veyra-docker-host-v1\0'+v.daemonId))return fail();
+ return frozen({...v,limits:checkedLimits}) as unknown as WorkspaceRuntimeOriginalProvision;
 }
 export function validateWorkspaceProvisionResponse(value:unknown,request:PublicWorkspaceProvisionRequest,backendId:unknown):WorkspaceRuntimeOriginalProvision{
  const original=decodeWorkspaceRuntimeOriginalProvision(value),expected=publicWorkspaceProvisionRequest(request);
@@ -193,7 +221,9 @@ export function readWorkspaceRuntimeOriginalProvision(db:OriginalDb,id:string):S
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='veyra_evolution_137'").get())return undefined;
  const raw=db.prepare('SELECT * FROM runtime_original_provisions WHERE runtime_id=? AND project_id IS NULL AND schema_version=2').get(id);if(!raw)return undefined;
  const r=obj(raw);if(!stamp(r.created_at))return fail();
- const value=decodeWorkspaceRuntimeOriginalProvision({schemaVersion:2,scopeKind:'workspace',kind:'original-workspace-runtime-provision-v2',runtimeId:r.runtime_id,parentContainerId:r.parent_container_id,daemonId:r.daemon_id,hostId:r.host_id,imageId:r.image_id,startIdentity:r.start_identity,publicProfileSha256:r.public_profile_sha256,specSha256:r.spec_sha256,workspaceId:r.workspace_id,organizationId:r.organization_id,projectId:r.project_id,ownerUserId:r.owner_user_id,bindingHash:r.binding_hash,bindingEpoch:r.binding_epoch,provisioningRevision:r.provisioning_revision,requestId:r.request_id,requestSha256:r.request_sha256,limits:{cpuMillis:r.cpu_millis,memoryBytes:r.memory_bytes,pidsLimit:r.pids_limit,diskBytes:r.disk_bytes,processLimit:r.process_limit},containerCreatedAt:r.container_created_at});
+ if(r.backend_kind!==undefined&&r.backend_kind!=='docker'&&r.backend_kind!=='kubernetes')return fail();
+ const backend=r.backend_kind==='kubernetes'?{kind:'original-kubernetes-workspace-runtime-provision-v1',backendKind:'kubernetes',kubernetes:typeof r.backend_identity_json==='string'&&Buffer.byteLength(r.backend_identity_json)<=8192?JSON.parse(r.backend_identity_json):fail()}:{kind:'original-workspace-runtime-provision-v2'};
+ const value=decodeWorkspaceRuntimeOriginalProvision({schemaVersion:2,scopeKind:'workspace',...backend,runtimeId:r.runtime_id,parentContainerId:r.parent_container_id,daemonId:r.daemon_id,hostId:r.host_id,imageId:r.image_id,startIdentity:r.start_identity,publicProfileSha256:r.public_profile_sha256,specSha256:r.spec_sha256,workspaceId:r.workspace_id,organizationId:r.organization_id,projectId:r.project_id,ownerUserId:r.owner_user_id,bindingHash:r.binding_hash,bindingEpoch:r.binding_epoch,provisioningRevision:r.provisioning_revision,requestId:r.request_id,requestSha256:r.request_sha256,limits:{cpuMillis:r.cpu_millis,memoryBytes:r.memory_bytes,pidsLimit:r.pids_limit,diskBytes:r.disk_bytes,processLimit:r.process_limit},containerCreatedAt:r.container_created_at});
  return frozen({...value,recordedAt:r.created_at});
 }
 export function insertWorkspaceRuntimeOriginalProvision(db:OriginalDb&{inTransaction:boolean},current:Omit<ProvisionRuntimeRow,'project_id'>&{project_id:null;schema_version:2},input:{toState:string;actorType:string;actorId:string;backendContainerId?:string|null;originalProvision?:WorkspaceRuntimeOriginalProvision},timestamp:string):void{
@@ -212,5 +242,10 @@ export function insertWorkspaceRuntimeOriginalProvision(db:OriginalDb&{inTransac
  // overwrite/requalify the initial physical original under the same runtimeId.
  if(readWorkspaceRuntimeOriginalProvision(db,p.runtimeId))return;
  const values=[p.runtimeId,p.parentContainerId,p.daemonId,p.hostId,p.imageId,p.startIdentity,p.publicProfileSha256,p.specSha256,p.workspaceId,p.organizationId,p.projectId,p.ownerUserId,p.bindingHash,p.bindingEpoch,p.provisioningRevision,p.requestId,p.requestSha256,l.cpuMillis,l.memoryBytes,l.pidsLimit,l.diskBytes,l.processLimit,p.containerCreatedAt,timestamp,2];
- if(Number(db.prepare(`INSERT INTO runtime_original_provisions(${originalColumns},schema_version) VALUES(${values.map(()=>'?').join(',')})`).run(...values).changes)!==1)return fail();
+ let columns=originalColumns+',schema_version';
+ if(p.backendKind==='kubernetes'){
+  requireKubernetesWorkspace141(db);
+  columns+=',backend_kind,backend_identity_json';values.push('kubernetes',JSON.stringify(p.kubernetes));
+ }
+ if(Number(db.prepare(`INSERT INTO runtime_original_provisions(${columns}) VALUES(${values.map(()=>'?').join(',')})`).run(...values).changes)!==1)return fail();
 }
