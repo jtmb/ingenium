@@ -117,7 +117,7 @@ def main():
             record["state"] = "probe-only"
         elif previous:
             need(previous["digest"] == image["Id"], "existing_tag_differs_no_overwrite")
-            record.update(state="existing-exact-image", digest=previous["digest"])
+            record.update(state="existing-exact-image", digest=previous["digest"], reference="docker.io/" + REPOSITORY + "@" + previous["digest"], tag=target)
         else:
             if candidate:
                 record.update(inputMode="verified-oci-archive", globalDockerStoreUsed=False)
