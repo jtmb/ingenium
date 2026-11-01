@@ -31,6 +31,7 @@ import {
 import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
 import { useMemoryCapabilities } from "./use-memory-capabilities";
 import Select from "../../components/Select";
+import ComposerSelect from "./ComposerSelect";
 import ProjectDropdown from "../../components/ProjectDropdown";
 import { FreshConversationStart } from "../../../lib/fresh-conversation-start";
 
@@ -886,10 +887,10 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
     [chat],
   );
 
-  const effortControl = <Select aria-label="Reasoning effort" value={variant ?? ""} disabled={selectorsDisabled || !Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {}).length}
-    onChange={event => setSelection(current => ({ ...current, variant: event.target.value || undefined }))} className="text-xs max-w-32">
-    <option value="">Model default</option>{Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {}).map(key => <option key={key} value={key}>{key}</option>)}
-  </Select>;
+  const effortVariants = Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {});
+  const effortControl = effortVariants.length > 0 ? <ComposerSelect label="Reasoning effort" value={variant ?? ""}
+    disabled={selectorsDisabled} onChange={value => setSelection(current => ({ ...current, variant: value || undefined }))}
+    options={[{ value: "", label: "Model default" }, ...effortVariants.map(key => ({ value: key, label: key.charAt(0).toUpperCase() + key.slice(1) }))]} /> : null;
 
   /* ---- Rendering ---- */
 
@@ -1361,10 +1362,9 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               memoryUnavailableReason={memoryCapabilities.reason}
               memorySavePending={memoryNotice?.status === "queued"}
               showSuggestions={chat.messages.length === 0}
-              modelControl={<><Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || currentModels.length === 0} wrapperClassName="veyra-composer-model-wrap" className="veyra-composer-model">
-                {!hasSelectableModel && <option value="">No model available</option>}
-                {currentModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </Select>{effortControl}</>}
+              modelControl={<div className="veyra-composer-controls"><ComposerSelect label="Chat model" value={hasSelectableModel ? modelId : ""}
+                onChange={handleModelChange} disabled={selectorsDisabled || currentModels.length === 0}
+                options={hasSelectableModel ? currentModels.map(model => ({ value: model.id, label: model.label })) : [{ value: "", label: "No model available" }]} />{effortControl}</div>}
             />
             </fieldset>}
           </>

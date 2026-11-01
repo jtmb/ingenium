@@ -521,3 +521,26 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
   .veyra-chat-plus-panel button, .veyra-chat-plus-panel summary { min-height: 44px; }
   .veyra-chat-menu-options [data-testid="chat-header-hamburger"] { display: flex; align-items: center; gap: 10px; padding: 9px 10px; text-align: left; }
 }
+
+/* Composer pickers share its quiet surface; popovers stay within narrow panes. */
+.veyra-composer-controls { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; }
+.veyra-composer-choice { min-width: 0; max-width: 11rem; flex: 0 1 auto; }
+.veyra-composer-choice-trigger { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 36px; border: 0; border-radius: 18px; padding: 0 9px; background: transparent; color: var(--color-text-secondary); font-size: 13px; line-height: 20px; cursor: pointer; }
+.veyra-composer-choice-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veyra-composer-choice-trigger > svg { flex-shrink: 0; opacity: .7; }
+.veyra-composer-choice-trigger:hover, .veyra-composer-choice-trigger[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.veyra-composer-choice-trigger:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.veyra-composer-choice-trigger:disabled { cursor: not-allowed; opacity: .45; }
+.veyra-composer-choice-menu { position: fixed; z-index: 100; box-sizing: border-box; overflow-y: auto; padding: 6px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-surface-raised); color: var(--color-text-primary); box-shadow: 0 12px 36px #0005; overscroll-behavior: contain; }
+.veyra-composer-choice-heading { padding: 7px 10px; color: var(--color-text-muted); font-size: 11px; }
+.veyra-composer-choice-menu > button { display: flex; justify-content: space-between; align-items: center; gap: 14px; width: 100%; border-radius: 8px; padding: 9px 10px; text-align: left; font-size: 13px; line-height: 20px; cursor: pointer; }
+.veyra-composer-choice-menu > button > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.veyra-composer-choice-menu > button > span:last-child { flex-shrink: 0; width: 14px; }
+.veyra-composer-choice-menu > button:hover, .veyra-composer-choice-menu > button:focus-visible { outline: none; background: var(--color-surface-hover); }
+.veyra-composer-choice-menu > button[aria-checked="true"] { font-weight: 500; }
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-composer-shell"] { container-type: inline-size; }
+@container (max-width: 560px) {
+  .veyra-composer-row { flex-wrap: wrap; }
+  .veyra-composer-row [data-testid="chat-composer"] { order: -1; flex-basis: 100%; }
+  .veyra-composer-controls { margin-left: auto; max-width: calc(100% - 140px); }
+}
