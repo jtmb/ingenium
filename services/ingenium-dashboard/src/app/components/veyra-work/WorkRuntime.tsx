@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRuntime } from "@/lib/RuntimeContext";
 import { useAuth } from "@/lib/AuthContext";
 import { useOrganization } from "@/lib/OrganizationContext";
-import { useProject } from "@/lib/ProjectContext";
+import { useOptionalProject } from "@/lib/ProjectContext";
 import { useOpenCodeSessions } from "@/lib/use-opencode-sessions";
 import { useOpenCodeChat, type ChatMessage } from "@/lib/use-opencode-chat";
 import RuntimeWorkspacePicker from "../RuntimeWorkspacePicker";
@@ -16,7 +16,10 @@ import ChatMessages from "../../chat/components/ChatMessages";
 import ActivityDrawer from "../../chat/components/ActivityDrawer";
 import type { ActivitySelection } from "../../chat/components/chat-activity";
 import WorkShell from "./WorkShell";
+import HostedWorkspaceProjects from "../projects-v2/HostedWorkspaceProjects";
 import WorkComposer from "./WorkComposer";
+import {HostedWorkMemory} from "../memory-v2/HostedWorkMemory";
+import {CurrentAgentVoiceControls} from "../voice-v2/CurrentAgentVoiceControls";
 import WorkChanges from "./WorkChanges";
 import WorkArtifacts from "./WorkArtifacts";
 import { collectWorkArtifacts } from "./work-artifacts";
@@ -51,10 +54,10 @@ export default function WorkRuntime({ initialSessionId, requestedRuntime, reques
   projectDisplayName?: string;
 }) {
   const runtime = useRuntime();
-  const project = useProject();
+  const project = useOptionalProject();
   const auth = useAuth();
-  const unavailable = (notice?: string) => <WorkShell projectLabel={projectDisplayName ?? (projectRefId === null ? "No project" : runtime.projectName ?? project)} projects={[]} conversations={[]} activeId={null}
-    installationAdmin={auth.installationAdmin}
+  const unavailable = (notice?: string) => <WorkShell projectLabel={projectDisplayName ?? (projectRefId === null ? "No project" : "Choose workspace")} projects={[]} conversations={[]} activeId={null}
+    installationAdmin={auth.installationAdmin} projectCatalog={<HostedWorkspaceProjects/>}
     onSelect={() => undefined} onNew={() => undefined} newPending composer={null}
     web={<p role="status" className="p-6 text-sm">Connect the selected workspace before opening a Web conversation.</p>}>
     {notice && <p role="alert" className="p-4 text-sm">{notice}</p>}
@@ -83,9 +86,12 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const runtime = useRuntime();
   const { user, installationAdmin } = useAuth();
   const organization = useOrganization();
-  const project = useProject();
-  const routeProject = runtime.projectName ?? project;
-  const projectLabel = projectDisplayName ?? (projectRefId === null ? "No project" : routeProject);
+  const project = useOptionalProject();
+  const routeProject = runtime.projectless ? null : runtime.projectName ?? project;
+  const [projectCaption,setProjectCaption]=useState<{executionKey:string;label:string|null}|null>(null);
+  const onMatchingProject=useCallback((value:{executionKey:string;label:string|null})=>setProjectCaption(current=>current?.executionKey===value.executionKey&&current.label===value.label?current:value),[]);
+  const matchedProjectLabel=projectCaption?.executionKey===JSON.stringify(runtime.execution??null)?projectCaption.label:null;
+  const projectLabel = projectDisplayName ?? (runtime.projectless ? matchedProjectLabel ?? "No project" : projectRefId === null ? "No project" : routeProject ?? "Choose workspace");
   const router = useRouter();
   const params = useSearchParams();
   const committedLocation = useRef(params.toString());
@@ -95,7 +101,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const activeId = active?.id ?? null;
   const [rehydrate, setRehydrate] = useState(false);
   const chat = useOpenCodeChat(rehydrate ? null : activeId, !rehydrate && activeId ? {
-    project: runtime.projectName ?? project, runtimeId: runtime.runtimeId, title: active?.title ?? "New conversation",
+    project: runtime.projectless ? null : runtime.projectName ?? project, runtimeId: runtime.runtimeId, title: active?.title ?? "New conversation",
   } : undefined);
   useEffect(() => {
     if (!rehydrate) return;
@@ -129,7 +135,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const [diffPending, setDiffPending] = useState(false);
   const [activity, setActivity] = useState<{ sessionId: string; selection: ActivitySelection } | null>(null);
   const [presentation, setPresentation] = useState<"work" | "web">("work");
-  const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: projectRefId === undefined ? routeProject : projectRefId,
+  const identity = { instanceId: runtime.execution?.instanceId ?? "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: runtime.projectless ? null : projectRefId === undefined ? routeProject : projectRefId,
     runtimeId: runtime.runtimeId ?? "compatibility", workspaceId: runtime.workspace.confirmedWorkspaceId ?? "", sessionId: initialSessionId };
   const draftKey = workDraftKey(identity);
   const retainingHistory = retainedHistory?.key === draftKey && (rehydrate || !chat.sessionReady || chat.isLoading || Boolean(chat.error));
@@ -290,7 +296,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const artifacts = collectWorkArtifacts(displayedMessages);
   const suggestions = workSuggestions({ hasSession: activeId !== null, hasFiles: artifacts.length > 0,
     hasChanges: diff !== null && diff.sessionId === activeId && Array.isArray(diff.value) && diff.value.length > 0, hasError: Boolean(chat.error) });
-  return <WorkShell projectLabel={projectLabel} projects={identity.projectId === null ? [] : [{ id: identity.projectId, label: projectLabel, conversations }]}
+  return <WorkShell projectCatalog={search=><HostedWorkspaceProjects execution={runtime.execution} conversations={conversations} activeId={activeId} onSelect={select} search={search} onMatchingProject={onMatchingProject}/>} projectLabel={projectLabel} projects={identity.projectId === null ? [] : [{ id: identity.projectId, label: projectLabel, conversations }]}
     installationAdmin={installationAdmin}
     conversations={conversations} activeId={activeId} onSelect={select} onNew={() => { void create(); }}
     dot={slots?.dot}
@@ -339,9 +345,33 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
         && (initialSessionId === null ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.isLoading && !chat.error)}
       pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
       projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {projectLabel}</span>}
-      environmentControl={slots?.environmentControl ?? <span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
+      environmentControl={slots?.environmentControl ?? <details className="relative">
+        <summary className="cursor-pointer rounded px-2 py-1 text-xs focus-visible:outline-blue-400">{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : runtime.execution?.kind === "cluster" ? "Cluster workspace" : "Isolated runtime"}</summary>
+        <div className="absolute bottom-full left-0 z-40 mb-2 w-64 rounded-xl border border-white/10 bg-neutral-900 p-3 text-xs shadow-xl">
+          <p className="break-words text-neutral-400">{runtime.execution?.environmentId ?? "Current execution"}</p>
+          {runtime.workspace.canStop && runtime.workspace.stop && <>
+            <p className="mt-2 text-neutral-400">Saved chats stay available after this execution stops.</p>
+            <button type="button" disabled={pending || navigationPending || protectedDraft || chat.isStreaming || Object.values(drafts).some(value => value.text.length > 0 || value.attachments.length > 0) || Object.keys(unconfirmed).length > 0}
+              onClick={() => { void runtime.workspace.stop?.(); }} className="mt-3 w-full rounded border border-white/10 px-3 py-2 text-left hover:bg-white/5 disabled:opacity-40">Stop workspace</button>
+            <p className="mt-1 text-neutral-500">Finish or clear drafts before stopping.</p>
+          </>}
+        </div>
+      </details>}
       permissionControl={slots?.permissionControl ?? <span>Runtime permissions</span>}
-      memoryControl={slots?.memoryControl} voiceControl={slots?.voiceControl} /></>}
+      memoryControl={slots?.memoryControl ?? <details className="relative">
+        <summary className="cursor-pointer rounded px-2 py-1 text-xs focus-visible:outline-blue-400">Memory</summary>
+        <div className="absolute bottom-full right-0 z-40 mb-2 max-h-[65vh] w-[min(28rem,85vw)] overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 shadow-xl">
+          <HostedWorkMemory selected={user?.id && organization.active?.id && runtime.workspace.confirmedWorkspaceId && runtime.runtimeId && activeId ? {
+            actorUserId:user.id,organizationId:organization.active.id,workspaceId:runtime.workspace.confirmedWorkspaceId,
+            runtimeId:runtime.runtimeId,engineSessionId:activeId,...(projectRefId === null || runtime.projectless ? {expectedProjectId:null} : projectRefId ? {expectedProjectId:projectRefId} : {}),
+          } : null}/>
+        </div>
+      </details>} voiceControl={slots?.voiceControl ?? <CurrentAgentVoiceControls key={draftKey}
+        workspaceId={runtime.workspace.confirmedWorkspaceId} runtimeId={runtime.runtimeId} engineSessionId={activeId} active={presentation === "work"}
+        disabled={protectedDraft || pending || navigationPending || Boolean(submissionBlockedReason) || !chat.sessionReady || rehydrate}
+        onDictation={(text) => { if (protectedDraft || pending || navigationPending || submissionBlockedReason) throw new Error("The original draft is currently protected.");
+          setDrafts((current) => { const previous = current[draftKey] ?? draft; return { ...current, [draftKey]: { ...previous, text: previous.text ? `${previous.text}\n${text}` : text } }; }); }}
+        onAdmitted={() => setRehydrate(true)} onResync={() => setRehydrate(true)} />} /></>}
   >
     {slots?.panels}
     {filesOpen && <section aria-label="Conversation artifacts" className="m-4 rounded-xl border border-white/10 p-4">
@@ -355,7 +385,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     </section>}
     {!activeId ? <div className="flex h-full min-h-64 flex-col items-center justify-center gap-5 px-6 text-center">
       <Image src="/veyra-blue.png" alt="" width={48} height={48} />
-      <h1 className="text-xl font-medium">{projectRefId === null ? "What should we build?" : `What should we build in ${projectLabel}?`}</h1>
+      <h1 className="text-xl font-medium">{(runtime.projectless ? !matchedProjectLabel : projectRefId === null) ? "What should we build?" : `What should we build in ${projectLabel}?`}</h1>
       <p className="text-xs text-neutral-400">Send a message to start a new chat, or choose an existing conversation.</p>
     </div> : <ChatMessages messages={displayedMessages} isLoading={chat.isLoading} isStreaming={chat.isStreaming}
       streamActivity={chat.streamActivity} error={chat.error} permissions={retainingHistory ? [] : chat.permissions} replyPermission={chat.replyPermission}

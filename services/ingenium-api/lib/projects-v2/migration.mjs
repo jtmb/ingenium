@@ -83,6 +83,11 @@ export function importLegacyCatalog({db, transaction, checkpointAfterWrite, inst
             workspace.organization_id === decision.scope.organizationId &&
             workspace.owner_user_id === decision.scope.ownerUserId, "MIGRATION_ALIAS_CONFLICT", 409);
         }
+        if (decision.classification === "installation") {
+          const ref = db.prepare("SELECT legacy_project_id,revision FROM veyra_installation_legacy_refs WHERE instance_id=?").get(instanceId);
+          requireValue(ref && ref.legacy_project_id === row.id && Number.isSafeInteger(ref.revision) && ref.revision > 0,
+            "MIGRATION_ALIAS_CONFLICT", 409);
+        }
         continue;
       }
       if (decision.classification === "workspace") {
@@ -96,7 +101,12 @@ export function importLegacyCatalog({db, transaction, checkpointAfterWrite, inst
             decision.scope.ownerUserId, row.id, row.name, row.archived_at, row.id);
       }
       if (decision.classification === "installation") {
-        db.prepare("INSERT INTO veyra_installation_legacy_refs(instance_id,legacy_project_id) VALUES(?,?)")
+        // Original bootstrap may already own this exact storage reference.
+        // Preserve its advanced preference revision; never insert a second owner.
+        const ref = db.prepare("SELECT legacy_project_id,revision FROM veyra_installation_legacy_refs WHERE instance_id=?").get(instanceId);
+        if (ref) requireValue(ref.legacy_project_id === row.id && Number.isSafeInteger(ref.revision) && ref.revision > 0,
+          "MIGRATION_ALIAS_CONFLICT", 409);
+        else db.prepare("INSERT INTO veyra_installation_legacy_refs(instance_id,legacy_project_id) VALUES(?,?)")
           .run(instanceId, row.id);
       }
       db.prepare(`INSERT INTO veyra_project_aliases

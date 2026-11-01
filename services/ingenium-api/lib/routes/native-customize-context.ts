@@ -1,3 +1,4 @@
+import {isInstallationStorageProject} from "ingenium-core";
 import type { Request } from "express";
 import { authorization, getDb, type HostedGovernanceAuthentication, HostedRefusal, type HostedGovernanceRow as Row, type VerifiedNativeGovernanceContext as VerifiedNative } from "ingenium-core";
 import { authMiddleware } from "../middleware/auth.js";
@@ -43,7 +44,7 @@ export function createNativeCustomizeContextOwner(native?:VerifiedNativeContextO
       systemAllowed:projectId=>{
         const p=current();
         return authorization.requireInstallationPermission(toAuthorizationPrincipal(p),"skills","admin").allowed
-          && !!getDb().prepare("SELECT 1 FROM projects WHERE id=? AND is_global=1 AND archived_at IS NULL").get(projectId);
+          && isInstallationStorageProject(projectId)&&!!getDb().prepare("SELECT 1 FROM projects WHERE id=? AND archived_at IS NULL").get(projectId);
       },
       verifyEnrollment:requestId=>{
         const p=current();

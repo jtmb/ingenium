@@ -5,7 +5,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
 import OpenCodeFrame from "../components/OpenCodeFrame";
-import VSCodeFrame from "../components/VSCodeFrame";
 import { api, type DocSpace } from "@/lib/api";
 import { buildStandaloneDocsHandoffUrl } from "../docs/docs-navigation";
 import { parseOpenCodeMode } from "@/lib/open-code-mode";
@@ -59,7 +58,7 @@ function StandaloneContent() {
     }
   });
 
-  if (!page || !["opencode", "vscode", "mail", "docs", "chat"].includes(page)) {
+  if (!page || !["opencode", "mail", "docs", "chat"].includes(page)) {
     return (
       <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -79,7 +78,7 @@ function StandaloneContent() {
   }
 
   const pageTitle =
-    page === "opencode" ? "OpenCode" : page === "vscode" ? "VS Code" : page === "mail" ? "Mail" : page === "chat" ? "Chat" : "Docs";
+    page === "opencode" ? "OpenCode" : page === "mail" ? "Mail" : page === "chat" ? "Chat" : "Docs";
 
   return (
     <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex flex-col">
@@ -99,20 +98,10 @@ function StandaloneContent() {
 
       <div className="flex-1 min-h-0">
         {page === "opencode" && <StandaloneOpenCode modeParam={searchParams.get("mode")} />}
-        {page === "vscode" && <StandaloneVSCode />}
         {page === "chat" && <StandaloneChat />}
         {page === "mail" && <StandaloneMail />}
         {page === "docs" && <StandaloneDocs standaloneSearchParams={searchParams} />}
       </div>
-    </div>
-  );
-}
-
-/** Standalone VS Code reuses the same fixed-origin frame and status boundary. */
-function StandaloneVSCode() {
-  return (
-    <div className="relative h-full min-h-0 min-w-0">
-      <VSCodeFrame />
     </div>
   );
 }

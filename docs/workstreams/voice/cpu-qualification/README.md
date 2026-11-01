@@ -1,10 +1,26 @@
 # CPU qualification recipe: separate Root envelope
 
-This is source for coordinator-operated qualification, not a production approval
-or an executed installation. The worker fetched only small authoritative JSON
-metadata and read known inputs. It did not execute Python, import models, download
-binaries, install packages, create cgroups, build these sources or start runtime.
-The hosted agent original-settlement gate remains separate and open.
+Root has now executed the Linux qualification stages below. These results are
+not production approval or a complete voice pipeline qualification. The worker's
+original contribution was source and metadata only; Root owns the actual kernel,
+interpreter, dependency and model execution evidence.
+
+- The retained kernel owner passed real basic, descendant, deadline, cancellation
+  and output-bound cases with positive waits, EOF and empty-leaf removal.
+- The exact CPython3.12.13 ABI and32-package sealed offline prefix passed actual
+  dependency/import checks. The consumed compressed wheels were safely removed.
+- Real case `0a1ea846-2828-48a9-be0e-37bb914cb6d5` passed all six selected
+  Kokoro-to-small.en known-phrase roundtrips in96,858ms. The kernel measured
+  peak aggregate memory1,223,331,840 bytes and9 processes; all originals joined.
+- The first model case exposed eSpeak's long-data-path truncation. Its failure
+  evidence is preserved; the corrected retained-directory adapter passed three
+  real descriptor lifetime cases before the successful model rerun.
+
+`productionWireValidated:false` and `productionApproval:false` remain explicit.
+Genuine helper/witness/resource-probe cases, actual Core operation wiring, full
+payload/hot envelopes, platform isolation, agent calls and attended audio/UI
+acceptance remain open. The hosted agent original-settlement gate is separate.
+The sections below retain the reproducible recipe and its original boundaries.
 
 ## Authority and unchanged storage
 
@@ -16,7 +32,7 @@ existing `real-gmail-ui/veyra-phase-1`. Register only this additional subdirecto
 QUAL = PHASE/coordination/voice/cpu-qualification
 QUAL/input          exact locks/manifests and private operator grants
 QUAL/wheels         one lock-keyed wheelhouse, no retry copies
-QUAL/runtime/site   one compatible CPU dependency closure
+QUAL/runtime/env    one compatible CPU prefix (bin + lib/python3.12/site-packages)
 QUAL/runtime/worker the exact closed eleven-file Veyra code bundle
 QUAL/runtime/models exact six-file model set plus v3 manifest
 QUAL/private        API-uid0700 profile/token/approval
@@ -121,11 +137,14 @@ fixed `-c` bootstrap prepends only the verified pip wheel and calls
 resolved-python -I -S -B -c <reviewed pip bootstrap> verified-pip.whl
   --isolated --disable-pip-version-check --no-cache-dir install
   --no-index --no-deps --no-compile --require-hashes
-  --find-links QUAL/wheels --target QUAL/runtime/site
+  --find-links QUAL/wheels --prefix QUAL/runtime/env
   -r QUAL/input/requirements-cpu.lock
 ```
 
 There is no base/user-site installation and no automatic dependency resolution.
+Use the exact prefix site-packages as pythonPaths. Audit the entire prefix, including
+RECORD-relative generated bin/data files, with verifyInstalledClosure(site, pins, VAD, prefix).
+The prefix keeps standard installed RECORD paths meaningful; no outside-prefix file is allowed.
 Validate every installed RECORD/hash and actual required versions, obtain the VAD
 closure, and run actual `pip check`/CPU ABI probes within bounded originals. Only
 the declared target and its scratch may be writable. Root seals installed code and
@@ -225,7 +244,7 @@ do not toggle host policy, borrow Stratus or infer retirement from Pod disappear
 
 `qualify_cpu.py` is a real model-only driver for a new bounded original. Its fixed
 command is the exact resolved Python with `-I -S -B`, this hashed script, runUUID
-and private qualification grant. Before any model import it checks exact cgroup
+and separate non-authority model input. The Root0600 operator grant remains private and unreadable to the dropped child. A distinct Root-owned0440/API-group-readable input binds only runId, finite hardLimits, profile path/hash and productionApproval:false; the private grant hashes that input and mounts its directory read-only. Before any model import it checks exact cgroup
 membership/limits, non-root uid, interpreter/code hashes, CPU/offline environment
 and the profile address-space cap. It uses the production CPU loader and its real
 warmup, then actual synthesis/transcription for every selected voice. It captures
@@ -356,3 +375,5 @@ failure cleanup. These are source-only harnesses authored by the worker and have
 not been executed by the worker. Root must additionally qualify actual Linux fd3
 inheritance and exec with the bounded inert C owner before any interpreter/model
 execution. `productionApproval: false` and all existing gates remain unchanged.
+
+The actual first model case b3c1ef5f-b0ad-42f7-a9fb-727613fa1d75 found the pinned eSpeak library truncating its204-byte data path to159bytes. The [1.52.0 source](https://github.com/espeak-ng/espeak-ng/blob/1.52.0/src/libespeak-ng/speech.h) defines the POSIX160-byte buffer. The Veyra CPU constructor now supplies a retained non-inheritable original data-directory fd through a fixed phonemizer API adapter at its final native boundary. It copies no assets, changes no mount, edits no dependency and closes the fd on constructor failure or after library cleanup. Actual corrected model qualification is still required.

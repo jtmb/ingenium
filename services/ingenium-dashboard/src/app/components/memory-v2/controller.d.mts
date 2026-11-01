@@ -4,6 +4,8 @@ export interface PendingMemoryChange { identity: MemoryBinding; operationId: str
 export interface PolicyReceipt { status: "committed"; operationId: string; scopeHash: string; operation: "policy" | "chat-policy"; revision: number }
 export interface MemoryControllerPorts {
   api: {
+    /** Original HTTP owner only: this error happened before its write dispatch. */
+    rejectedBeforeDispatch?: (error: unknown) => boolean;
     read: (binding: MemoryBinding) => Promise<{ scopeHash: string; chatId: string; bindingHash: string; bindingEpoch: number; available: boolean; canChange: boolean; policy: MemoryControlsState['policy']; chat: MemoryControlsState['chat'] }>;
     change: (pending: PendingMemoryChange) => Promise<{ receipt: PolicyReceipt }>;
     operation: (binding: MemoryBinding, operationId: string) => Promise<PolicyReceipt | null>;

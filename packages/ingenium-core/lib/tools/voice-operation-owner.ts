@@ -2,7 +2,7 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { createCoreVoiceOperationLedger, type VoiceLedgerPorts } from "./voice-operation-ledger.js";
 import type { CoreVoiceLedger } from "./voice-operation-contract.js";
 
-export type VoiceOperationAuthorities<C> = Pick<VoiceLedgerPorts<C>,"currentScope"|"verifyRetirement"|"requireOriginalResource">;
+export type VoiceOperationAuthorities<C> = Pick<VoiceLedgerPorts<C>,"currentScope"|"verifyRetirement"|"requireOriginalResource"|"originalAssistantSources">;
 /** Core-owned connection/transaction; API supplies actual closed request and private retirement authorities. */
 export function createVoiceOperationOwner<C>(authorities:VoiceOperationAuthorities<C>):CoreVoiceLedger<C> {
   return createCoreVoiceOperationLedger({

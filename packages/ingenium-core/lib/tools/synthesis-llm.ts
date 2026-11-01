@@ -1,6 +1,6 @@
 import { Observation, PersonalityTrait, Skill } from "../schema.js";
 import { getSetting } from "./settings.js";
-import { getGlobalProject } from "./projects.js";
+import { getInstallationStorageProject } from "./projects.js";
 import { logger } from "../logger.js";
 import { EndpointPolicyError, safeLlmFetch } from "./endpoint-policy.js";
 import { tryParseJSON } from "./llm-json.js";
@@ -387,15 +387,15 @@ export interface LLMConfig {
 
 /**
  * Resolve LLM configuration with a fallback chain:
- *   1. Global project (is_global = 1) → "synthesis_model", "synthesis_api_key", "synthesis_endpoint"
+ *   1. Installation storage → "synthesis_model", "synthesis_api_key", "synthesis_endpoint"
  *   2. Current project (projectId) settings
  *   3. Environment variables: SYNTHESIS_MODEL, SYNTHESIS_API_KEY, SYNTHESIS_ENDPOINT
  *
  * Returns null if no config is found anywhere.
  */
 export function resolveLLMConfig(projectId?: string): LLMConfig | null {
-  // 1. Try global project
-  const gid = getGlobalProject()?.id;
+  // 1. Try installation settings
+  const gid = getInstallationStorageProject()?.id;
   if (gid) {
     const model = getSetting(gid, "synthesis_model");
     if (model) {

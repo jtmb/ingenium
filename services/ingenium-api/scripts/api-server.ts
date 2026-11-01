@@ -1,3 +1,15 @@
+import {createInstallationPreferencesRouter} from '../lib/routes/installation-preferences.js';
+import {bindInstallationSettingsOwner} from '../lib/projects-v2/installation-retention.mjs';
+import {createWorkspaceContextRouter} from '../lib/routes/workspace-context.js';
+import {createWorkspaceExecutionRouter} from '../lib/routes/workspace-execution.js';
+import {createWorkspaceProjectsRouter} from '../lib/routes/workspace-projects.js';
+import {workspaceV2McpIngress} from '../lib/projects-v2/workspace-v2-mcp.mjs';
+import {workspaceV2PrivateIngress,provisionWorkspaceRuntimeFromRequestV2,refreshWorkspaceRuntimeFromRequestV2} from '../lib/projects-v2/workspace-v2-control.mjs';
+import {captureOriginalCandidateManagerBody} from "../lib/dot-v2/candidate-manager-http.mjs";
+import {createCurrentAgentCallRouter,captureOriginalCurrentCallBody,captureOriginalCurrentCallPcmBody,releaseOriginalCurrentCallPcmBody} from '../lib/voice-v2/current-call-http.js';
+import {CURRENT_CALL_PREFIX,CURRENT_CALL_BODY_LIMIT,CURRENT_CALL_PCM_LIMIT,isCurrentCallHttpPath,isCurrentCallPcmPath} from '../lib/voice-v2/current-call-http-protocol.mjs';
+import {createNativeScopedCustomizeRouter} from '../lib/routes/customize-scoped-v1.js';
+import {createScopedCustomizeRouter} from "../lib/routes/customize-scoped.js";
 import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
 import {installedDotSchedulerRuntime} from "../lib/dot-v2/installed-dot-scheduler.js";
 import express from "express";
@@ -8,7 +20,7 @@ import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
-import { agents, authentication, backups, emailKeyTransition, jobs, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { agents, authentication, backups, emailKeyTransition, jobs, logger, getDb, execTransaction, checkpointAfterWrite, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { getEmailEncryptionKeyFingerprint } from "ingenium-email/lib/credential-crypto";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -109,7 +121,9 @@ configureEmailRuntimeForApi();
  */
 export function ensureGlobalProject(): string | null {
   try {
-    const global = projectsDb.ensureCanonicalGlobalProject();
+    const mapped=projectsDb.getInstallationStorageProject();
+    const global=mapped??projectsDb.ensureCanonicalGlobalProject();
+    if(!mapped)bindInstallationSettingsOwner({db:getDb(process.env.INGENIUM_CORE_DB_PATH),transaction:execTransaction,checkpointAfterWrite},global.id);
     // The broker is a system-owned profile. Its dedicated core bootstrap emits
     // the only row accepted by migration 058; no public agent route can create
     // or reactivate it.
@@ -134,7 +148,7 @@ export function ensureGlobalProject(): string | null {
       logger.error("api", "Reserved LLM broker startup validation failed; refusing unsafe startup");
       throw error;
     }
-    logger.warn("api", "Failed to create the global-default project. Email engine and cross-project features will be unavailable until one is created via /init-project or the Settings page.");
+    logger.warn("api", "Installation storage is unavailable. Email and shared configuration remain unavailable until installation setup is repaired.");
     return null;
   }
 }
@@ -153,7 +167,10 @@ app.use(cors({ origin: [...config.dashboardOrigins], preflightContinue: true }))
 app.use(repositorySyncContentTypeGate);
 // Repository projections contain the bounded docs and resource manifests in one
 // request, so they need a narrow ceiling above the default API body limit.
-const defaultJsonParser = express.json({ limit: "2mb" });
+const defaultJsonParser:ReturnType<typeof express.json> = (request,response,next) => isCurrentCallPcmPath(request.originalUrl??request.url) ? express.raw({type:'application/octet-stream',limit:CURRENT_CALL_PCM_LIMIT,inflate:false,verify(originalRequest,originalResponse,bytes){captureOriginalCurrentCallPcmBody(originalRequest,bytes);const release=()=>releaseOriginalCurrentCallPcmBody(originalRequest);originalResponse.once('finish',release);originalResponse.once('close',release);}})(request,response,next) : express.json({
+ limit:isCurrentCallHttpPath(request.originalUrl??request.url)?CURRENT_CALL_BODY_LIMIT:'2mb',
+ verify(originalRequest,_response,bytes){captureOriginalCandidateManagerBody(originalRequest,bytes);captureOriginalCurrentCallBody(originalRequest,bytes);},
+})(request,response,next);
 app.use((req, res, next) => isExactRepositorySyncRequest(req)
   ? next()
   : defaultJsonParser(req, res, next));
@@ -164,11 +181,28 @@ app.use(authPreflightReadRateLimit);
 app.use(rateLimit);
 // Dedicated manager/job-run audiences authenticate in their original owners.
 app.use(createCore126Ingress(actualManagedJobHandlers));
+app.use(workspaceV2PrivateIngress); // exact manager/bootstrap audiences only
+app.use(workspaceV2McpIngress);
 app.use(authMiddleware);
 app.use(recordCandidateAuthenticationFailure);
 app.use(authenticatedReadRateLimit);
 app.use(csrfMiddleware);
+// Real session/CSRF/rate admission above; explicit canonical workspace owner
+// authorization precedes the legacy Project route mapper for these exact routes.
+app.post('/api/v1/runtimes/workspace-v2/provision',async(req,res)=>{
+ try{if(req.originalUrl!==req.path)throw Error('exact path');res.status(202).json({data:await provisionWorkspaceRuntimeFromRequestV2(req,req.body)});}
+ catch{res.status(503).json({error:{code:'WORKSPACE_V2_PROVISION_UNAVAILABLE'}});}
+});
+app.post('/api/v1/runtimes/workspace-v2/refresh',async(req,res)=>{
+ try{if(req.originalUrl!==req.path)throw Error('exact path');res.status(200).json({data:await refreshWorkspaceRuntimeFromRequestV2(req,req.body)});}
+ catch{res.status(503).json({error:{code:'WORKSPACE_V2_PLACEMENT_UNAVAILABLE'}});}
+});
+app.use('/api/v1/workspace-context',createWorkspaceContextRouter()); // original session/CSRF; private placement and canonical source history only
+app.use('/api/v1/workspace-execution',createWorkspaceExecutionRouter()); // discovery is not readiness; original private placement confirms each selection
+app.use('/api/v1/workspace-projects',createWorkspaceProjectsRouter()); // same original session/CSRF/rate admission; explicit per-call organization/actor owner
 app.use(authorizationMiddleware);
+app.use('/api/v1/installation/preferences',createInstallationPreferencesRouter()); // server-owned legacy storage mapping, no browser project selector
+app.use(CURRENT_CALL_PREFIX,createCurrentAgentCallRouter());
 app.use(createRepositorySyncIngress());
 
 // OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
@@ -198,6 +232,8 @@ app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/native-customize/pairings",createNativePairingRouter());
 const verifiedNative=createVerifiedNativeContextOwner(req=>createNodeNativePairingOwner(req).custody);
 app.use("/api/v1/native-customize",createNativeCustomizeRouter({context:createNativeCustomizeContextOwner(verifiedNative.owner),preflight:verifiedNative.preflight}));
+app.use("/api/v1/customize-scoped-v1",createNativeScopedCustomizeRouter());
+app.use("/api/v1/customize",createScopedCustomizeRouter());
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
@@ -329,7 +365,7 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   }
 
   try {
-    const globalProjectRec = projectsDb.getCanonicalGlobalProject();
+    const globalProjectRec = projectsDb.getInstallationStorageProject();
     if (globalProjectRec) {
       const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
       if (!isPackagedMcpLauncher(launcherPath)) {
@@ -392,7 +428,7 @@ export function startApiServer(): ApiServerHandle | null {
     assertApiTokenConfigured();
     authentication.validateAuthEncryptionKeyFile();
     if (process.env.INGENIUM_EMAIL_ENCRYPTION_KEY_EMPTY_TRANSITION === "1") {
-      const project = projectsDb.ensureCanonicalGlobalProject();
+      const project = projectsDb.getInstallationStorageProject()??projectsDb.ensureCanonicalGlobalProject();
       const transition = emailKeyTransition.transitionEmptyEmailEncryptionKey({
         projectId: project.id,
         fingerprint: getEmailEncryptionKeyFingerprint(),

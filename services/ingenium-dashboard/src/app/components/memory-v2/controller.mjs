@@ -104,7 +104,7 @@ export function createMemoryController({ api, journal, newOperationId = () => `m
       // Only a definitive pre-commit 4xx response can release the pending journal.
       const definitive = { 401: ['UNAUTHORIZED', 'AUTH_REQUIRED'], 403: ['FORBIDDEN'], 404: ['NOT_FOUND'],
         409: ['VERSION_CONFLICT', 'OPERATION_CONFLICT', 'RESET_CHANGED'], 422: ['INVALID_INPUT', 'INVALID_SCOPE'] };
-      const rejected = definitive[error?.status]?.includes(error?.code) === true;
+      const rejected = api.rejectedBeforeDispatch?.(error) === true || definitive[error?.status]?.includes(error?.code) === true;
       if (rejected) {
         try { await journal.remove(captured.scopeHash, record.operationId); }
         catch { if (isCurrent(captured, generation)) publish({ pending: false, unknownOperationId: record.operationId, error: 'The request journal could not be reconciled.' }); return false; }

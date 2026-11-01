@@ -58,14 +58,16 @@ export function decodeDockerMultiplex(raw,maxBytes=1024*1024){
 function json(response,status){if(response.status!==status)throw failure('CORE126_DOCKER_STATUS');try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(response.bytes));}catch{throw failure('CORE126_DOCKER_JSON');}}
 /** Actual exec/read/inspect producer. No caller command, detached mode or TTY.
  * probeSource is the reviewed frozen harness source, not task/user prompt text. */
-export function createCore126DockerProbeOwner({io,probeSource,probeSha256}){
+export function createCore126DockerProbeOwner({io,probeSource,probeSha256,retainOriginalExec}){
  if(!io||typeof io.request!=='function'||typeof io.hijack!=='function'||!Buffer.isBuffer(probeSource)||probeSource.length<1||probeSource.length>96*1024||digest(probeSource)!==probeSha256)throw failure('CORE126_PROBE_SOURCE');
+ if(retainOriginalExec!==undefined&&typeof retainOriginalExec!=='function')throw failure('CORE126_ORIGINAL_EXEC_RETENTION');
  const text=new TextDecoder('utf-8',{fatal:true}).decode(probeSource),retired=new WeakMap();
  return Object.freeze({
   async exec(containerId,input,options){
    if(!id(containerId))throw failure('CORE126_CONTAINER_ID');const payload=Buffer.from(JSON.stringify(input));if(payload.length>INPUT)throw failure('CORE126_PROBE_INPUT_LIMIT');
    const create=await io.request('POST','/containers/'+containerId+'/exec',{AttachStdin:true,AttachStdout:true,AttachStderr:true,Tty:false,Privileged:false,User:'1000:1000',WorkingDir:'/workspace',Cmd:['/usr/local/bin/node','--input-type=module','-e',text,'--','--core126-probe']},options);
    const exec=json(create,201);if(!id(exec.Id))throw failure('CORE126_EXEC_ID');
+   retainOriginalExec?.(Object.freeze({containerId,execId:exec.Id,probeSha256}));
    const stream=await io.hijack('/exec/'+exec.Id+'/start',{Detach:false,Tty:false},payload,options),decoded=decodeDockerMultiplex(stream.bytes,options?.maxBytes??1024*1024);
    const inspectRaw=await io.request('GET','/exec/'+exec.Id+'/json',undefined,options),inspect=json(inspectRaw,200);
    if(inspect.ID!==exec.Id&&inspect.Id!==exec.Id||inspect.ContainerID!==containerId||inspect.Running!==false||!Number.isInteger(inspect.ExitCode))throw failure('CORE126_EXEC_RETIREMENT_UNCONFIRMED');

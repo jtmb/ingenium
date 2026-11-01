@@ -2,7 +2,7 @@ export * from "./db.js";
 export * from "./database-integrity.js";
 export * as skills from "./tools/skills.js";
 export * as skillGovernance from "./tools/skill-governance.js";
-export { getSkillsBase, getPluginsBase, getCommandsBase } from "./tools/paths.js";
+export { getSkillsBase, getPluginsBase, getCommandsBase, isInstallationStorageProject } from "./tools/paths.js";
 export * as tasks from "./tools/tasks.js";
 export * as taskClaims from "./tools/task-claims.js";
 export * as context from "./tools/context.js";
@@ -88,3 +88,11 @@ export type { CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, 
 export {assertNativeGovernanceLifecycleClear} from "./tools/node-native-lifecycle.js";
 
 export * as dotExecutionDelegation from "./tools/dot-execution-delegation.js";
+
+export * as customizeCatalog from "./tools/customize-catalog-owner.js";
+
+export type {OriginalAssistantSourceClaim,OriginalAssistantSourceInspectors,OriginalAssistantPlanFacts,OriginalAssistantDispatchFacts} from './tools/voice-assistant-source.js';
+
+export * as workspaceContext from "./tools/workspace-context-store.mjs";
+
+export * as workspaceRuntimeCredentialsV2 from "./tools/workspace-runtime-credentials.mjs";

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+export async function bootstrapWorkspaceRuntimeV2(hints:import("./workspace-runtime-mcp-client.js").WorkspaceMcpHints){const original=await import("./workspace-runtime-mcp-transport.js");return original.bootstrapWorkspaceRuntimeV2(hints); }
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +105,11 @@ export async function runMcpLauncher(
       writeLauncherFailure("authentication", "Original JobRun MCP transport unavailable.");
       return 2;
     }
+  }
+  // Dedicated actual workspace facet before ANY generic Project preflight.
+  if(process.env.INGENIUM_EXECUTION_SCOPE==="workspace"){
+    try{const {runWorkspaceRuntimeMcpTransportV2}=await import("./workspace-runtime-mcp-transport.js");await runWorkspaceRuntimeMcpTransportV2();return 0;}
+    catch{writeLauncherFailure("authentication","Workspace runtime MCP owner unavailable.");return 2;}
   }
   const preflight = preflightMcpLauncher(worktree);
   if (!preflight.ok) {

@@ -1,3 +1,6 @@
+import { installContext136, hasVerifiedContext136 } from '../data/migrations/migration-136.mjs';
+import { verifiedWorkspace137Definitions } from '../data/migrations/migration-137.mjs';
+import { installWorkspaceSuccessors138, verifiedWorkspaceExecutionDefinitions } from '../data/migrations/migration-138.mjs';
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
@@ -80,6 +83,35 @@ const WRITE_RETRY_MIN_MS = 20;
 const WRITE_RETRY_MAX_MS = 150;
 
 let db: Database.Database | null = null;
+
+type DbBootstrapState = 'closed' | 'opening' | 'ready' | 'closing' | 'failed';
+let dbBootstrapState: DbBootstrapState = 'closed';
+let dbBootstrapFailure: unknown = null;
+
+function refuseUnverifiedDatabase(): never {
+  throw new Error('CORE_DATABASE_BOOTSTRAP_UNAVAILABLE', {cause: dbBootstrapFailure});
+}
+
+/** A failed/unknown close retains the exact original and a refusal latch. */
+function closeRetainedDatabaseOriginal(): void {
+  const original = db;
+  if (!original) return refuseUnverifiedDatabase();
+  dbBootstrapState = 'closing';
+  try {
+    original.close();
+    if (original.open !== false || db !== original) {
+      throw new Error('CORE_DATABASE_CLOSE_UNCONFIRMED');
+    }
+  } catch (error) {
+    dbBootstrapState = 'failed';
+    dbBootstrapFailure ??= error;
+    throw error;
+  }
+  // Clear only after the SAME retained original positively confirms closed.
+  db = null;
+  dbBootstrapState = 'closed';
+  dbBootstrapFailure = null;
+}
 
 /**
  * Migration 058 owns the connection-independent reserved-broker trigger set.
@@ -562,7 +594,7 @@ function inspectContextSnapshotImportMigration(db: Database.Database): ContextSn
       "instr(source_key, '/') = 0",
       "instr(source_key, char(92)) = 0",
       "length(snapshot_hash) = 64",
-      "CHECK(entry_count >= 1)",
+      hasVerifiedContext136(db) ? "CHECK((project_id IS NOT NULL AND entry_count >= 1) OR (project_id IS NULL AND entry_count >= 0))" : "CHECK(entry_count >= 1)",
       "UNIQUE(project_id, source_key)",
       "UNIQUE(project_id, conversation_id)",
     ],
@@ -2082,7 +2114,9 @@ function compareMigrationDefinitions(
       reference.close();
     }
   }
+  const evolved = files.every(file => ["100_mcp_credentials.sql","101_runtime_isolation.sql","102_runtime_browser_sessions.sql","109_runtime_workspace_supersession.sql","127_runtime_original_provisions.sql"].includes(file)) ? (verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)) : undefined;
   return objectNames.flatMap((name) => {
+    if (evolved && Object.hasOwn(evolved,name)) return []; // exact new owned DDL already verified
     const row = db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name) as { sql?: string } | undefined;
     return row?.sql && normalizeSchemaSql(row.sql) === expected!.get(name) ? [] : [`${name} definition`];
   });
@@ -2530,7 +2564,7 @@ function inspectMcpCredentialMigration(db: Database.Database): AuthenticationFou
       if (!actual.has(column)) missing.push(`mcp_credentials.${column} column`);
     }
     for (const column of actualColumns) {
-      if (!(MCP_CREDENTIAL_COLUMNS as readonly string[]).includes(column)) missing.push(`mcp_credentials.${column} unexpected column`);
+      if (!(MCP_CREDENTIAL_COLUMNS as readonly string[]).includes(column) && !(column === "schema_version" && (verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)))) missing.push(`mcp_credentials.${column} unexpected column`);
     }
   }
   if (!securityEpochPresent) missing.push("service_principals.security_epoch column");
@@ -2609,13 +2643,13 @@ function inspectRuntimeIsolationMigration(db: Database.Database): RuntimeIsolati
   if (state.missing.length === 0) {
     const unmapped = db.prepare(`SELECT count(*) AS count FROM mcp_credentials c
       WHERE NOT EXISTS (SELECT 1 FROM authorized_workspaces w WHERE w.id = c.workspace_id
-        AND w.organization_id = c.organization_id AND w.project_id = c.project_id
+        AND w.organization_id = c.organization_id AND w.project_id IS c.project_id
         AND w.owner_user_id = c.created_by_user_id AND w.storage_path = c.launcher_worktree
         AND w.storage_mapping_hash = sha256(c.workspace_id || char(0) || c.launcher_worktree))`).get() as { count: number };
     const invalidBindings = db.prepare(`SELECT count(*) AS count FROM runtime_capability_bindings b
       JOIN runtime_instances r ON r.id = b.runtime_id JOIN mcp_credentials c ON c.id = b.mcp_credential_id
       WHERE c.kind <> 'runtime' OR c.audience <> 'runtime' OR r.workspace_id <> c.workspace_id
-        OR r.organization_id <> c.organization_id OR r.project_id <> c.project_id OR r.owner_user_id <> c.created_by_user_id`).get() as { count: number };
+        OR r.organization_id <> c.organization_id OR r.project_id IS NOT c.project_id OR r.owner_user_id <> c.created_by_user_id`).get() as { count: number };
     const manifest = db.prepare("SELECT phase, foreign_key_violations, workspace_count, runtime_count FROM runtime_isolation_manifests WHERE migration = 101").get() as {
       phase: string; foreign_key_violations: number; workspace_count: number; runtime_count: number;
     } | undefined;
@@ -3696,29 +3730,52 @@ function repairContextConversationMigration(
  *   Must be re-enabled every connection because it is not persisted in the DB file.
  */
 export function getDb(dbPath?: string): Database.Database {
-  if (db) return db;
+  if (dbBootstrapState === 'ready' && db) return db;
+  if (dbBootstrapState !== 'closed' || db) return refuseUnverifiedDatabase();
 
   const resolvedDbPath = resolveCoreDbPath(dbPath);
-
   const dir = dirname(resolvedDbPath);
   mkdirSync(dir, { recursive: true });
 
-  db = new Database(resolvedDbPath);
-  db.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 5000");
-  db.pragma("foreign_keys = ON");
+  // Covers synchronous reentry even from constructor/configuration hooks.
+  dbBootstrapState = 'opening';
+  try {
+    const original = new Database(resolvedDbPath);
+    db = original;
+    original.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
+    original.pragma("journal_mode = WAL");
+    original.pragma("busy_timeout = 5000");
+    original.pragma("foreign_keys = ON");
 
-  // The fixed root restore executor must inspect the live database before it
-  // stops appuser processes. Running schema migrations at that point can
-  // rebuild a table while those processes still hold the database open. The
-  // executor swaps a previously validated snapshot; its explicit restore-only
-  // upgrader handles its narrow allowlist, while ordinary startup migration
-  // remains disabled.
-  const isRootRestoreMaintenance = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE === "execute"
-    && typeof process.getuid === "function" && process.getuid() === 0;
-  if (!isRootRestoreMaintenance) runMigrations(db);
-  return db;
+    // The fixed root restore executor must inspect the live database before it
+    // stops appuser processes. Running schema migrations at that point can
+    // rebuild a table while those processes still hold the database open. The
+    // executor swaps a previously validated snapshot; its explicit restore-only
+    // upgrader handles its narrow allowlist, while ordinary startup migration
+    // remains disabled.
+    const isRootRestoreMaintenance = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE === "execute"
+      && typeof process.getuid === "function" && process.getuid() === 0;
+    if (!isRootRestoreMaintenance) runMigrations(original);
+    if (db !== original || original.open !== true) {
+      throw new Error('CORE_DATABASE_BOOTSTRAP_ORIGINAL_CHANGED');
+    }
+    dbBootstrapState = 'ready';
+    return original;
+  } catch (error) {
+    dbBootstrapFailure = error;
+    dbBootstrapState = 'failed';
+    if (db) {
+      try { closeRetainedDatabaseOriginal(); }
+      catch (closeError) {
+        throw new AggregateError([error, closeError], 'CORE_DATABASE_BOOTSTRAP_CLOSE_UNCONFIRMED');
+      }
+    } else {
+      // Constructor never returned an original. No cached handle can escape.
+      dbBootstrapState = 'closed';
+      dbBootstrapFailure = null;
+    }
+    throw error;
+  }
 }
 
 export function getAuthenticationFoundationMigrationStatus(): Record<"093" | "094" | "095" | "096" | "097" | "098" | "099" | "100" | "101" | "102", AuthenticationFoundationMigrationState> {
@@ -5506,6 +5563,10 @@ function runMigrations(db: Database.Database): void {
     logger.info("db", "Applied migration 121_repository_sync_worktree_state.sql");
   }
   applyVeyraDomainMigrations(db, migrationsDir);
+  // Dedicated Context/workspace evolutions keep the existing single writer; GPU135 is separately allocated.
+  // Each dedicated evolution toggles FK before its own BEGIN on this connection.
+  installContext136(db);
+  installWorkspaceSuccessors138(db);
   enforceReservedBrokerInvariant(db);
 }
 
@@ -5521,11 +5582,39 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
     { file: "128_voice_operations.sql", tables: ["veyra_voice_operations"], triggers: ["veyra_voice_control_generation","veyra_voice_operation_identity_immutable","veyra_voice_operation_terminal_immutable","veyra_voice_operation_revision","veyra_voice_operation_no_delete","veyra_voice_private_revision","veyra_voice_control_identity_immutable","veyra_voice_cpu_identity_terminal_immutable"] },
     { file: "129_managed_candidate_purpose.sql", tables: ["managed_job_execution_purpose_schema"], triggers: ["managed_job_execution_immutable","managed_job_effect_fence_monotonic","managed_job_credential_requires_material","job_run_mcp_credentials_immutable","job_run_credential_purpose_immutable","managed_job_purpose_schema_no_update","managed_job_purpose_schema_no_delete"] },
     { file: "130_dot_original_dispatch_fence.sql", tables: ["dot_original_dispatch_schema"], triggers: ["dot_dispatch_schema_no_update","dot_dispatch_schema_no_delete","dot_dispatch_initial","dot_dispatch_retry_claim","dot_dispatch_monotonic","dot_dispatch_no_delete","dot_dispatch_admission","dot_dispatch_record_admission","dot_dispatch_admitted_no_delete","dot_dispatch_run_identity","dot_dispatch_run_no_delete","dot_dispatch_record_collision","dot_dispatch_run_collision"] },
+    { file: "131_candidate_waiting_lifecycle.sql", tables: ["managed_candidate_lifecycle_schema", "job_run_candidate_lifecycle"], triggers: ["candidate131_schema_no_update", "candidate131_schema_no_delete", "candidate131_schema_no_replace", "candidate131_new_marker", "candidate131_base_no_update", "candidate131_base_no_delete", "candidate131_base_no_replace", "candidate131_extension_initial", "candidate131_extension_no_replace", "candidate131_extension_no_delete", "candidate131_seed", "candidate131_transition", "candidate131_child_no_adoption", "candidate131_run_no_delete", "candidate131_run_no_replace", "candidate131_run_terminal_guard", "candidate131_run_identity", "candidate131_exact_evidence", "candidate131_extension_update_collision"] },
+    { file: "132_voice_attachment_deliveries.sql", tables: ["veyra_voice_attachment_deliveries"], triggers: ["veyra_voice_attachment_insert_collision","veyra_voice_attachment_no_delete","veyra_voice_attachment_monotonic_time","veyra_voice_attachment_identity_immutable","veyra_voice_attachment_transition"] },
+    { file: "133_customize_scoped_catalog.sql", tables: ["plugin_lifecycle_events", "customize_catalog_sources", "customize_commands", "customize_installations", "customize_projection_preimages", "customize_native_consents"], triggers: ["plugins_archived_inactive", "plugins_revision", "plugins_lifecycle_event", "plugin_lifecycle_event_no_update", "plugin_lifecycle_event_no_delete", "customize_catalog_immutable", "customize_catalog_no_delete", "customize_command_no_update", "customize_command_no_delete", "customize_installation_no_update", "customize_installation_no_delete", "customize_preimage_no_update", "customize_preimage_no_delete", "customize_native_consent_immutable", "customize_native_consent_no_delete", "customize_native_request_insert", "customize_native_request_immutable", "plugin_lifecycle_events_original_insert", "customize_catalog_sources_original_insert", "customize_commands_original_insert", "customize_installations_original_insert", "customize_projection_preimages_original_insert", "customize_native_consents_original_insert", "customize_command_terminal_insert", "customize_command_terminal_update"] },
+    { file: "134_voice_assistant_sources.sql", tables: ["veyra_voice_assistant_sources"], triggers: ["veyra_voice_assistant_no_replace", "veyra_voice_assistant_initial", "veyra_voice_assistant_immutable", "veyra_voice_assistant_spend", "veyra_voice_assistant_cpu_link", "veyra_voice_assistant_no_delete", "veyra_voice_assistant_update_no_replace"] },
+    { file: "139_installation_credential_owner.sql", tables: ["installation_credential_owner_schema"], triggers: ["installation_credential_schema_no_update", "installation_credential_schema_no_delete", "installation_credential_schema_no_replace", "provider_connections_owner_valid_insert", "provider_connections_credential_valid_update"] },
+    { file: "140_installation_restore_owner.sql", tables: ["installation_restore_owner_schema"], triggers: ["installation_restore_schema_no_update", "installation_restore_schema_no_delete", "installation_restore_schema_no_replace", "backup_restore_plans_global_project_insert", "backup_restore_plan_revisions_global_project_insert", "backup_restore_authorizations_global_project_insert", "backup_restore_stages_global_project_insert", "backup_restore_events_global_project_insert", "backup_restore_receipts_global_project_insert", "backup_restore_execution_authorizations_global_project_insert", "backup_restore_execution_runs_global_project_insert", "backup_restore_execution_items_global_project_insert", "backup_restore_executor_plan_revisions_global_project_insert", "backup_restore_execution_events_global_project_insert", "backup_restore_execution_receipts_global_project_insert"] },
   ];
   for (const migration of migrations) {
     const present = migration.tables.filter(name => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
     if (present.length > 0 && present.length !== migration.tables.length) throw new Error("Incomplete Veyra schema: " + migration.file);
     if (present.length === 0) {
+      if (migration.file.startsWith("140_")) {
+        // Require the exact original restore ownership guards before evolution.
+        const guards: Array<[string,string]> = [["083_restore_plans.sql", "backup_restore_plans_global_project_insert"], ["083_restore_plans.sql", "backup_restore_plan_revisions_global_project_insert"], ["083_restore_plans.sql", "backup_restore_authorizations_global_project_insert"], ["083_restore_plans.sql", "backup_restore_stages_global_project_insert"], ["083_restore_plans.sql", "backup_restore_events_global_project_insert"], ["083_restore_plans.sql", "backup_restore_receipts_global_project_insert"], ["084_restore_executor.sql", "backup_restore_execution_authorizations_global_project_insert"], ["084_restore_executor.sql", "backup_restore_execution_runs_global_project_insert"], ["084_restore_executor.sql", "backup_restore_execution_items_global_project_insert"], ["084_restore_executor.sql", "backup_restore_executor_plan_revisions_global_project_insert"], ["084_restore_executor.sql", "backup_restore_execution_events_global_project_insert"], ["084_restore_executor.sql", "backup_restore_execution_receipts_global_project_insert"]];
+        for (const [file,name] of guards) {
+          const original = readFileSync(resolve(migrationsDir,file),"utf8"), prefix = "CREATE TRIGGER " + name + "\n";
+          const start = original.indexOf(prefix), end = original.indexOf("END;", start);
+          const row = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name) as {sql?:string}|undefined;
+          if (start < 0 || end < start || !row?.sql || normalizeSchemaSql(row.sql) !== normalizeSchemaSql(original.slice(start,end+4))) throw Error("Installation restore original guard drift: " + name);
+        }
+      }
+      if (migration.file.startsWith("139_")) {
+        // Evolve only the exact original096 guards; partial/custom DDL is not repaired.
+        const original = readFileSync(resolve(migrationsDir, "096_resource_ownership.sql"), "utf8");
+        for (const name of ["provider_connections_owner_valid_insert", "provider_connections_credential_valid_update"]) {
+          const prefix = "CREATE TRIGGER " + name + " ";
+          const start = original.indexOf(prefix), end = original.indexOf("END;", start);
+          const row = database.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name) as {sql?: string} | undefined;
+          if (start < 0 || end < start || !row?.sql || normalizeSchemaSql(row.sql) !== normalizeSchemaSql(original.slice(start, end + 4))) {
+            throw Error("Installation credential original guard drift: " + name);
+          }
+        }
+      }
       database.transaction(() => {
         database.exec(readFileSync(resolve(migrationsDir, migration.file), "utf8"));
         for (const table of migration.tables) {
@@ -5538,6 +5627,18 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       const keys = database.prepare("PRAGMA foreign_key_list(" + table + ")").all() as { from: string; table: string; to: string; on_delete: string }[];
       if (!keys.some(key => key.from === column && key.table === parent && key.to === (parent === "veyra_installation_identity" ? "instance_id" : "id") && key.on_delete === "RESTRICT")) throw new Error("Missing Veyra ownership invariant: " + table + "." + column);
     };
+    if (migration.file.startsWith("140_")) {
+      const marker = database.prepare("SELECT schema_version FROM installation_restore_owner_schema WHERE singleton=1").get() as {schema_version:number}|undefined;
+      const drift = compareMigrationDefinitions(database,migration.file,"CREATE TABLE backup_restore_plans(project_id TEXT);CREATE TABLE backup_restore_plan_revisions(project_id TEXT);CREATE TABLE backup_restore_authorizations(project_id TEXT);CREATE TABLE backup_restore_stages(project_id TEXT);CREATE TABLE backup_restore_events(project_id TEXT);CREATE TABLE backup_restore_receipts(project_id TEXT);CREATE TABLE backup_restore_execution_authorizations(project_id TEXT);CREATE TABLE backup_restore_execution_runs(project_id TEXT);CREATE TABLE backup_restore_execution_items(project_id TEXT);CREATE TABLE backup_restore_executor_plan_revisions(project_id TEXT);CREATE TABLE backup_restore_execution_events(project_id TEXT);CREATE TABLE backup_restore_execution_receipts(project_id TEXT);",[...migration.tables,...migration.triggers]);
+      if (marker?.schema_version !== 1 || drift.length) throw Error("Installation restore schema drift: " + drift.join(","));
+    }
+    if (migration.file.startsWith("139_")) {
+      const marker = database.prepare("SELECT schema_version FROM installation_credential_owner_schema WHERE singleton=1").get() as {schema_version: number} | undefined;
+      const drift = compareMigrationDefinitions(database, migration.file,
+        "CREATE TABLE provider_connections(id TEXT PRIMARY KEY, owner_kind TEXT, organization_id TEXT, owner_user_id TEXT, credential_item_id TEXT);",
+        [...migration.tables, ...migration.triggers]);
+      if (marker?.schema_version !== 1 || drift.length) throw Error("Installation credential schema drift: " + drift.join(","));
+    }
     if (migration.file.startsWith("122_")) {
       for (const table of ["veyra_workspace_projects", "veyra_workspace_roots", "veyra_project_aliases", "veyra_installation_legacy_refs"]) references(table, "instance_id", "veyra_installation_identity");
       references("veyra_workspace_projects", "organization_id", "organizations");
@@ -5584,7 +5685,13 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       const row=database.prepare("SELECT schema_version FROM managed_job_execution_purpose_schema WHERE singleton=1").get() as {schema_version:number}|undefined;
       if(row?.schema_version!==1)throw Error("Missing managed execution purpose schema marker");
       const objects=["job_run_managed_execution","job_run_mcp_credentials","managed_job_execution_purpose_schema",...migration.triggers];
-      const drift=compareMigrationDefinitions(database,["126_managed_job_execution.sql","129_managed_candidate_purpose.sql"],"CREATE TABLE job_runs(id TEXT PRIMARY KEY);CREATE TABLE service_principals(id TEXT PRIMARY KEY);",objects);
+      //131 adds a candidate-only discriminator to the same retained base.
+      // Reopened/upgraded databases must compare the cumulative definition;
+      // do not mistake its exact additive column for129 schema corruption.
+      const candidateColumns=database.prepare("PRAGMA table_info(job_run_managed_execution)").all() as Array<{name:string}>;
+      const referenceMigrations=["126_managed_job_execution.sql","129_managed_candidate_purpose.sql"];
+      if(candidateColumns.some(column=>column.name==="candidate_waiting_protocol"))referenceMigrations.push("131_candidate_waiting_lifecycle.sql");
+      const drift=compareMigrationDefinitions(database,referenceMigrations,"CREATE TABLE job_runs(id TEXT PRIMARY KEY);CREATE TABLE service_principals(id TEXT PRIMARY KEY);",objects);
       if(drift.length)throw Error("Managed execution purpose schema drift: "+drift.join(","));
       references("job_run_managed_execution","run_id","job_runs");
       references("job_run_mcp_credentials","run_id","job_runs");
@@ -5597,6 +5704,45 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       const drift=compareMigrationDefinitions(database,["124_veyra_dot_automation.sql","126_managed_job_execution.sql","129_managed_candidate_purpose.sql","130_dot_original_dispatch_fence.sql"],"CREATE TABLE organizations(id TEXT PRIMARY KEY);CREATE TABLE users(id TEXT PRIMARY KEY);CREATE TABLE job_runs(id TEXT PRIMARY KEY);CREATE TABLE service_principals(id TEXT PRIMARY KEY);",objects);
       if(drift.length)throw Error("Original Dot dispatch schema drift: "+drift.join(","));
     }
+    if (migration.file.startsWith("131_")) {
+      const marker=database.prepare("SELECT schema_version FROM managed_candidate_lifecycle_schema WHERE singleton=1").get() as {schema_version:number}|undefined;
+      if(marker?.schema_version!==1)throw Error("Missing candidate waiting lifecycle schema marker");
+      const drift=compareMigrationDefinitions(database,
+        ["126_managed_job_execution.sql","129_managed_candidate_purpose.sql","131_candidate_waiting_lifecycle.sql"],
+        "CREATE TABLE job_runs(id TEXT PRIMARY KEY);CREATE TABLE service_principals(id TEXT PRIMARY KEY);",
+        ["job_run_managed_execution",...migration.tables,...migration.triggers]);
+      const columns=database.prepare("PRAGMA table_info(job_run_managed_execution)").all() as Array<{name:string;type:string;notnull:number;dflt_value:string|null}>;
+      const protocol=columns.find(column=>column.name==="candidate_waiting_protocol");
+      if(!protocol||protocol.type!=="TEXT"||protocol.notnull!==0||protocol.dflt_value!==null)drift.push("candidate waiting protocol additive column");
+      // This original parent's key is run_id, not the generic id helper.
+      const keys=database.prepare("PRAGMA foreign_key_list(job_run_candidate_lifecycle)").all() as Array<{from:string;to:string;table:string;on_delete:string}>;
+      if(!keys.some(key=>key.from==="run_id"&&key.to==="run_id"&&key.table==="job_run_managed_execution"&&key.on_delete==="RESTRICT"))drift.push("candidate original run ownership");
+      if(drift.length)throw Error("Candidate waiting lifecycle schema drift: "+drift.join(","));
+    }
+    if (migration.file.startsWith("133_")) {
+      // Reference only the preexisting columns needed by this additive migration.
+      // Existing plugins/identity/auth ownership remains with its original migrations.
+      const drift=compareMigrationDefinitions(database,"133_customize_scoped_catalog.sql",
+        "CREATE TABLE plugins(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);",
+        [...migration.tables,"customize_catalog_scope","customize_commands_pending",...migration.triggers]);
+      const columns=database.prepare("PRAGMA table_info(plugins)").all() as Array<{name:string;type:string;notnull:number;dflt_value:string|null}>;
+      const revision=columns.find(c=>c.name==="revision"),archived=columns.find(c=>c.name==="archived_at");
+      if(!revision||revision.type!=="INTEGER"||revision.notnull!==1||revision.dflt_value!=="0"
+        ||!archived||archived.type!=="TEXT"||archived.notnull!==0||archived.dflt_value!==null)drift.push("plugins additive lifecycle columns");
+      const pluginSql=database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='plugins'").get() as {sql?:string}|undefined;
+      if(!pluginSql?.sql||!normalizeSchemaSql(pluginSql.sql).includes("check(revision>=0)"))drift.push("plugins lifecycle revision check");
+      if(drift.length)throw Error("Customize scoped catalog schema drift: "+drift.join(","));
+    }
+    if (migration.file.startsWith("134_")) {
+      const drift=compareMigrationDefinitions(database,["134_voice_assistant_sources.sql"],"CREATE TABLE veyra_voice_operations(operation_id TEXT PRIMARY KEY)",["veyra_voice_assistant_sources","veyra_voice_assistant_call_fence",...migration.triggers]);
+      const keys=database.prepare("PRAGMA foreign_key_list(veyra_voice_assistant_sources)").all() as Array<{from:string;table:string;to:string;on_delete:string}>;
+      for(const column of ["control_operation_id","cpu_operation_id"])if(!keys.some(k=>k.from===column&&k.table==="veyra_voice_operations"&&k.to==="operation_id"&&k.on_delete==="RESTRICT"))drift.push(column+" original CPU reference");
+      if(drift.length)throw Error("Voice assistant source schema drift: "+drift.join(","));
+    }
+    if (migration.file.startsWith("132_")) {
+      const drift=compareMigrationDefinitions(database,["132_voice_attachment_deliveries.sql"],"",["veyra_voice_attachment_deliveries",...migration.triggers]);
+      if(drift.length)throw Error("Voice attachment delivery schema drift: "+drift.join(","));
+    }
     if (migration.file.startsWith("124_")) {
       references("veyra_dot_records", "organization_id", "organizations");
       references("veyra_dot_records", "owner_user_id", "users");
@@ -5607,6 +5753,9 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(trigger)) throw new Error("Missing Veyra retention invariant: " + trigger);
     }
   }
+  // Exactly once per original Core startup/restore, never per ledger factory.
+  // Lost process-local plans/CPU handles cannot be reconstructed from rows.
+  database.transaction(()=>{database.prepare("UPDATE veyra_voice_assistant_sources SET fenced=1,fence_reason=COALESCE(fence_reason,'CORE_STARTUP_OR_RESTORE'),phase=CASE WHEN phase IN ('reserved','linked') THEN 'unknown' ELSE phase END,revision=revision+1 WHERE fenced=0").run();})();
 }
 
 function reconcileDuplicateActiveGlobals(db: Database.Database): void {
@@ -5775,10 +5924,11 @@ export function checkpointAfterWrite(): void {
 
 /** Close the singleton before RESTORE-101 scans for database holders. */
 export function closeDbForMaintenance(): void {
-  if (db) {
-    db.close();
-    db = null;
+  if (dbBootstrapState === 'opening' || dbBootstrapState === 'closing') {
+    return refuseUnverifiedDatabase();
   }
+  if (db) closeRetainedDatabaseOriginal();
+  else if (dbBootstrapState !== 'closed') return refuseUnverifiedDatabase();
   writeCount = 0;
 }
 

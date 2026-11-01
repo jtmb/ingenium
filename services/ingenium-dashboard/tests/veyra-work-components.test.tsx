@@ -52,7 +52,7 @@ describe("Work presentation", () => {
     expect(screen.queryByRole("complementary", { name: "Projects and conversations" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }));
     const width = screen.getByRole("separator", { name: "Conversation sidebar width" });
-    expect(width.getAttribute("aria-valuenow")).toBe("468");
+    expect(width.getAttribute("aria-valuenow")).toBe("360");
     fireEvent.keyDown(width, { key: "Home" });
     expect(width.getAttribute("aria-valuenow")).toBe("256");
     fireEvent.keyDown(width, { key: "ArrowRight" });

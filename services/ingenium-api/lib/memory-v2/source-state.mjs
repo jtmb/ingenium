@@ -1,4 +1,5 @@
 import { readVerifiedRecallSource } from './recall-availability.mjs';
+import {resolveContextPairCandidate} from './opencode-context-pair.mjs';
 import { readCompletedSnapshotSource } from './bounded-snapshot.mjs';
 import { createHash } from 'node:crypto';
 import { scopeKey } from './lifecycle.mjs';
@@ -27,7 +28,8 @@ export function eligibilityFingerprint(policy, scope, execution) {
 /** Reads canonical source facts on the supplied API connection; no transcript, policy or job is written. */
 export function contextMemorySourceState({ db, scope, execution, chatId, messageId, conversationId, contentHash, policy = null, completedSnapshot, readAvailability, nowMs = Date.now() }) {
   const key = scopeKey(scope);
-  if (scope.projectId === null || !Number.isSafeInteger(nowMs) || nowMs < 0) return null;
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) return null;
+  if (scope.projectId === null) return workspaceMemorySourceState({db,scope,execution,chatId,messageId,conversationId,contentHash,policy,completedSnapshot,readAvailability});
   const source = db.prepare(`SELECT m.id,m.sequence,m.role,m.content,m.content_hash,m.metadata,m.idempotency_key,m.created_at
     FROM context_messages m JOIN context_conversations c ON c.id=m.conversation_id AND c.project_id=m.project_id
     WHERE m.id=? AND m.conversation_id=? AND m.project_id=? AND c.organization_id=? AND c.owner_user_id=? AND c.visibility='private'
@@ -129,4 +131,32 @@ export function contextMemorySourceState({ db, scope, execution, chatId, message
     && admissionMatches && policy.admission.state === 'settled' && nowMs - lastActivity >= policy.minRolloutIdleHours * 3_600_000;
   return { active: !!active, excluded, uncertain: !complete || !!uncertainAdmission, idleEligible: !!idleEligible,
     ...(fingerprint === null ? {} : { eligibilityVersion: fingerprint }) };
+}
+
+/** Current-generation original ledger plus the same opaque engine observation
+ * used by legacy sources. Stored completion/checkpoints alone never grant idle
+ * generation, and this read path cannot adopt history from another runtime. */
+function workspaceMemorySourceState({db,scope,execution,chatId,messageId,conversationId,contentHash,policy,completedSnapshot,readAvailability}){
+ const pair=resolveContextPairCandidate(db,{scope,execution,chatId,sourceRef:{id:messageId,contentHash}});
+ if(!pair||pair.conversationId!==conversationId)return null;
+ const key=scopeKey(scope),at=pair.sourceRefs.findIndex(ref=>ref.id===messageId);if(at<0)return null;
+ const excluded=!!db.prepare(`SELECT 1 FROM veyra_memory_suppression WHERE scope_key=? AND
+  ((kind='source' AND target IN (?,?)) OR (kind='content' AND target IN (?,?))) LIMIT 1`)
+  .get(key,pair.sourceRefs[0].id,pair.sourceRefs[1].id,pair.sourceRefs[0].contentHash,pair.sourceRefs[1].contentHash);
+ if(completedSnapshot!==undefined){
+  const policyValid=policy?.version===CODEX_MEMORY_IDLE_POLICY.version&&policy.runtimeId===execution.runtimeId&&scopeFields.every(field=>policy.scope?.[field]===scope[field]);
+  const member=at===0?pair.user:pair.assistant;
+  const selected=policyValid?readCompletedSnapshotSource(completedSnapshot,{scope,execution,chatId,engineMessageId:member.id,role:at===0?'user':'assistant',content:member.content,contentHash,minRolloutIdleHours:policy.minRolloutIdleHours}):null;
+  const complete=selected&&selected.userMessageId===pair.user.id&&selected.terminalAssistantId===pair.assistant.id&&selected.userContentHash===pair.sourceRefs[0].contentHash&&selected.terminalContentHash===pair.sourceRefs[1].contentHash;
+  if(!complete)return {active:false,excluded,uncertain:true,idleEligible:false};
+  const host=db.prepare('SELECT enabled,generate,external_context FROM veyra_memory_policy WHERE scope_key=?').get(key);
+  const chat=db.prepare('SELECT contribute FROM veyra_memory_chat_policy WHERE scope_key=? AND chat_id=?').get(key,chatId);
+  const archive=db.prepare(`SELECT event_type,archive_sequence FROM context_checkpoint_audit_events WHERE project_id IS NULL AND conversation_id=? AND archive_sequence IS NOT NULL ORDER BY archive_sequence DESC LIMIT 1`).get(conversationId);
+  return {active:false,excluded,uncertain:false,idleEligible:!!(!excluded&&(!archive||archive.event_type==='conversation_unarchived')&&host?.enabled===1&&host.generate===1&&chat?.contribute===1&&(!selected.externalContextUsed||host.external_context===1)),eligibilityVersion:selected.eligibilityVersion+':'+(archive?.archive_sequence??-1)};
+ }
+ if(readAvailability!==undefined){
+  const state=readVerifiedRecallSource(readAvailability,{db,scope,execution,chatId,messageId,contentHash});
+  return state?{...state,excluded:excluded||state.excluded}:{active:false,excluded,uncertain:true,idleEligible:false};
+ }
+ return {active:false,excluded,uncertain:true,idleEligible:false};
 }

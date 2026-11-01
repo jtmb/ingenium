@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { logger } from "../logger.js";
-import { getCanonicalGlobalProject } from "./projects.js";
+import { getInstallationStorageProject } from "./projects.js";
 import * as vault from "./vault.js";
 
 export const OAUTH_CLIENT_SECRET_KEYS = [
@@ -40,12 +40,12 @@ export function isOAuthClientSecretKey(value: unknown): value is OAuthClientSecr
 
 /**
  * OAuth application secrets are server-wide mail infrastructure. Resolve the
- * caller supplied project ID against the sole active global project rather
+ * caller supplied storage ID against the immutable installation reference rather
  * than treating an arbitrary dashboard project as a credential namespace.
  */
-function isActiveGlobalProjectId(projectId: string): boolean {
+function isInstallationStorageProjectId(projectId: string): boolean {
   try {
-    return getCanonicalGlobalProject()?.id === projectId;
+    return getInstallationStorageProject()?.id === projectId;
   } catch {
     // An ambiguous or unavailable global project is an integrity failure. The
     // caller must fail closed instead of selecting a project by convention.
@@ -224,7 +224,7 @@ export function migrateLegacyOAuthClientSecret(
   projectId: string,
   key: OAuthClientSecretKey,
 ): OAuthClientSecretResult {
-  if (!isActiveGlobalProjectId(projectId)) {
+  if (!isInstallationStorageProjectId(projectId)) {
     return { status: "invalid", metadata: emptyMetadata() };
   }
 
@@ -271,15 +271,15 @@ export function migrateLegacyOAuthClientSecrets(projectId: string): OAuthClientS
 }
 
 /**
- * Reconcile legacy OAuth secrets only for the sole active global project.
+ * Reconcile legacy OAuth secrets only for the mapped installation storage owner.
  * Lifecycle callers use this after the vault opens; the log records outcomes
  * only and never project identifiers, keys, values, or error text.
  */
 export function migrateLegacyOAuthClientSecretsForActiveGlobalProject(): OAuthClientSecretLifecycleMigration {
   try {
-    const globalProject = getCanonicalGlobalProject();
+    const globalProject = getInstallationStorageProject();
     if (!globalProject) {
-      logger.warn("protected-settings", "OAuth client-secret migration skipped because no active global project is available");
+      logger.warn("protected-settings", "OAuth client-secret migration skipped because installation storage is unavailable");
       return { status: "no_active_global", results: [] };
     }
     const results = migrateLegacyOAuthClientSecrets(globalProject.id);
@@ -298,7 +298,7 @@ export function migrateLegacyOAuthClientSecretsForActiveGlobalProject(): OAuthCl
 
 /** Read the protected value for runtime use. Sealed/unavailable vaults fail closed. */
 export function getOAuthClientSecret(projectId: string, key: OAuthClientSecretKey): string | undefined {
-  if (!isActiveGlobalProjectId(projectId)) return undefined;
+  if (!isInstallationStorageProjectId(projectId)) return undefined;
   if (vault.isSealed()) return undefined;
   const reference = getReference(projectId, key);
   if (!reference) return undefined;
@@ -311,7 +311,7 @@ export function getOAuthClientSecret(projectId: string, key: OAuthClientSecretKe
 
 /** Return non-sensitive state for API responses. */
 export function getOAuthClientSecretMetadata(projectId: string, key: OAuthClientSecretKey): OAuthClientSecretMetadata {
-  if (!isActiveGlobalProjectId(projectId)) return emptyMetadata();
+  if (!isInstallationStorageProjectId(projectId)) return emptyMetadata();
   return metadata(projectId, key);
 }
 
@@ -325,7 +325,7 @@ export function updateOAuthClientSecret(
   action: OAuthClientSecretAction,
   value?: string,
 ): OAuthClientSecretResult {
-  if (!isActiveGlobalProjectId(projectId)) {
+  if (!isInstallationStorageProjectId(projectId)) {
     return { status: "invalid", metadata: emptyMetadata() };
   }
   if (action === "preserve") return migrateLegacyOAuthClientSecret(projectId, key);

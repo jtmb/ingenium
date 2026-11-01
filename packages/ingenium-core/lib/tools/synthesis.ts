@@ -105,15 +105,15 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
     summary: "",
   };
 
-  // Find global project
-  const globalProject = projects.getGlobalProject();
+  // Use installation-owned synthesis settings and proposal storage.
+  const globalProject = projects.getInstallationStorageProject();
   if (!globalProject) {
-    result.errors.push("No global project found. Mark a project as global first via setProjectGlobal().");
-    result.summary = "No global project configured.";
+    result.errors.push("Installation storage is not configured.");
+    result.summary = "Installation storage is not configured.";
     return result;
   }
   if (!isAutomaticLearningEnabled(globalProject.id)) {
-    result.summary = "Automatic learning is disabled for the global project.";
+    result.summary = "Automatic learning is disabled for this installation.";
     return result;
   }
   try {
@@ -122,18 +122,18 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
       "synthesis_started",
       "synthesis",
       "Cross-project synthesis started",
-      "Evaluating patterns across all non-global projects",
+      "Evaluating enabled workspace patterns in the installation organization",
     );
   } catch (_) { /* non-fatal */ }
 
-  // Find all non-global, non-archived projects
+  // Keep learning within the installation organization and enabled workspaces.
   const allProjects = projects.listProjects();
   const nonGlobalProjects = allProjects.filter(
-    p => !p.is_global && !p.archived_at && p.id !== globalProject.id && isAutomaticLearningEnabled(p.id),
+    p => !p.archived_at && p.id !== globalProject.id && p.organization_id === globalProject.organization_id && isAutomaticLearningEnabled(p.id),
   );
 
   if (nonGlobalProjects.length === 0) {
-    result.summary = "No non-global projects found for cross-project synthesis.";
+    result.summary = "No eligible workspaces found for cross-project synthesis.";
     return result;
   }
 
@@ -337,7 +337,7 @@ export async function consolidateSkills(
   opts?: { llmExecutor?: LLMTextExecutor },
 ): Promise<ConsolidationResult> {
   // Prefer direct configuration; use the API-owned broker only when none exists.
-  const gid = projects.getGlobalProject()?.id;
+  const gid = projects.getInstallationStorageProject()?.id;
   const directConfig = synthesisLlm.getFullLLMSynthesisConfig(projectId);
   if (!directConfig && !opts?.llmExecutor) {
     return { merged: 0, deleted: 0, summary: "LLM not configured — skipping consolidation" };

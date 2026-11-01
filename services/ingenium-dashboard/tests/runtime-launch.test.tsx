@@ -23,7 +23,7 @@ import {
 } from "../src/lib/use-runtime-launch";
 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
-function runtimeOrigin(audience: "web" | "cli" | "vscode"): string {
+function runtimeOrigin(audience: "web" | "cli"): string {
   return `https://${audience}--${runtimeId}.runtime.example.test`;
 }
 const workspace = {
@@ -65,7 +65,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderRuntime(audience: "web" | "cli" | "vscode" = "web") {
+function renderRuntime(audience: "web" | "cli" = "web") {
   return renderHook(() => {
     const workspaceController = useRuntimeWorkspace(scope);
     return { workspace: workspaceController, launch: useRuntimeLaunch(audience, workspaceController) };
@@ -128,7 +128,7 @@ describe("RUNTIME-100 dashboard runtime selection", () => {
     },
   );
 
-  it.each(["web", "cli", "vscode"] as const)("requires an explicit authorized workspace before launching %s", async (audience) => {
+  it.each(["web", "cli"] as const)("requires an explicit authorized workspace before launching %s", async (audience) => {
     const origin = runtimeOrigin(audience);
     const launchResponse = { data: { launchUrl: `${origin}/__ingenium/exchange`, status: "ready" } };
     apiRequest
@@ -474,13 +474,13 @@ describe("HTTPS LAN compatibility launch", () => {
     apiRequest
       .mockResolvedValueOnce({ data: { mode: "compatibility", status: "ready", reason: null } })
       .mockResolvedValueOnce({ data: { status: "ready" } })
-      .mockResolvedValueOnce({ data: { status: "ready", launchUrl: "https://vscode.ingenium.example.test/__ingenium/exchange" } });
-    const { result } = renderRuntime("vscode");
+      .mockResolvedValueOnce({ data: { status: "ready", launchUrl: "https://cli.ingenium.example.test/__ingenium/exchange" } });
+    const { result } = renderRuntime("cli");
     await waitFor(() => expect(result.current.launch.status).toBe("ready"));
     expect(apiRequest).toHaveBeenCalledWith("/runtimes/browser/compatibility-launch", expect.objectContaining({ method: "POST" }));
-    expect(exchange).toHaveBeenCalledWith("https://vscode.ingenium.example.test/__ingenium/exchange", expect.objectContaining({
+    expect(exchange).toHaveBeenCalledWith("https://cli.ingenium.example.test/__ingenium/exchange", expect.objectContaining({
       method: "POST", credentials: "include",
     }));
-    expect(result.current.launch.url).toBe("https://vscode.ingenium.example.test/");
+    expect(result.current.launch.url).toBe("https://cli.ingenium.example.test/");
   });
 });

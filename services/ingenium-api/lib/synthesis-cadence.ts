@@ -6,7 +6,7 @@ export const SYNTHESIS_DEFAULT_MS = Number.isFinite(configuredDefault) && config
 /** The scheduler and its status view must read the same active-global cadence. */
 export function getSynthesisInterval(): number {
   try {
-    const globalId = projects.getGlobalProject()?.id;
+    const globalId = projects.getInstallationStorageProject()?.id;
     if (globalId) {
       const value = settings.getSetting(globalId, "synthesis_interval_ms");
       if (value !== undefined) {

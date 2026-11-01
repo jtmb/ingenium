@@ -9,7 +9,8 @@ import { createCoreMemorySession, positionalCoreConnection } from "./core-sessio
 import { authorizeMemoryRequestOperation, mapRequestExecutionFailure } from "./request-policy.mjs";
 import { contextMemorySourceState, type ApprovedMemoryEligibilityPolicy } from "./source-state.mjs";
 import type { AuthenticatedExecution } from "./adapters.mjs";
-import type { MemoryScope } from "./lifecycle.mjs";
+import { MemoryError, type MemoryScope } from "./lifecycle.mjs";
+import { expectedMemoryBinding, assertExpectedMemoryBinding } from "./expected-binding.mjs";
 
 export interface InternalMemoryRequestOptions {
   readAvailability?: import('./recall-availability.mjs').RecallReadView;
@@ -26,6 +27,7 @@ function executionLookup<T>(read: () => T): T {
 /** Public request composition only. Internal generation/backup/restore retain their own operator/job owner. */
 export function createRequestMemorySession(request: Request, selected: RequestExecutionSelection, internal: InternalMemoryRequestOptions = {}) {
   const selection = Object.freeze({ ...selected });
+  const expected = expectedMemoryBinding(name => request.get(name));
   return createCoreMemorySession({
     request,
     selected: selection,
@@ -36,8 +38,17 @@ export function createRequestMemorySession(request: Request, selected: RequestEx
       const execution = executionLookup(() => resolveRequestExecution(request, selection));
       return execution.projectId === null ? { ...execution, projectId: null, visibility: "private" as const } : null;
     },
-    authorizeOperation: ({ principal, scope, permission }) => {
+    authorizeOperation: ({ principal, scope, execution, permission }) => {
       const identity = revalidateRequestIdentity(request);
+      if (expected) {
+        // Bind the selected chat, including when inspecting provenance from OTHER chats.
+        // This runs on every lifecycle authorization, inside mutation transactions too.
+        const queryChat=request.query.chatId,pathChat=request.params.chatId;
+        const engineId=pathChat??queryChat;
+        if (typeof engineId!=="string" || (pathChat!==undefined && queryChat!==undefined && pathChat!==queryChat)) throw new MemoryError("INVALID_INPUT");
+        const chat=executionLookup(()=>resolveRequestChatBinding(request,execution,engineId,"active"));
+        assertExpectedMemoryBinding(expected,scope,chat.contextConversationId);
+      }
       return authorizeMemoryRequestOperation({
         permission, expectedPrincipal: principal, identity, method: request.method,
         csrf: () => {

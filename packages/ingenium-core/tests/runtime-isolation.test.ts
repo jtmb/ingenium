@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
+import {createHash,randomUUID} from "node:crypto";
 import { getAuthenticationFoundationMigrationStatus, getDb, resetDbForTest } from "../lib/db.js";
 import { createUser } from "../lib/tools/identity.js";
 import { createOrganization } from "../lib/tools/organizations.js";
@@ -516,7 +517,7 @@ describe("AUTH-108 runtime isolation", () => {
       runtimeId: runtime.id,
       ownerUserId: first.user.id,
       authSessionId: authSession.session.id,
-      audience: "vscode",
+      audience: "cli",
       rootDomain: "runtime.example.test",
       scheme: "https",
       launcherOrigin: "https://dashboard.example.test",
@@ -525,7 +526,37 @@ describe("AUTH-108 runtime isolation", () => {
     });
     const replacement = consumeRuntimeBrowserLaunchTicket({ ...afterLogout, exchangeProof: replacementProof, now })!;
     runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "REVOKED", actorType: "manager", actorId: "manager" });
-    expect(resolveRuntimeBrowserSession({ token: replacement.token, audience: "vscode", host: afterLogout.host, origin: afterLogout.origin, now })).toBeUndefined();
+    expect(resolveRuntimeBrowserSession({ token: replacement.token, audience: "cli", host: afterLogout.host, origin: afterLogout.origin, now })).toBeUndefined();
+  });
+
+  it("denies retired editor mint, exchange and old persisted credentials without deleting history", () => {
+    const scope=tenancy("retired-editor");
+    authorizeWorkspace({id:"workspace-retired-editor",organizationId:scope.organizationId,projectId:scope.project.id,ownerUserId:scope.user.id,storagePath:"/srv/retired-editor"});
+    let runtime=createRuntimeInstance("workspace-retired-editor",limits);
+    for(const toState of ["PROVISIONING","STARTING","READY"] as const)runtime=transitionRuntime({id:runtime.id,expectedRevision:runtime.revision,toState,actorType:"system",actorId:"test"});
+    const now=new Date(),auth=createSession(scope.user.id,now),db=getDb(process.env.INGENIUM_CORE_DB_PATH);
+    // Invalid incoming/legacy value deliberately crosses the TypeScript boundary.
+    const retired="vscode" as never;
+    expect(()=>issueRuntimeLaunchTicket({runtimeId:runtime.id,ownerUserId:scope.user.id,audience:retired,now})).toThrow("Invalid runtime launch ticket");
+    expect(()=>issueRuntimeBrowserLaunchTicket({runtimeId:runtime.id,ownerUserId:scope.user.id,authSessionId:auth.session.id,audience:retired,rootDomain:"runtime.example.test",scheme:"https",launcherOrigin:"https://dashboard.example.test",exchangeProof:"z".repeat(43),now})).toThrow();
+    const proof="p".repeat(43),issued=issueRuntimeBrowserLaunchTicket({runtimeId:runtime.id,ownerUserId:scope.user.id,authSessionId:auth.session.id,audience:"web",rootDomain:"runtime.example.test",scheme:"https",launcherOrigin:"https://dashboard.example.test",exchangeProof:proof,now});
+    const active=consumeRuntimeBrowserLaunchTicket({...issued,exchangeProof:proof,now})!;
+    expect(active).toBeDefined();
+    const hash=(s:string)=>createHash("sha256").update(s).digest("hex");
+    const host=`vscode--${runtime.id}.runtime.example.test`,origin=`https://${host}`,oldProof="o".repeat(43),oldToken=`rbs_${"t".repeat(43)}`;
+    // Historical format102 fixtures use the unchanged real schema/triggers and
+    // SAME test Core connection. No auth row or schema guard is fabricated.
+    const insertHistorical=(table:string,row:Record<string,unknown>)=>db.prepare(`INSERT INTO ${table} (${Object.keys(row).join(",")}) VALUES (${Object.keys(row).map(()=>"?").join(",")})`).run(...Object.values(row));
+    const oldTicket={...db.prepare("SELECT * FROM runtime_browser_launch_tickets WHERE runtime_id=?").get(runtime.id) as Record<string,unknown>,id:randomUUID(),audience:"vscode",host,origin,token_hash:hash("retired-editor-ticket"),nonce_hash:hash(oldProof),consumed_at:null};
+    insertHistorical("runtime_browser_launch_tickets",oldTicket);
+    const oldSession={...db.prepare("SELECT * FROM runtime_browser_sessions WHERE runtime_id=?").get(runtime.id) as Record<string,unknown>,id:randomUUID(),audience:"vscode",host,origin,token_hash:hash(oldToken)};
+    insertHistorical("runtime_browser_sessions",oldSession);
+    expect(consumeRuntimeBrowserLaunchTicket({exchangeProof:oldProof,audience:retired,host,origin,launcherOrigin:issued.launcherOrigin,now})).toBeUndefined();
+    expect(resolveRuntimeBrowserSession({token:oldToken,audience:retired,host,origin,now,touch:true})).toBeUndefined();
+    expect(db.prepare("SELECT * FROM runtime_browser_launch_tickets WHERE id=?").get(oldTicket.id)).toEqual(oldTicket);
+    expect(db.prepare("SELECT * FROM runtime_browser_sessions WHERE id=?").get(oldSession.id)).toEqual(oldSession);
+    expect(resolveRuntimeBrowserSession({token:active.token,audience:"web",host:issued.host,origin:issued.origin,now})?.backendName).toBe(runtime.backendName);
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({integrity_check:"ok"});
   });
 
   it("reconciles activity counters when a runtime crashes", () => {

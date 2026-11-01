@@ -24,6 +24,7 @@ export interface MemoryApiPorts<RequestContext = unknown> {
   authorizeOperation: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; permission: MemoryPermission; chatId: string | null }) => boolean;
   resolveSourceState: (input: { request: RequestContext; principal: MemoryActor; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string; messageId: string; conversationId: string; role: 'user' | 'assistant' | 'tool'; contentHash: string }) => Pick<SourceState,'active' | 'excluded' | 'uncertain' | 'idleEligible' | 'eligibilityVersion'> | null;
   resolveProjectlessScope?: (input: { request: RequestContext; principal: MemoryActor; workspaceId: string }) => (WorkspaceOwnership & { projectId: null; visibility: 'private' }) | null;
+  resolveProjectlessServiceScope?: (input: { request: RequestContext; principal: MemoryActor; workspaceId: string }) => (WorkspaceOwnership & { projectId: null; visibility: 'private';servicePrincipalId:string;credentialId:string }) | null;
   clock?: () => string;
 }
 export function createApiMemorySession<RequestContext>(ports: MemoryApiPorts<RequestContext>): Readonly<{
@@ -35,3 +36,6 @@ export function explicitMemoryForChat<T extends { items: { instructionAuthority:
   memory: MemoryLifecycle; scope: MemoryScope; chatId: string;
   loadExplicit: (scope: { organizationId: string; ownerUserId: string; projectId: string; workspaceId: string; allowProjectVisibility: false }) => T | Promise<T>;
 }): Promise<{ excluded: boolean; reason: string | null; page: T | null }>;
+
+/** Capability only; actual identity, scope and authorization remain request-owned. */
+export function hasMemoryCapability(principal: MemoryActor, permission: MemoryPermission): boolean;

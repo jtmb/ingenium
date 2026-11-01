@@ -247,7 +247,7 @@
     {
       "id": "dot",
       "number": 6,
-      "name": "Dot and automation",
+      "name": "veyra-bot and automation",
       "branch": "codex/veyra-parallel-dot",
       "checkout": "parallel/dot",
       "writerPrefixes": [
@@ -269,7 +269,7 @@
       ],
       "model": "gpt-6.1-sol",
       "reasoningEffort": "medium",
-      "ownedGoal": "Implement Veyra Dot, scoped proactive suggestions, follow-ups, scheduled work, notifications, event queue and operation history. Prove cancellation, restart recovery, authorization, timezone/DST and missed-run behavior without external-message permission bypasses or a duplicate scheduler. Deliver scoped modules, tests, documentation, evidence and cleanup ready for coordinator integration.",
+      "ownedGoal": "Implement veyra-bot, scoped proactive suggestions, follow-ups, scheduled work, notifications, event queue and operation history. Prove cancellation, restart recovery, authorization, timezone/DST and missed-run behavior without external-message permission bypasses or a duplicate scheduler. Deliver scoped modules, tests, documentation, evidence and cleanup ready for coordinator integration.",
       "receipt": "coordination/dot/ownership.json",
       "statusReceipt": "coordination/dot/status.json",
       "nativeCheckout": null,
@@ -771,7 +771,7 @@
     },
     {
       "id": "F47",
-      "feature": "Thread follow-ups/heartbeats, proactive assistant/dot workflow",
+      "feature": "Thread follow-ups/heartbeats, proactive veyra-bot workflow",
       "stream": "dot",
       "finalVerifier": "coordinator",
       "originalPhases": "6",
@@ -1032,7 +1032,7 @@
     "Codex Work window",
     "Codex Customize Plugins",
     "Codex Customize Skills",
-    "Veyra Dot",
+    "veyra-bot",
     "Agent call",
     "Live voice"
   ],

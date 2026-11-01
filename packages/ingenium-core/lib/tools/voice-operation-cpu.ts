@@ -3,6 +3,7 @@ import type {VoiceLedgerPorts,VoiceMetadata,VoiceOriginal,VoiceOwner,CpuIdentity
 import type {CpuPrivate,CpuRetentionChange,CpuRetentionAck,CpuResultFingerprint,VoiceControl,OriginalResourceRequest} from "./voice-operation-contract.js";
 type Row=Record<string,any>;
 interface Internal<C> {
+ requireOriginalAssistantCpuLive(context:C,operationId:string,owner:VoiceOwner):void;
  get(id:string):Row|undefined;write<T>(work:()=>T):T;
  authorize(context:C,scope:VoiceScope|null,action:"reserve"|"read"|"transition"|"settle"|"quarantine",live:boolean):VerifiedVoiceContext;
  metadata(row:Row):VoiceMetadata;update(row:Row,state:VoiceState,outcome?:VoiceOutcome|null,fingerprint?:string|null,retention?:string|null,code?:string|null):VoiceMetadata;
@@ -99,6 +100,7 @@ export function createVoiceCpuExtension<C>(ports:VoiceLedgerPorts<C>,i:Internal<
      i.exact(request,["operationId","owner","identity","expectedCpuRevision"]);
      return i.write(()=>{
        const {row,cpu}=cpuOwned(context,request,"claimCpuDispatch");live(context,row,request.owner);
+       i.requireOriginalAssistantCpuLive(context,row.operation_id,request.owner);
        if(row.state!=="reserved"||cpu.dispatchClaimed||cpu.quarantined||cpu.phase!=="bound")return i.fail("VOICE_CPU_DISPATCH_ALREADY_CLAIMED",403);
        cpu.dispatchClaimed=true;cpu.permitId=randomUUID();saveCpu(row,cpu);i.update(row,"running");
        return {identity:cpu.identity,permitId:cpu.permitId,revision:cpu.revision};
@@ -111,6 +113,7 @@ export function createVoiceCpuExtension<C>(ports:VoiceLedgerPorts<C>,i:Internal<
        const row=owned(context,request,"retainCpu");if(!row.cpu_json)return i.fail("VOICE_CPU_ORIGINAL_REQUIRED",403);
        const cpu:Cpu=JSON.parse(row.cpu_json),transactionDigest=i.digest(request);
        if(!i.equal(cpu.identity,request.identity))return i.fail("VOICE_CPU_ORIGINAL_CONFLICT",403);
+       if(request.phase==="running")i.requireOriginalAssistantCpuLive(context,row.operation_id,request.owner);
        const old=cpu.transactions[request.transactionId];
        if(old){if(old.digest!==transactionDigest)return i.fail("VOICE_CPU_TRANSACTION_CONFLICT");return old.ack;}
        if(!i.integer(request.expectedCpuRevision)||request.expectedCpuRevision!==cpu.revision)return i.fail("VOICE_CPU_REVISION_CONFLICT");

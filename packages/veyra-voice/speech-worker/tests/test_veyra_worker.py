@@ -587,5 +587,58 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(calls, ["cpu-onnx"])
 
 
+class EspeakDataHandleTests(unittest.TestCase):
+    """Real descriptor/closure tests, with no phonemizer or neural imports."""
+
+    def test_long_data_path_is_held_without_reopening_or_inheriting(self):
+        import tempfile
+        from cpu_models import _retained_espeak_api
+        with tempfile.TemporaryDirectory(prefix="espeak-data-", dir=os.environ["TMPDIR"]) as parent:
+            root = Path(parent) / ("a" * 80) / ("b" * 80)
+            root.mkdir(parents=True)
+            (root / "phontab").write_bytes(b"original")
+            class Api:
+                def __init__(self, library, data):
+                    self.data = data
+            adapted = _retained_espeak_api(Api, root)
+            original = adapted("fixed-library", str(root))
+            self.assertLess(len(original.data), 160)
+            descriptor = int(original.data.rsplit("/", 1)[1])
+            self.assertFalse(os.get_inheritable(descriptor))
+            renamed = root.with_name("retained-original")
+            root.rename(renamed)
+            root.mkdir()
+            (root / "phontab").write_bytes(b"replacement")
+            self.assertEqual((Path(original.data) / "phontab").read_bytes(), b"original")
+            original._veyra_data_close()
+            self.assertFalse(Path(original.data).exists())
+
+    def test_failed_library_constructor_closes_actual_data_descriptor(self):
+        import tempfile
+        from cpu_models import _retained_espeak_api
+        with tempfile.TemporaryDirectory(prefix="espeak-failure-", dir=os.environ["TMPDIR"]) as parent:
+            observed = []
+            class Api:
+                def __init__(self, library, data):
+                    observed.append(data)
+                    raise RuntimeError("actual constructor failed")
+            with self.assertRaisesRegex(RuntimeError, "actual constructor failed"):
+                _retained_espeak_api(Api, parent)("fixed-library", parent)
+            self.assertEqual(len(observed), 1)
+            self.assertFalse(Path(observed[0]).exists())
+
+    def test_foreign_data_does_not_enter_library_constructor(self):
+        import tempfile
+        from cpu_models import _retained_espeak_api
+        with tempfile.TemporaryDirectory(prefix="espeak-foreign-", dir=os.environ["TMPDIR"]) as parent:
+            expected = Path(parent) / "expected"
+            expected.mkdir()
+            class Api:
+                def __init__(self, *_):
+                    raise AssertionError("foreign data must not reach native code")
+            with self.assertRaises(WorkerError) as caught:
+                _retained_espeak_api(Api, expected)("fixed-library", parent)
+            self.assertEqual(caught.exception.code, "CPU_ESPEAK_DATA_CHANGED")
+
 if __name__ == "__main__":
     unittest.main()

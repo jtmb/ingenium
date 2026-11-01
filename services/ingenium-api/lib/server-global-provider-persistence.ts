@@ -209,7 +209,7 @@ function listProviderCredentialItems(projectId: string): VaultProviderItem[] {
 
 function getCanonicalGlobalProjectId(): string | undefined {
   try {
-    return projects.getCanonicalGlobalProject()?.id;
+    return projects.getInstallationStorageProject()?.id;
   } catch {
     return undefined;
   }

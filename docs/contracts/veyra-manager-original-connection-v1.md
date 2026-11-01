@@ -1,0 +1,11 @@
+# Original runtime-manager connection observations
+
+The API and runtime manager use the existing private manager URL and token. The additive POST `/v1/manager-original/connection` accepts one strict 32-byte challenge. Existing runtime, workspace, voice and job endpoints keep their contracts.
+
+The manager reads its actual Linux kernel PID/start identity, canonical compiled entry, Node executable and Docker daemon through a bounded original Unix-socket GET. It tracks genuine server connections privately and binds the challenge response to the original socket. The response has a five-second lifetime, a separate random connection identity and a domain-separated MAC using the existing credential. Replays, duplicate JSON keys, extra fields, cookies and origins refuse. No new credential store, database writer or Docker mutation is added.
+
+The fixed API client accepts no endpoint, token, callback or source argument. It verifies the original Node HTTP exchange, strict bounded response, private challenge/MAC, current installed manager entry and exact Node executable. Only its private original handle can read these observations. Closure, expiry, configured-origin changes, credential replacement and file drift invalidate it. Metadata copies cannot restore a handle. Both services must use the same qualified Linux release and Node binary; an incompatible installation refuses.
+
+These handles qualify transport/source observations only. They grant no image approval, Core preparation, candidate operation, material or retirement authority. The manager's pending delegation methods and the worker's candidate RPC proposal still require coordinator integration and physical qualification before activation. No original prepare may be reconstructed from SQL rows or copied facts.
+
+API261 passes the original full compiler/copier with 329 first-party inputs and 286 runtime/declaration outputs. R262 passes 31 local controls against the actual compiled manager and actual Docker daemon. Its UID1000 WSL process is local evidence; the immutable UID1109 image, canonical pending launch, original one-shot Core writes and Windows/cluster acceptance remain open. Tests create no containers, models or production changes, and close/join their owned child before cleanup.

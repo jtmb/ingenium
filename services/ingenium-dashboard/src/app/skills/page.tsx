@@ -193,6 +193,7 @@ function ProjectSkills({ project, tab, setTab, proposalView, setProposalView }: 
   const [proposalDetail, setProposalDetail] = useState<ProposalDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const submitBusyRef = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [currentSkillContent, setCurrentSkillContent] = useState<string | null>(null);
   const [enrichedObservations, setEnrichedObservations] = useState<EnrichedObs[]>([]);
@@ -546,6 +547,28 @@ function ProjectSkills({ project, tab, setTab, proposalView, setProposalView }: 
     setProposalDetail(null);
     setDetailLoading(false);
     setActionError(null);
+  };
+
+  const handleSubmitProposal = async () => {
+    const original = proposalDetail;
+    const requestProject = project, requestId = proposalDetailRequestId.current;
+    if (!original || original.id !== selectedProposal?.id || original.status !== "draft" || detailLoading || actionLoading || submitBusyRef.current) return;
+    submitBusyRef.current = true; setActionLoading(true); setActionError(null);
+    try {
+      const response = await api.skills.proposals.submit(original.id, requestProject);
+      if (!mounted.current || requestProject !== currentProjectRef.current || requestId !== proposalDetailRequestId.current) return;
+      if (response.data?.id !== original.id || response.data?.projectId !== original.projectId || response.data?.status !== "pending") throw new Error("Unexpected submission response");
+      setProposalDetail(response.data as ProposalDetail);
+      setSelectedProposal(response.data as ProposalDetail);
+      refreshProposalData(requestProject);
+    } catch {
+      if (mounted.current && requestProject === currentProjectRef.current && requestId === proposalDetailRequestId.current) {
+        setActionError("Submission is not confirmed. Refresh this proposal's status before trying again.");
+      }
+    } finally {
+      submitBusyRef.current = false;
+      if (mounted.current && requestProject === currentProjectRef.current) setActionLoading(false);
+    }
   };
 
   const handleApprove = async (reviewer: string, reason: string) => {
@@ -983,6 +1006,8 @@ function ProjectSkills({ project, tab, setTab, proposalView, setProposalView }: 
             currentSkillContent={currentSkillContent}
             enrichedObservations={enrichedObservations}
             project={project}
+            onSubmit={handleSubmitProposal}
+            onRefresh={() => { if (selectedProposal && !actionLoading) void openProposal(selectedProposal); }}
             onApprove={handleApprove}
             onReject={handleReject}
             onRollback={handleRollback}

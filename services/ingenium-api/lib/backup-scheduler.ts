@@ -37,7 +37,7 @@ function resolveOpencodeDbPath(): string {
 
 function getSchedule(): BackupSchedule {
   try {
-    const gid = projects.getGlobalProject()?.id;
+    const gid = projects.getInstallationStorageProject()?.id;
     if (gid) {
       const raw = settings.getSetting(gid, "backup_schedule");
       if (raw) {
@@ -176,14 +176,14 @@ function shouldRunDaily(): boolean {
   return now - lastDailyAt >= 23 * ONE_DAY / 24;
 }
 
-function getGlobalProjectId(): string | null {
-  const global = projects.getGlobalProject();
+function getInstallationStorageProjectId(): string | null {
+  const global = projects.getInstallationStorageProject();
   return global?.id ?? null;
 }
 
 async function schedulerTick(generation: number): Promise<void> {
   if (!isBackupSchedulerActive(generation)) return;
-  const projectId = getGlobalProjectId();
+  const projectId = getInstallationStorageProjectId();
   if (!projectId) {
     // No global project — skip but keep scheduler alive
     scheduleNext(generation);
@@ -276,7 +276,7 @@ export function startBackupScheduler(): void {
   backupSchedulerRunning = true;
   const generation = ++backupSchedulerGeneration;
   const schedule = getSchedule();
-  const gid = getGlobalProjectId();
+  const gid = getInstallationStorageProjectId();
 
   if (gid) {
     for (const record of backups.listBackups(gid)) {

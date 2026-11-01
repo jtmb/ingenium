@@ -1003,7 +1003,7 @@ export interface SettingResponse {
   masked?: boolean;
 }
 
-export type CloudflareServiceId = "dashboard" | "opencode" | "cli" | "vscode" | "api" | "info";
+export type CloudflareServiceId = "dashboard" | "opencode" | "cli" | "api" | "info";
 export type CloudflareTokenOperation =
   | { action: "preserve" }
   | { action: "replace"; value: string }
@@ -2301,7 +2301,13 @@ export type {
  * The client exposes the dashboard's supported resource groups and their typed
  * HTTP operations.
  */
+export type InstallationRetentionPreference = {key:'archive_retention_days';value:string|null;revision:number;valueHash:string;};
+export type InstallationRetentionIntent = {operationId:string;expectedRevision:number;expectedValueHash:string;value:string;};
 export const api = {
+  installationPreferences: {
+    getArchiveRetention: () => request<{data:InstallationRetentionPreference}>('/installation/preferences/archive-retention'),
+    setArchiveRetention: (intent:InstallationRetentionIntent) => request<{data:InstallationRetentionPreference;receipt:{operationId:string;replayed:boolean;appliedRevision:number;}}>('/installation/preferences/archive-retention',{method:'PUT',body:JSON.stringify(intent)}),
+  },
   auth: {
     csrf: () => request<{ data: { csrfToken: string } }>("/auth/csrf"),
     session: loadAuthenticatedSession,
@@ -2395,6 +2401,8 @@ export const api = {
       },
       get: (proposalId: string, project = DEFAULT_PROJECT) => 
         request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}?project=${encodeURIComponent(project)}`),
+      submit: (proposalId: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/submit?project=${encodeURIComponent(project)}`, { method: 'POST', body: '{}' }),
       approve: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
         request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/approve?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
       reject: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
@@ -2590,9 +2598,9 @@ export const api = {
   /** Immutable, project-scoped conversation memory. */
   context: {
     chat: {
-      link: (input: { runtimeId: string | null; sessionId: string; title: string }, project = DEFAULT_PROJECT) =>
-        request<{ data: ContextConversationSummary }>(
-          `/context/chat-sessions/link?project=${encodeURIComponent(project)}`,
+      link: (input: { runtimeId: string | null; sessionId: string; title: string }, project: string | null = DEFAULT_PROJECT) =>
+        request<{ data: Pick<ContextConversationSummary, "id" | "revision"> }>(
+          project === null ? "/workspace-context/chat-sessions/link" : `/context/chat-sessions/link?project=${encodeURIComponent(project)}`,
           { method: "POST", body: JSON.stringify(input) },
         ),
       persistTurn: (
@@ -2606,10 +2614,13 @@ export const api = {
           assistantContent: string;
           expectedRevision: number;
         },
-        project = DEFAULT_PROJECT,
-      ) => request<{ data: ContextChatTurnResult }>(
-        `/context/conversations/${encodeURIComponent(conversationId)}/chat-turns?project=${encodeURIComponent(project)}`,
-        { method: "POST", body: JSON.stringify(input) },
+        project: string | null = DEFAULT_PROJECT,
+      ) => request<{ data: Pick<ContextChatTurnResult, "revision"> }>(
+        project === null ? `/workspace-context/conversations/${encodeURIComponent(conversationId)}/chat-turns` : `/context/conversations/${encodeURIComponent(conversationId)}/chat-turns?project=${encodeURIComponent(project)}`,
+        { method: "POST", body: JSON.stringify(project === null ? {
+          runtimeId:input.runtimeId,sessionId:input.sessionId,userMessageId:input.userMessageId,
+          assistantMessageId:input.assistantMessageId,expectedRevision:input.expectedRevision,
+        } : input) },
       ),
     },
     sources: {

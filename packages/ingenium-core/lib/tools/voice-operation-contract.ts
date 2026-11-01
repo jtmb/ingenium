@@ -1,3 +1,4 @@
+import type {OriginalAssistantSourceClaim} from './voice-assistant-source.js';
 import type {VoiceScope,VoiceOwner,CpuIdentity,VoiceOriginal,VoiceMetadata,VoiceChange} from "./voice-operation-ledger.js";
 export interface CpuResultFingerprint {status:number;contentType:"application/json"|"audio/wav";sha256:string;bytes:number}
 export interface VoiceControl {instanceId:string;profileDigest:string;recoveryEndpointIdentity:string;retirementSecretSha256:string}
@@ -6,6 +7,11 @@ export interface CpuRetentionAck {identity:CpuIdentity;transactionId:string;revi
 export interface CpuPrivate {identity:CpuIdentity;revision:number;phase:"bound"|"reserved"|"running"|"uncertain"|"terminal";outcome:CpuRetentionChange["outcome"];drained:boolean;retentionId:string|null;lastTransactionId:string|null;lastTransactionDigest:string|null;resultFingerprint:CpuResultFingerprint|null;dispatchClaimed:boolean;quarantined:boolean}
 export interface OriginalResourceRequest {operationId:string;owner:VoiceOwner}
 export interface CoreVoiceLedger<C> {
+ reserveOriginalAssistantSource(context:C,actualPrivatePlan:object):OriginalAssistantSourceClaim;
+ reserveAttachedAssistantTts(context:C,claim:OriginalAssistantSourceClaim,original:VoiceOriginal,owner:VoiceOwner):{accepted:boolean;fresh:boolean;operation:VoiceMetadata};
+ spendOriginalAssistantSource(context:C,claim:OriginalAssistantSourceClaim,actualOpaqueCpuDispatch:object):void;
+ fenceOriginalAssistantSources(actualOriginalCall:object,reason:string):void;
+ requireOriginalAssistantCpuLive(context:C,operationId:string,owner:VoiceOwner):void;
  reserve(context:C,original:VoiceOriginal,owner:VoiceOwner):{accepted:boolean;fresh:boolean;operation:VoiceMetadata};
  read(context:C,operationId:string):VoiceMetadata|null;
  cas(context:C,change:VoiceChange):VoiceMetadata;

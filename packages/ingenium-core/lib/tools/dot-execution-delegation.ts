@@ -20,25 +20,41 @@ const text=(v:unknown):v is string=>typeof v==="string"&&v.length>0&&v.length<=5
 const parse=(v:unknown):Record<string,any>=>{if(typeof v!=="string"||Buffer.byteLength(v)>65536)return deny();try{const r=JSON.parse(v);if(!r||typeof r!=="object"||Array.isArray(r))return deny();return r;}catch{return deny();}};
 const key=(s:Scope)=>JSON.stringify([s.organizationId,s.ownerUserId,s.projectId,s.executionBindingId,s.executionBindingFingerprint,s.conversationId]);
 const runIdentity=(run:Record<string,any>)=>hash([run.id,run.job_id,run.project_id,run.organization_id,run.effective_service_principal_id,run.job_revision,run.schedule_revision??null,run.authorization_revision,run.trigger,run.scheduled_for??null,run.created_at]);
-function read(selection:Selection,mode:"execute"|"cancel"):Facts{
+function read(selection:Selection,mode:"execute"|"cancel",purpose:"production"|"candidate-inert-v1"="production"):Facts{
  const db=getDb(),record=(kind:string,id:string)=>db.prepare("SELECT id,organization_id,owner_user_id,scope_key,revision,body FROM veyra_dot_records WHERE kind=? AND id=?").get(kind,id) as Record<string,any>|undefined;
  const fr=record("followup",selection.followupId),f=fr&&parse(fr.body),sr=f&&record("suggestion",f.suggestionId),s=sr&&parse(sr.body),or=record("operation",selection.operationId),op=or&&parse(or.body);
- if(!fr||!f||!sr||!s||!or||!op||s.state!=="approved"||f.id!==fr.id||s.id!==f.suggestionId||s.id!==f.id||op.id!==or.id||op.followupId!==f.id||op.runId!==selection.runId)return deny();
+ if(!fr||!f||!sr||!s||!or||!op||(s.state!=="approved"&&!(purpose==="candidate-inert-v1"&&mode==="cancel"))||f.id!==fr.id||s.id!==f.suggestionId||s.id!==f.id||op.id!==or.id||op.followupId!==f.id||op.runId!==selection.runId)return deny();
  if(mode==="execute"?(f.state!=="active"||!["claimed","running"].includes(op.state)):(!["active","paused","cancelled"].includes(f.state)||!["claimed","running","unknown","cancel_requested","success","failed","cancelled"].includes(op.state)))return deny();
- if(op.managedDispatch?.protocol==="core126-candidate-original-v1")return deny(); // Candidate has no production delegation.
+ const marker=op.managedDispatch;
+ if(purpose==="candidate-inert-v1"){
+  if(!marker||Object.keys(marker).sort().join("|")!=="fence|protocol|runIdentityHash"||marker.protocol!=="core126-candidate-original-v1"||!["not-admitted-v1","core-owner-admitted-v1"].includes(marker.fence)||mode==="cancel"&&marker.fence!=="core-owner-admitted-v1")return deny();
+ }else if(marker?.protocol==="core126-candidate-original-v1")return deny(); // Candidate never acquires production delegation.
  const scope=f.scope as Scope;
  if(!scope||![scope.organizationId,scope.ownerUserId,scope.projectId,scope.executionBindingId].every(text)||!/^[a-f0-9]{64}$/.test(scope.executionBindingFingerprint)||scope.conversationId!==null&&!text(scope.conversationId))return deny();
  const sk=key(scope);for(const r of [fr,sr,or])if(r.organization_id!==scope.organizationId||r.owner_user_id!==scope.ownerUserId||r.scope_key!==sk)return deny();
  if(key(s.scope)!==sk||key(op.scope)!==sk||f.revision!==fr.revision||s.revision!==sr.revision||op.revision!==or.revision)return deny();
  const job=jobs.getJob(scope.projectId,f.jobId),run=jobs.getJobRun(scope.projectId,selection.runId);
  if(!run||run.id!==selection.runId||run.job_id!==f.jobId||run.organization_id!==scope.organizationId||run.project_id!==scope.projectId||run.job_revision!==f.jobRevision||run.schedule_revision!==f.scheduleRevision)return deny();
+ if(purpose==="candidate-inert-v1"&&marker.runIdentityHash!==runIdentity(run))return deny();
  if(mode==="cancel"){
   // Safety-reducing intent uses the retained original ledger, not current private
   // source access or a fabricated automation read scope. It proves no retirement.
   const ledger=db.prepare("SELECT run_id,attempt_id,job_id,project_id,organization_id,owner_user_id,workspace_id,runtime_id,parent_container_id,run_identity_hash,purpose FROM job_run_managed_execution WHERE run_id=?").get(run.id) as Record<string,any>|undefined;
-  if(!ledger||ledger.run_identity_hash!==runIdentity(run)||ledger.purpose!=="production"||ledger.job_id!==f.jobId||ledger.project_id!==scope.projectId||ledger.organization_id!==scope.organizationId||ledger.owner_user_id!==scope.ownerUserId||ledger.workspace_id!==scope.executionBindingId||!text(ledger.runtime_id)||!text(ledger.parent_container_id))return deny();
+  if(!ledger||ledger.run_identity_hash!==runIdentity(run)||ledger.purpose!==purpose||ledger.job_id!==f.jobId||ledger.project_id!==scope.projectId||ledger.organization_id!==scope.organizationId||ledger.owner_user_id!==scope.ownerUserId||ledger.workspace_id!==scope.executionBindingId||!text(ledger.runtime_id)||!text(ledger.parent_container_id))return deny();
+  let candidateBinding:Readonly<{specHash:string;selectionSha256:string}>|undefined;
+  if(purpose==="candidate-inert-v1"){
+   // Negative control uses the retained canonical candidate ledger, not current
+   // source/image approval, private conversation access or an execution handle.
+   const retained=db.prepare("SELECT candidate_waiting_protocol,candidate_intent_hash,spec_hash,admission_json FROM job_run_managed_execution WHERE run_id=?").get(run.id) as Record<string,any>|undefined;
+   const lifecycle=db.prepare("SELECT * FROM job_run_candidate_lifecycle WHERE run_id=?").get(run.id) as Record<string,any>|undefined;
+   if(!retained||!lifecycle||retained.candidate_waiting_protocol!=="original-candidate-waiting-v1")return deny();
+   const admission=parse(retained.admission_json),{specHash,...beforeSpec}=admission;
+   if(admission.purpose!==purpose||admission.runId!==run.id||admission.attemptId!==ledger.attempt_id||admission.projectId!==scope.projectId||admission.organizationId!==scope.organizationId||admission.ownerUserId!==scope.ownerUserId||admission.jobId!==f.jobId||admission.runtimeId!==ledger.runtime_id||admission.workspaceId!==ledger.workspace_id||admission.parentContainerId!==ledger.parent_container_id||!/^[a-f0-9]{64}$/.test(specHash??"")||hash(beforeSpec)!==specHash||specHash!==retained.spec_hash||admission.candidateIntentHash!==retained.candidate_intent_hash||!/^[a-f0-9]{64}$/.test(admission.candidateIntentHash??"")||!/^[a-f0-9]{64}$/.test(admission.selectionSha256??""))return deny();
+   if(lifecycle.run_id!==run.id||lifecycle.attempt_id!==ledger.attempt_id||lifecycle.run_identity_hash!==ledger.run_identity_hash||lifecycle.project_id!==scope.projectId||lifecycle.organization_id!==scope.organizationId||lifecycle.owner_user_id!==scope.ownerUserId||lifecycle.job_id!==f.jobId||lifecycle.runtime_id!==ledger.runtime_id||lifecycle.workspace_id!==ledger.workspace_id||lifecycle.parent_container_id!==ledger.parent_container_id||lifecycle.spec_hash!==specHash||lifecycle.candidate_intent_hash!==retained.candidate_intent_hash||lifecycle.selection_sha256!==admission.selectionSha256||lifecycle.deadline_at!==admission.deadlineAt)return deny();
+   candidateBinding={specHash,selectionSha256:admission.selectionSha256};
+  }
   if(getDb()!==db)return deny();
-  return {selection:{...selection},scope:{...scope},runtimeId:ledger.runtime_id,automationPrincipalId:run.effective_service_principal_id,approvalDigest:hash([fr,sr,or,ledger]),runIdentityHash:ledger.run_identity_hash};
+  return {selection:{...selection},scope:{...scope},runtimeId:ledger.runtime_id,automationPrincipalId:run.effective_service_principal_id,approvalDigest:hash(candidateBinding?[fr,sr,or,ledger,candidateBinding]:[fr,sr,or,ledger]),runIdentityHash:ledger.run_identity_hash};
  }
  if(!job||job.id!==run.job_id||job.organization_id!==scope.organizationId||job.project_id!==scope.projectId||run.effective_service_principal_id!==job.service_principal_id||job.owner_kind==="user"&&job.owner_user_id!==scope.ownerUserId||job.visibility==="private"&&job.owner_user_id!==scope.ownerUserId||job.prompt_template!==s.prompt)return deny();
  if(mode==="execute"&&(!["running","queued"].includes(run.status)||!job.enabled||job.revision!==run.job_revision||job.schedule_revision!==run.schedule_revision||!jobs.isJobRunAuthorizationCurrent(scope.projectId,run.id)))return deny();
@@ -105,4 +121,36 @@ export function closeOriginalUnadmittedDotOperation(selection:Selection):Readonl
  },1);
  if(result)checkpointAfterWrite();
  return result;
+}
+
+/** Separate immutable-purpose Core original. It can authorize only Root's
+ * candidate source/prepare path; production APIs cannot consume this brand. */
+declare const candidateDotOriginal:unique symbol;
+export interface CandidateDotExecutionOriginal {readonly [candidateDotOriginal]:never}
+const candidateOriginals=new WeakMap<object,{db:ReturnType<typeof getDb>;facts:Facts;expiresAt:number}>();
+export function acquireCandidateDotExecutionOriginal(selection:Selection):CandidateDotExecutionOriginal{
+ if(!selection||Object.keys(selection).sort().join("|")!=="followupId|operationId|runId"||!Object.values(selection).every(text))return deny();
+ const db=getDb(),facts=read(selection,"execute","candidate-inert-v1"),handle=Object.freeze({});
+ candidateOriginals.set(handle,{db,facts,expiresAt:Date.now()+30000});return handle as CandidateDotExecutionOriginal;
+}
+export function requireCandidateDotExecutionOriginal(handle:CandidateDotExecutionOriginal,expected:{runId:string;projectId:string;runtimeId:string;workspaceId:string}):Readonly<Facts>{
+ const original=handle&&candidateOriginals.get(handle);if(!original||original.db!==getDb()||original.expiresAt<=Date.now())return deny();
+ const actual=read(original.facts.selection,"execute","candidate-inert-v1");
+ if(JSON.stringify(actual)!==JSON.stringify(original.facts)||expected.runId!==actual.selection.runId||expected.projectId!==actual.scope.projectId||expected.runtimeId!==actual.runtimeId||expected.workspaceId!==actual.scope.executionBindingId)return deny();
+ return structuredClone(actual);
+}
+
+/** Separate negative-only candidate brand. It can select existing control work
+ * after revocation; no execution, private read, material or retirement grant. */
+declare const candidateDotControlOriginal:unique symbol;
+export interface CandidateDotControlOriginal {readonly [candidateDotControlOriginal]:never}
+const candidateControls=new WeakMap<object,{db:ReturnType<typeof getDb>;facts:Facts;expiresAt:number}>();
+export function acquireCandidateDotControlOriginal(selection:Selection):CandidateDotControlOriginal{
+ if(!selection||Object.keys(selection).sort().join("|")!=="followupId|operationId|runId"||!Object.values(selection).every(text))return deny();
+ const db=getDb(),facts=read(selection,"cancel","candidate-inert-v1"),handle=Object.freeze({});candidateControls.set(handle,{db,facts,expiresAt:Date.now()+30000});return handle as CandidateDotControlOriginal;
+}
+export function requireCandidateDotControlOriginal(handle:CandidateDotControlOriginal,expected:{runId:string;projectId:string;runtimeId:string;workspaceId:string}):Readonly<Facts>{
+ const original=handle&&candidateControls.get(handle);if(!original||original.db!==getDb()||original.expiresAt<=Date.now())return deny();
+ const actual=read(original.facts.selection,"cancel","candidate-inert-v1");
+ if(JSON.stringify(actual)!==JSON.stringify(original.facts)||expected.runId!==actual.selection.runId||expected.projectId!==actual.scope.projectId||expected.runtimeId!==actual.runtimeId||expected.workspaceId!==actual.scope.executionBindingId)return deny();return structuredClone(actual);
 }

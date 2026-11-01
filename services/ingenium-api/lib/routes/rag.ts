@@ -71,8 +71,8 @@ ragRouter.post("/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const global = projects.getGlobalProject();
-    if (!global) { res.status(409).json({ error: { code: "GLOBAL_PROJECT_MISSING", message: "A global-default project is required for repository documentation indexing" } }); return; }
+    const global = projects.getInstallationStorageProject();
+    if (!global) { res.status(409).json({ error: { code: "GLOBAL_PROJECT_MISSING", message: "Installation storage is required for repository documentation indexing" } }); return; }
     res.json({ data: rag.indexConfiguredDocs(global.id) });
   }
   catch (error) { res.status(422).json({ error: { code: "INDEX_CONFIGURATION_ERROR", message: error instanceof Error ? error.message : "Unable to index configured docs" } }); }

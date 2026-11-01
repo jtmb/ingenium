@@ -1,6 +1,6 @@
 #!/bin/sh
 # Composite container health: every supervised process, the private dashboard
-# and OpenCode/code-server listeners, and ttyd through its only supported health identity.
+# and OpenCode listeners, and ttyd through its only supported health identity.
 set -eu
 
 # Docker health commands can inherit the image's original environment even
@@ -101,16 +101,6 @@ require_ttyd_gateway_health() {
   fi
 }
 
-require_vscode_gateway_csp() {
-  expected_csp="Content-Security-Policy: frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000"
-  headers="$(curl --fail --silent --show-error --max-time 5 --dump-header - --output /dev/null --header "Host: vscode.localhost" "http://127.0.0.1:3000/?folder=/workspace")"
-
-  if ! printf '%s\n' "$headers" | tr -d '\r' | grep -F -q "$expected_csp"; then
-    echo "ERROR: VS Code gateway health check is missing the exact worker-safe frame policy"
-    exit 1
-  fi
-}
-
 require_cli_root_ok() {
   actual="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: cli.localhost" --header "X-Ingenium-Authenticated-User: attacker-controlled" http://127.0.0.1:3000/ || true)"
   if [ "$actual" != "200" ]; then
@@ -145,7 +135,7 @@ require_production_aliases_unavailable() {
 
 programs="restore-handoff ingenium-api ingenium-api-boundary ingenium-dashboard ingenium-gateway"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
-  programs="$programs opencode-web opencode-internal-proxy ttyd-opencode vscode"
+  programs="$programs opencode-web opencode-internal-proxy ttyd-opencode"
 fi
 for program in $programs; do
   require_running "$program"
@@ -164,13 +154,14 @@ if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
   require_authenticated_http_ok "OpenCode internal proxy" "http://127.0.0.1:4101/api/info" "/run/ingenium-secrets/opencode/opencode-server-password"
   require_gateway_status "OpenCode internal proxy Basic boundary" "localhost" "/api/info" "401" "4101"
 
-  require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
   require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
-  require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"
-  require_gateway_status "VS Code gateway workbench" "vscode.localhost" "/?folder=/workspace" "200"
-  require_vscode_gateway_csp
   require_ttyd_gateway_health
   require_cli_root_ok
 else
   require_production_aliases_unavailable
 fi
+
+# Retired editor host refuses both HTTP and upgrades in either deployment profile.
+require_gateway_status "Retired editor" "vscode.localhost" "/" "404"
+retired_upgrade="$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' --header "Host: vscode.localhost" --header "Connection: Upgrade" --header "Upgrade: websocket" http://127.0.0.1:3000/ || true)"
+[ "$retired_upgrade" = "404" ] || { echo "ERROR: retired editor host forwarded an upgrade"; exit 1; }

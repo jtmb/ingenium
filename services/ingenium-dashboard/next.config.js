@@ -50,7 +50,6 @@ function runtimeWildcardOrigin() {
   return `${scheme}://*.${domain}`;
 }
 
-const VSCODE_GATEWAY_ORIGIN = "http://vscode.localhost:3000";
 
 // Production bundles and builds with explicit public origins are gateway
 // builds. Only an unconfigured non-production build may advertise the private
@@ -63,6 +62,17 @@ function isGatewayMode() {
 
 const nextConfig = {
   output: "standalone",
+
+  // Release builders bind the generated assets to the exact public source
+  // digest. Unconfigured development/local builds keep Next's default ID.
+  async generateBuildId() {
+    const source = process.env.IMAGE_SOURCE_SHA256;
+    if (source === undefined || source === "") return null;
+    if (!/^[a-f0-9]{64}$/.test(source)) {
+      throw new Error("Release build source digest must be 64 lowercase hex characters");
+    }
+    return "veyra-" + source;
+  },
 
   // Signed backup verification can exceed Next's 30-second rewrite timeout.
   // Keep the wait bounded while the API admits only one download buffer.
@@ -131,7 +141,7 @@ const nextConfig = {
               "connect-src 'self' http://localhost:" + apiPort + (runtimeOrigin ? ` ${runtimeOrigin}` : "") + "; " +
               "frame-src 'self'" +
               (gatewayMode ? "" : " http://localhost:4098 http://localhost:4099") +
-               " http://opencode.localhost:3000 http://cli.localhost:3000 " + VSCODE_GATEWAY_ORIGIN +
+               " http://opencode.localhost:3000 http://cli.localhost:3000" +
               (configuredFrameOrigins.length > 0 ? ` ${[...new Set(configuredFrameOrigins)].join(" ")}` : "") +
               (runtimeOrigin ? ` ${runtimeOrigin}` : "") +
               "; " +

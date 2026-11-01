@@ -4,7 +4,7 @@ import { authorization, getDb } from "ingenium-core";
 import { AppError } from "./middleware/errors.js";
 import { deploymentMode } from "./runtime-mode.js";
 
-type Audience = "web" | "cli" | "vscode";
+type Audience = "web" | "cli";
 type Grant = { sessionId: string; userId: string; host: string; expires: number };
 const pending = new Map<string, Grant>();
 const sessions = new Map<string, Grant>();
@@ -41,7 +41,7 @@ function alive(grant: Grant): boolean {
 function requestHost(req: Request): string {
   const host = req.get("host") ?? "";
   const root = domain();
-  if (!["opencode", "cli", "vscode"].some((name) => host === `${name}.${root}`)) {
+  if (!["opencode", "cli"].some((name) => host === `${name}.${root}`)) {
     throw new AppError("Runtime audience is unavailable", "NOT_FOUND", 404);
   }
   return host;
@@ -55,7 +55,7 @@ export function issueCompatibilityLaunch(req: Request, res: Response): void {
     throw new AppError("Installation administrator access is required", "FORBIDDEN", 403);
   }
   const audience = req.body?.audience as Audience;
-  if (req.get("origin") !== `https://${root}` || !["web", "cli", "vscode"].includes(audience)
+  if (req.get("origin") !== `https://${root}` || !["web", "cli"].includes(audience)
     || !validToken(req.body?.exchangeProof) || Object.keys(req.body).some((key) => !["audience", "exchangeProof"].includes(key))) {
     throw new AppError("Invalid LAN runtime launch", "VALIDATION_ERROR", 422);
   }

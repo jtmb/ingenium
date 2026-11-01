@@ -44,7 +44,7 @@ export interface McpUsefulnessCatalogEntry {
   name: string;
   category: string;
   description: string;
-  projectScope: "per-project" | "global";
+  projectScope: "per-project" | "global" | "workspace";
   defaultEnabled: boolean;
   apiEndpoints: string[];
   enabled: boolean;

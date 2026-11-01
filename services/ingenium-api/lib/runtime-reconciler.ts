@@ -21,6 +21,8 @@ async function stopExpired(runtime: runtimes.RuntimeInstance): Promise<void> {
 
 export async function reconcileRuntimes(now = new Date()): Promise<void> {
   runtimes.markExpiredRuntimeOrphans(now);
+  // Schema2 is metadata-only here; legacy manager removal must never handle its backend.
+  runtimes.markExpiredWorkspaceRuntimeOrphansV2(now);
   for (const original of runtimes.listRuntimeInstances()) {
     if (original.state === "ABSENT" || original.state === "STOPPED" || original.state === "REVOKED" || original.state === "PROVISIONING") continue;
     try {

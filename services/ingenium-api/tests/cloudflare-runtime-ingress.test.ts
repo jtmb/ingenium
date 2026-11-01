@@ -11,7 +11,7 @@ import { handleRuntimeGatewayRequest, proxyResponseHeaders, runtimeScope } from 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
 const otherRuntimeId = "22222222-2222-4222-8222-222222222222";
 const token = `rbs_${"a".repeat(43)}`;
-const mappings = [["opencode", "web"], ["cli", "cli"], ["vscode", "vscode"]] as const;
+const mappings = [["opencode", "web"], ["cli", "cli"]] as const;
 let directory: string;
 let server: Server;
 const validate = vi.fn();
@@ -79,7 +79,7 @@ describe("CLOUDFLARE-100 GAP 1 label ingress", () => {
     validate.mockResolvedValue(new Response(JSON.stringify({ data: { backendName: "runtime-backend", session: { launcherOrigin } } }), { status: 200 }));
     const result = await ingressRequest(`${service}.example.com`, undefined, { authorization: `Bearer ${token}` });
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`https://${host}/${audience === "vscode" ? "?folder=/workspace" : ""}`);
+    expect(result.headers.location).toBe(`https://${host}/`);
     expect(result.headers["content-security-policy"]).toBe(`frame-ancestors ${launcherOrigin}; default-src 'none'`);
     expect(result.headers["cache-control"]).toBe("no-store");
     expect(result.headers["referrer-policy"]).toBe("no-referrer");

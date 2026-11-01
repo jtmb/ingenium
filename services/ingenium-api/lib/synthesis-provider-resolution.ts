@@ -91,7 +91,7 @@ function appendUnique(
 export async function resolveSynthesisProviderSelections(
   projectId: string,
 ): Promise<SynthesisProviderResolution> {
-  const catalogProjectId = projects.getGlobalProject()?.id ?? projectId;
+  const catalogProjectId = projects.getInstallationStorageProject()?.id ?? projectId;
   const catalog = await getChatProviderCatalog(catalogProjectId);
   if (catalog.unavailable) {
     return { selections: [], catalogUnavailable: true };

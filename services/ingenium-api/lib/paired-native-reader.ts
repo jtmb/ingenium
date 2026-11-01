@@ -76,6 +76,16 @@ export function createPairedNativeReader(credential:PairedNativeCredential){
   async readRetirement(){
    return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/retirement","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;
   },
+  async readScopedConsent(consentId:string,purpose:'prepare'|'domain'){
+   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(consentId)||!['prepare','domain'].includes(purpose))return invalid();
+   const path='/remote/v1/node-hosted/enrollments/'+encodeURIComponent(original.enrollmentRequestId)+'/customize-scoped-v1/consents/'+encodeURIComponent(consentId);
+   return (await request(trust,path,'GET',{actor_id:original.actorId,installation_id:original.installationId,purpose},token)).body;
+  },
+  async readScopedOriginal(consentId:string,operationId:string,payloadHash:string){
+   if(!id(consentId)||!id(operationId)||!/^[a-f0-9]{64}$/.test(payloadHash))return invalid();
+   const path='/remote/v1/node-hosted/enrollments/'+encodeURIComponent(original.enrollmentRequestId)+'/customize-scoped-v1/consents/'+encodeURIComponent(consentId)+'/originals/'+encodeURIComponent(operationId);
+   return (await request(trust,path,'GET',{actor_id:original.actorId,installation_id:original.installationId,payload_hash:payloadHash},token)).body;
+  },
   async readOriginal(operationId:string,payloadHash:string){
    if(!id(operationId)||!/^[a-f0-9]{64}$/.test(payloadHash))return invalid();
    const path="/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/originals/"+encodeURIComponent(operationId);

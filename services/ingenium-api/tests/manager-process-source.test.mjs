@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {captureOriginalManagerProcessSource,readOriginalManagerProcessSource}from'../lib/dot-v2/manager-process-source.mjs';
+test('manager source rejects caller-provided process/backend/observation inputs before I/O',async()=>{for(const input of[{},true,Promise.resolve({}),()=>true,{pid:process.pid,daemonId:'copied'}])await assert.rejects(captureOriginalManagerProcessSource(input),e=>e.code==='MANAGER_PROCESS_CALLER_INPUT_REFUSED')});
+test('manager source rejects copied facts, booleans and callbacks as original handles',()=>{for(const input of[{},true,()=>true,Promise.resolve({}),{kind:'original-manager-process-source',pid:process.pid}])assert.throws(()=>readOriginalManagerProcessSource(input),e=>e.code==='MANAGER_PROCESS_ORIGINAL_REQUIRED')});
+test('ordinary API or test entrypoint cannot impersonate the actual manager process',async()=>{await assert.rejects(captureOriginalManagerProcessSource(),e=>e.code==='MANAGER_PROCESS_ENTRY_UNAVAILABLE'||e.code==='MANAGER_PROCESS_PLATFORM_UNAVAILABLE')});

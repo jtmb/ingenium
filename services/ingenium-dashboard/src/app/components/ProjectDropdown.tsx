@@ -9,12 +9,12 @@ import { Dropdown, DropdownItem, DropdownLabel, DropdownPanel, DropdownSeparator
 /**
  * Project switcher dropdown in the top navigation bar.
  *
- * Disabled on `/backups`, `/mail`, `/opencode`, and `/vscode` pages because those views operate on the
+ * Disabled on `/backups`, `/mail`, and `/opencode` pages because those views operate on the
  * global project context. Chat exposes project switching through the composer plus menu, retaining
  * the validated project and existing full-reload navigation semantics.
  */
 export function isProjectSwitchingDisabled(pathname: string | null): boolean {
-  const globalOnlyRoutes = ["/backups", "/mail", "/opencode", "/vscode"];
+  const globalOnlyRoutes = ["/backups", "/mail", "/opencode"];
   return pathname ? globalOnlyRoutes.some((route) => pathname.startsWith(route)) : false;
 }
 

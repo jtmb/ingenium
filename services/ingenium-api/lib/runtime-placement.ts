@@ -1,3 +1,4 @@
+import {withManagedWorkspaceV2Placement} from './projects-v2/workspace-v2-placement.mjs';
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Request } from "express";
 import { authorization, explicitMemory, getDb, runtimes } from "ingenium-core";
@@ -33,7 +34,7 @@ export async function withManagedRequestPlacement<T>(request:Request,selected:Re
     || typeof selected.workspaceId!=="string" || typeof selected.runtimeId!=="string")
     throw new RequestExecutionError("INVALID_EXECUTION_SELECTION",422);
   const selection={...selected};
-  if(selection.projectId===null)throw new RequestExecutionError("PROJECTLESS_EXECUTION_OWNER_UNAVAILABLE",503);
+  if(selection.projectId===null)return withManagedWorkspaceV2Placement(request,selection,work);
   const identity=revalidateRequestIdentity(request);
   if(!identity)throw new RequestExecutionError("EXECUTION_IDENTITY_UNAVAILABLE",401);
   const principal=identity.principal;

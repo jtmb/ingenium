@@ -35,7 +35,7 @@ export {
   validateRestoreSecuritySchemaForMaintenance as validateRestoredSecuritySchemaForMaintenance,
 } from "../db.js";
 import { BackupRecord } from "../schema.js";
-import { getGlobalProject } from "./projects.js";
+import { getInstallationStorageProject } from "./projects.js";
 
 export const BACKUP_BUNDLE_FORMAT = 2;
 export const BACKUP_RESTORE_SCHEMA_VERSION = 85;
@@ -731,7 +731,7 @@ function manifestComponent(filename: "ingenium.db" | "opencode.db", path: string
 }
 
 function assertGlobalBackupProject(projectId: string): void {
-  const global = getGlobalProject();
+  const global = getInstallationStorageProject();
   if (!global || global.id !== projectId) throw new BackupError("RESTORE_PROJECT_SCOPE");
 }
 
@@ -2406,6 +2406,8 @@ export type RestoreExecutionCapsule = {
   explicitMemoryForgets: ExplicitMemoryForgetLedger;
   /** Absent only in maintenance journals written before learned memory shipped. */
   learnedMemorySuppressions?: LearnedMemorySuppressionLedger;
+  /** Missing legacy capsule metadata refuses restore; never assume empty. */
+  voiceAttachmentDeliveries?: import("./voice-attachment-restore.mjs").VoiceAttachmentRestoreLedger;
   plan: StoredRestorePlan;
   legacyRevisions: StoredPlanRevision[];
   legacyAuthorizations: StoredAuthorization[];
@@ -2419,6 +2421,8 @@ export type RestoreExecutionCapsule = {
   sourceRecord: BackupRecord;
   safetyRecord: BackupRecord | null;
 };
+import { captureVoiceAttachmentRestoreLedger, mergeVoiceAttachmentRestoreLedger } from "./voice-attachment-restore.mjs";
+export { validateVoiceAttachmentRestoreLedger } from "./voice-attachment-restore.mjs";
 
 type ExplicitMemoryForgetEntry = {
   memory: {
@@ -3056,9 +3060,9 @@ export function invalidateRestoredSecurityState(projectId: string, runId: string
   execTransaction(() => {
     const run = getExecutionRunRecord(projectId, runId);
     const project = db.prepare(
-      "SELECT organization_id FROM projects WHERE id = ? AND is_global = 1 AND archived_at IS NULL",
+      "SELECT organization_id FROM projects WHERE id = ? AND archived_at IS NULL",
     ).get(projectId) as { organization_id: string } | undefined;
-    if (!run || run.state !== "verifying" || !project) throw new BackupError("RESTORE_STATE_CONFLICT", run?.revision);
+    if (!run || run.state !== "verifying" || !project || getInstallationStorageProject()?.id !== projectId) throw new BackupError("RESTORE_STATE_CONFLICT", run?.revision);
 
     const audits = db.prepare(
       `SELECT id FROM security_audit_events
@@ -3145,6 +3149,7 @@ export function captureRestoreExecutionCapsule(projectId: string, runId: string)
   return {
     explicitMemoryForgets: captureExplicitMemoryForgetLedger(db),
     learnedMemorySuppressions: captureLearnedMemorySuppressions(db),
+    voiceAttachmentDeliveries: captureVoiceAttachmentRestoreLedger(db),
     plan,
     legacyRevisions: db.prepare(
       "SELECT project_id, plan_id, backup_id, revision, from_state, to_state, stage_hash, created_at FROM backup_restore_plan_revisions WHERE project_id = ? AND plan_id = ? ORDER BY revision ASC",
@@ -3191,6 +3196,7 @@ function insertBackupRecordIfMissing(record: BackupRecord): void {
 export function rehydrateRestoreExecutionCapsule(capsule: RestoreExecutionCapsule): RestoreExecutionRun {
   const result = execTransaction(() => {
     const db = getDb(backupDbPath());
+    mergeVoiceAttachmentRestoreLedger(db, capsule.voiceAttachmentDeliveries);
     mergeExplicitMemoryForgetLedger(db, capsule.explicitMemoryForgets);
     if (capsule.learnedMemorySuppressions) mergeLearnedMemorySuppressions(db, capsule.learnedMemorySuppressions);
     const existing = getExecutionRunRecord(capsule.run.project_id, capsule.run.id);

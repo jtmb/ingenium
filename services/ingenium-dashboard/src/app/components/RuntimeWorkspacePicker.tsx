@@ -19,13 +19,13 @@ export default function RuntimeWorkspacePicker({
     );
   }
 
-  if (status === "starting") {
+  if (status === "starting" || status === "stopping") {
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-surface-muted)] p-4" role="status" aria-live="polite">
         <div className="w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center hover:shadow-md transition-shadow">
           <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" aria-hidden="true" />
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Starting workspace</h2>
-          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">Preparing the isolated runtime for {product}. This check is bounded.</p>
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{status === "stopping" ? "Stopping workspace" : "Starting workspace"}</h2>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{status === "stopping" ? "Ending this workspace execution. Saved chats stay available." : `Preparing the workspace for ${product}. This check is bounded.`}</p>
         </div>
       </div>
     );
@@ -62,7 +62,7 @@ export default function RuntimeWorkspacePicker({
     <div className="absolute inset-0 overflow-y-auto bg-[var(--color-surface-muted)] p-4 sm:p-6">
       <form
         className="mx-auto w-full max-w-2xl rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow sm:p-6"
-        onSubmit={(event) => { event.preventDefault(); void start(); }}
+        onSubmit={(event) => { event.preventDefault(); void (controller.canRestart && controller.restart ? controller.restart() : start()); }}
       >
         <fieldset>
           <legend className="text-lg font-semibold text-[var(--color-text-primary)]">Choose a workspace for {product}</legend>
@@ -106,12 +106,13 @@ export default function RuntimeWorkspacePicker({
           >
             Refresh list
           </button>
+          {controller.canStop && controller.stop && <button type="button" onClick={() => { void controller.stop?.(); }} className="rounded border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-text-primary)]">Stop workspace</button>}
           <button
             type="submit"
             disabled={selectionUnavailable}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Open workspace
+            {controller.canRestart ? "Reopen workspace" : "Open workspace"}
           </button>
         </div>
       </form>

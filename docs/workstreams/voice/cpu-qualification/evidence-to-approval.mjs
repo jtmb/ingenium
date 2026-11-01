@@ -6,6 +6,8 @@ import { readFileSync, lstatSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
+import {projectCapturedConfiguration,assertStableConfiguration,assertKernelEnvironment,assertCaptureDecoder} from './capture-projection.mjs';
+import {parseStrictJobJson} from '../../../../services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs';
 const fail = code => { throw new Error(code); };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const canonical = v => v && typeof v === 'object' ? Array.isArray(v) ? '[' + v.map(canonical).join(',') + ']'
@@ -17,35 +19,39 @@ function trusted(path, max = 1048576) {
   const bytes = readFileSync(path); if (bytes.length !== facts.size) fail('ROOT_CAPTURE_CHANGED');
   return { bytes, sha256: hash(bytes) };
 }
-function json(path) { const input = trusted(path); return { ...input, value: JSON.parse(input.bytes.toString('utf8')) }; }
+function json(path) { const input = trusted(path); return { ...input, value: parseStrictJobJson(input.bytes,1048576) }; }
 function counter(snapshot, field) {
   const value = snapshot.kernel[field]; if (!/^(0|[1-9][0-9]*)\n?$/.test(value ?? '')) fail('RAW_KERNEL_COUNTER_REQUIRED');
   const n = Number(value.trim()); if (!Number.isSafeInteger(n)) fail('RAW_KERNEL_COUNTER_RANGE'); return n;
 }
 function rss(snapshot) { const match = snapshot.procStatus.match(/^VmRSS:\s+([0-9]+) kB$/m); if (!match) fail('RAW_PROC_RSS_REQUIRED'); return Number(match[1]) * 1024; }
-function run(path, expectedCase, bindings) {
+function run(path, expectedCase, review, closureSha256) {
+  const descriptor=review.captureDecoders?.[expectedCase];assertCaptureDecoder(descriptor,expectedCase);
   const capture = json(path), value = capture.value, owner = value.kernelOwner;
   if (value.case !== expectedCase || value.successful !== true || value.productionApproval !== false
     || !['ownerExitJoined', 'ownerCloseJoined', 'stdoutJoined', 'stderrJoined'].every(k => value[k] === true)
     || !owner || owner.runId !== value.runId || owner.waited !== true || owner.populated !== false || owner.leafRemoved !== true
     || owner.stdoutEOF !== true || owner.stderrEOF !== true || owner.deadlineKilled !== false
     || !['memoryPeakBytes', 'leaderMaxRssBytes', 'pidsPeak', 'childStartTicks', 'inode'].every(k => positive(owner[k]))
-    || value.exit?.code !== 0 || value.exit.signal || canonical(value.bindings) !== canonical(bindings)) fail('POSITIVE_ORIGINAL_CAPTURE_REQUIRED');
+    || value.exit?.code !== 0 || value.exit.signal) fail('POSITIVE_ORIGINAL_CAPTURE_REQUIRED');
   const stdout = trusted(resolve(dirname(path), 'stdout.log')), stderr = trusted(resolve(dirname(path), 'stderr.log'));
   if (stdout.sha256 !== value.stdoutSha256 || stderr.sha256 !== value.stderrSha256) fail('ORIGINAL_CAPTURE_HASH');
   // A constrained/failed workload must not mint a deceptively small peak.
   const errors = stderr.bytes.toString('utf8');
   for (const label of ['oom', 'oom_kill', 'oom_group_kill']) if (new RegExp(`^${label} [1-9][0-9]*$`, 'm').test(errors)) fail('QUALIFICATION_OOM');
   if (/^max [1-9][0-9]*$/m.test(errors)) fail('QUALIFICATION_MEMORY_OR_PIDS_LIMIT_HIT');
-  const events = stdout.bytes.toString('utf8').split('\n').filter(s => s.startsWith('{')).map(s => JSON.parse(s));
-  return { ...capture, owner, events, stdoutSha256: stdout.sha256, stderrSha256: stderr.sha256 };
+  const events = stdout.bytes.toString('utf8').split('\n').filter(s => s.startsWith('{')).map(s => parseStrictJobJson(Buffer.from(s),1048576));
+  const grant=json(descriptor.grantPath);
+  const projection=projectCapturedConfiguration({capture:value,captureSha256:capture.sha256,grant:grant.value,grantSha256:grant.sha256,descriptor,review,closureSha256,events});
+  return { ...capture, owner, events, projection, stdoutSha256: stdout.sha256, stderrSha256: stderr.sha256 };
 }
 export async function generateApproval({ reviewPath, profilePath, profileModule, resourceModule, outputPath }) {
   if (process.platform !== 'linux' || process.getuid?.() === 0) fail('ACTUAL_NONROOT_API_UID_REQUIRED');
   const review = json(reviewPath), r = review.value;
-  if (r.kind !== 'root-cpu-qualification-review-v1' || r.approved !== true || r.templateOnly === true || r.platform !== 'linux-cgroup-v2'
+  if (r.kind !== 'root-cpu-qualification-review-v2' || r.approved !== true || r.templateOnly === true || r.platform !== 'linux-cgroup-v2'
     || r.fixtureEvidence !== false || !r.bindings || !r.cases || !positive(r.approvalLifetimeMs) || r.approvalLifetimeMs > 86400000
     || !positive(r.maxLifetimeMs) || r.maxLifetimeMs > 1800000 || !positive(r.maxWitnessLifetimeMs) || r.maxWitnessLifetimeMs > 60000) fail('ACTUAL_ROOT_REVIEW_REQUIRED');
+  assertStableConfiguration(r.bindings);assertKernelEnvironment(r.kernelEnvironment);
   const { ManagedCpuProfile } = await import(pathToFileURL(profileModule));
   const profile = ManagedCpuProfile.load(profilePath);
   if (r.bindings.profileDigest !== profile.profileDigest || r.bindings.codeBundleDigest !== hash(canonical(profile.value.bundle))
@@ -53,9 +59,9 @@ export async function generateApproval({ reviewPath, profilePath, profileModule,
   const closure = json(r.dependencyClosurePath);
   if (closure.sha256 !== r.bindings.dependencyClosureSha256 || closure.value.allRecordHashesVerified !== true
     || closure.value.environmentSealed !== true || !closure.value.bundledVad?.sha256 || closure.value.bundledVad.bytes !== 1245151) fail('SEALED_ACTUAL_DEPENDENCY_CLOSURE_REQUIRED');
-  const cold = run(r.cases.coldHot, 'model-cold-hot', r.bindings), helper = run(r.cases.helper, 'helper', r.bindings),
-    witness = run(r.cases.witness, 'witness', r.bindings), probe = run(r.cases.probe, 'probe', r.bindings), wire = run(r.cases.wire, 'production-wire', r.bindings);
-  if (r.bindings.kernelBootId !== cold.owner.bootId || [helper, witness, probe, wire].some(capture => capture.owner.bootId !== cold.owner.bootId
+  const cold = run(r.cases.coldHot, 'model-cold-hot', r, closure.sha256), helper = run(r.cases.helper, 'helper', r, closure.sha256),
+    witness = run(r.cases.witness, 'witness', r, closure.sha256), probe = run(r.cases.probe, 'probe', r, closure.sha256), wire = run(r.cases.wire, 'production-wire', r, closure.sha256);
+  if (r.kernelEnvironment.bootId !== cold.owner.bootId || [helper, witness, probe, wire].some(capture => capture.owner.bootId !== cold.owner.bootId
     || capture.owner.namespaceInode !== cold.owner.namespaceInode)) fail('QUALIFIED_KERNEL_OR_NAMESPACE_CHANGED');
   const wireAuthority = json(r.coreWireReceiptPath);
   if (wireAuthority.sha256 !== r.coreWireReceiptSha256 || wireAuthority.value.actualCoreWriter !== true
@@ -89,7 +95,8 @@ export async function generateApproval({ reviewPath, profilePath, profileModule,
       witness: { additionalBytes: components.witnessBytes + components.probeBytes, additionalTasks: components.witnessTasks, cpuMilli: cpu(witness) } },
     qualifiedAt, expiresAt, retirementExpiresAt: expiresAt + r.maxWitnessLifetimeMs, maxLifetimeMs: r.maxLifetimeMs, maxWitnessLifetimeMs: r.maxWitnessLifetimeMs,
     qualificationDigest: hash(canonical({ review: review.sha256, dependencyClosure: closure.sha256, coreWire: wireAuthority.sha256,
-      cases: [cold, helper, witness, probe, wire].map(e => ({ receipt: e.sha256, stdout: e.stdoutSha256, stderr: e.stderrSha256 })) })) };
+      projectionSchema: "root-cpu-configuration-v1", configuration: r.bindings, kernelEnvironment: r.kernelEnvironment,
+      cases: [cold, helper, witness, probe, wire].map(e => ({ receipt: e.sha256, grant: e.projection.rawGrantSha256, decoder: e.projection.decoder, projection: e.projection.projectionSha256, stdout: e.stdoutSha256, stderr: e.stderrSha256 })) })) };
   const { readResourceApproval, verifyModelSet } = await import(pathToFileURL(resourceModule));
   // Validate actual sealed assets BEFORE emitting private approval. The review
   // authority is Root; digest syntax alone is never represented as execution.

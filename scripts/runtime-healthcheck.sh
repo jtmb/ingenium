@@ -18,4 +18,3 @@ opencode_auth | curl --fail --silent --max-time 3 --config - --output /dev/null 
 opencode_auth | curl --fail --silent --max-time 3 --config - --output /dev/null http://127.0.0.1:4098/api/provider
 opencode_auth | curl --fail --silent --max-time 3 --config - --output /dev/null http://127.0.0.1:4098/api/mcp
 curl --fail --silent --max-time 3 --output /dev/null --header "X-Ingenium-Authenticated-User: runtime" http://127.0.0.1:4099/
-curl --fail --silent --max-time 3 --output /dev/null http://127.0.0.1:4100/healthz

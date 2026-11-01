@@ -6,7 +6,7 @@ const { ownerRequest, ownerStepUp, runtimeWorkspace } = vi.hoisted(() => ({
   ownerRequest: vi.fn(), ownerStepUp: vi.fn(),
   runtimeWorkspace: { mode: "isolated", confirmedWorkspaceId: "workspace-one" },
 }));
-const runtimeLaunch = vi.hoisted(() => vi.fn((audience: "web" | "cli" | "vscode", _workspace: unknown, enabled = true) => ({
+const runtimeLaunch = vi.hoisted(() => vi.fn((audience: "web" | "cli", _workspace: unknown, enabled = true) => ({
   status: enabled ? "ready" : "loading",
   url: enabled ? `https://${audience}--11111111-1111-4111-8111-111111111111.runtime.example.test/` : null,
   error: null,
@@ -39,7 +39,6 @@ vi.mock("../src/lib/RuntimeContext", () => ({
 vi.mock("../src/app/components/WorkspaceControl", () => ({ default: () => <span data-testid="workspace-control" /> }));
 
 import OpenCodePageClient from "../src/app/opencode/OpenCodePageClient";
-import VSCodePage from "../src/app/vscode/page";
 import { parseOpenCodeMode } from "../src/lib/open-code-mode";
 
 beforeEach(() => {
@@ -129,12 +128,4 @@ describe("AUTH-109 protected runtime frames", () => {
     expect(localStorage.getItem("opencode-mode")).toBe("web");
   });
 
-  it("uses the distinct VS Code audience in the same runtime identity", () => {
-    render(<VSCodePage />);
-    const frame = screen.getByTitle("VS Code");
-    expect(frame.getAttribute("src")).toBe(`https://vscode--${runtimeId}.runtime.example.test/`);
-    expect(frame.getAttribute("allow")).toBe("clipboard-write");
-    expect(frame.getAttribute("sandbox")).toBeNull();
-    expect(document.body.innerHTML).not.toMatch(/4100|rbl_|Bearer/);
-  });
 });

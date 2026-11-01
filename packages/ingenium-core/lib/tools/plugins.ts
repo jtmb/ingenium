@@ -2,8 +2,10 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Plugin } from "../schema.js";
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, relative, isAbsolute, dirname } from "node:path";
-import { getPluginsBase, getConfigPath, isGlobal } from "./paths.js";
+import { getPluginsBase, getPluginConfigPath, isGlobal } from "./paths.js";
 import { z } from "zod";
+import {editPluginConfiguration} from "./plugin-config-text.js";
+import {assertPluginCommandClear,validateProjectionPath,archive as archivePlugin} from "./plugin-lifecycle.js";
 
 export const pluginDescriptionSchema = z.string().max(2000).refine((value) => !value.includes("\0"), "Description must not contain NUL");
 export const pluginUpdateSchema = z.union([
@@ -24,12 +26,13 @@ export function defaultPluginDescription(name: string): string {
 }
 
 export function updatePluginDescription(projectId: string, name: string, description: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
   z.string().min(1).max(256).parse(projectId);
   z.string().min(1).max(256).parse(name);
   pluginDescriptionSchema.parse(description);
   const plugin = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    return db.prepare("UPDATE plugins SET description = ?, updated_at = ? WHERE project_id = ? AND name = ? RETURNING *")
+    return db.prepare("UPDATE plugins SET description = ?, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL RETURNING *")
       .get(description, new Date().toISOString(), projectId, name) as Plugin | undefined;
   });
   if (plugin) checkpointAfterWrite();
@@ -45,7 +48,7 @@ export function updatePluginDescription(projectId: string, name: string, descrip
  */
 function validatePluginPath(filePath: string, projectId?: string): string {
   // Restrict to safe characters only — prevents shell injection via filenames
-  if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath)) {
+  if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath) || filePath.split("/").some(p => !p || p === "." || p === "..")) {
     throw new Error(`Invalid plugin file path: ${filePath}`);
   }
   const baseDir = getPluginsBase(projectId);
@@ -55,6 +58,7 @@ function validatePluginPath(filePath: string, projectId?: string): string {
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Plugin path escapes base directory: ${filePath}`);
   }
+  validateProjectionPath(resolved);
   return filePath;
 }
 
@@ -67,51 +71,20 @@ function validatePluginPath(filePath: string, projectId?: string): string {
  * - Global:  `plugins/<filePath>`
  * - Project: `.opencode/plugins/<filePath>`
  */
-export function addPluginToConfig(filePath: string, projectId?: string): void {
-  const isGlobalProject = isGlobal(projectId);
-  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
-  try {
-    const configPath = getConfigPath(projectId);
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    const entries = [...new Map([
-      ...(Array.isArray(config.plugins) ? config.plugins : []),
-      ...(Array.isArray(config.plugin) ? config.plugin : []),
-    ].map((entry) => [JSON.stringify(entry), entry])).values()];
-    if (!entries.includes(rel)) entries.push(rel);
-    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
-      config.plugins = entries;
-      delete config.plugin;
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    }
-  } catch { /* config may not exist yet — skip silently */ }
+export function addPluginToConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,true);}
+export function removePluginFromConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,false);}
+function syncPluginConfig(filePath:string,projectId:string|undefined,enabled:boolean):void{
+ validatePluginPath(filePath,projectId);const target=getPluginConfigPath(projectId);validateProjectionPath(target);
+ if(!existsSync(target)&&!enabled)return;
+ const before=existsSync(target)?readFileSync(target,'utf8'):'{}'+String.fromCharCode(10);
+ const rel=isGlobal(projectId)?'plugins/'+filePath:'.opencode/plugins/'+filePath;
+ const after=editPluginConfiguration(before,rel,enabled);
+ if(after!==before){mkdirSync(dirname(target),{recursive:true});writeFileSync(target,after);}
 }
-
-/**
- * Remove a plugin entry from opencode.json's `plugins` array.
- * Mirror of addPluginToConfig — keeps the disk config in sync when a plugin is deleted or disabled.
- */
-export function removePluginFromConfig(filePath: string, projectId?: string): void {
-  const isGlobalProject = isGlobal(projectId);
-  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
-  try {
-    const configPath = getConfigPath(projectId);
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    const entries = [...new Map([
-      ...(Array.isArray(config.plugins) ? config.plugins : []),
-      ...(Array.isArray(config.plugin) ? config.plugin : []),
-    ].map((entry) => [JSON.stringify(entry), entry])).values()].filter((entry) => entry !== rel);
-    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
-      config.plugins = entries;
-      delete config.plugin;
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    }
-  } catch { /* config may not exist — skip silently */ }
-}
-
 /** List all plugins registered for a project. */
 export function listPlugins(projectId: string): Plugin[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  return db.prepare("SELECT * FROM plugins WHERE project_id = ?").all(projectId) as Plugin[];
+  return db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL").all(projectId) as Plugin[];
 }
 
 /**
@@ -122,13 +95,14 @@ export function listPlugins(projectId: string): Plugin[] {
  * without it, OpenCode won't load the plugin on startup.
  */
 export function enablePlugin(projectId: string, name: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
-    db.prepare("UPDATE plugins SET enabled = 1, updated_at = ? WHERE project_id = ? AND name = ?")
+    db.prepare("UPDATE plugins SET enabled = 1, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL")
       .run(now, projectId, name);
 
-    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?")
+    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
       .get(projectId, name) as Plugin | undefined;
 
     if (plugin?.source_content) {
@@ -149,13 +123,14 @@ export function enablePlugin(projectId: string, name: string): Plugin | undefine
  * from opencode.json's `plugins` array.
  */
 export function disablePlugin(projectId: string, name: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
-    db.prepare("UPDATE plugins SET enabled = 0, updated_at = ? WHERE project_id = ? AND name = ?")
+    db.prepare("UPDATE plugins SET enabled = 0, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL")
       .run(now, projectId, name);
 
-    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?")
+    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
       .get(projectId, name) as Plugin | undefined;
 
     if (plugin) {
@@ -192,14 +167,17 @@ export function createPlugin(
   projectId: string,
   name: string,
   filePath: string,
-  sourceContent?: string
+  sourceContent?: string,
+  initiallyEnabled = true
 ): Plugin {
+  assertPluginCommandClear(projectId);
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     validatePluginPath(filePath, projectId);
+    if (db.prepare("SELECT 1 FROM plugins WHERE project_id=? AND (name=? OR file_path=?)").get(projectId,name,filePath)) throw new Error("Plugin target already exists; restore or edit its original row");
     const now = new Date().toISOString();
     const id = `plugin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const content = sourceContent || (() => {
+    const content = sourceContent !== undefined ? sourceContent : (() => {
       try {
         const resolvedPath = resolve(getPluginsBase(projectId), filePath);
         if (existsSync(resolvedPath)) {
@@ -211,11 +189,11 @@ export function createPlugin(
 
     db.prepare(
       `INSERT INTO plugins (id, project_id, name, file_path, enabled, source_content, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
-    ).run(id, projectId, name, filePath, content, now, now);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, projectId, name, filePath, initiallyEnabled ? 1 : 0, content, now, now);
 
-    ensurePluginDir(projectId);
-    if (content) {
+    if (initiallyEnabled) ensurePluginDir(projectId);
+    if (initiallyEnabled && content) {
       const fullPath = resolve(getPluginsBase(projectId), filePath);
       mkdirSync(dirname(fullPath), { recursive: true });
       writeFileSync(fullPath, content);
@@ -232,22 +210,7 @@ export function createPlugin(
  * Returns false if the plugin doesn't exist.
  */
 export function deletePlugin(projectId: string, name: string): boolean {
-  return execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?")
-      .get(projectId, name) as Plugin | undefined;
-    if (!plugin) return false;
-
-    try {
-      const resolvedPath = resolve(getPluginsBase(projectId), validatePluginPath(plugin.file_path, projectId));
-      if (existsSync(resolvedPath)) unlinkSync(resolvedPath);
-      removePluginFromConfig(plugin.file_path, projectId);
-    } catch { /* file may already be gone */ }
-
-    db.prepare("DELETE FROM plugins WHERE id = ?").run(plugin.id);
-    checkpointAfterWrite();
-    return true;
-  });
+  return Boolean(archivePlugin(projectId,name));
 }
 
 /**
@@ -265,9 +228,10 @@ export function updatePlugin(
   name: string,
   updates: { file_path?: string; source_content?: string }
 ): Plugin | undefined {
+  assertPluginCommandClear(projectId);
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const existing = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?")
+    const existing = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
       .get(projectId, name) as Plugin | undefined;
     if (!existing) return undefined;
 
@@ -281,6 +245,7 @@ export function updatePlugin(
       "UPDATE plugins SET file_path = ?, source_content = ?, updated_at = ? WHERE id = ?"
     ).run(newFilePath, newContent, now, existing.id);
 
+      if (!existing.enabled) { checkpointAfterWrite(); return db.prepare("SELECT * FROM plugins WHERE id = ?").get(existing.id) as Plugin; }
       if (updates.source_content !== undefined) {
        ensurePluginDir(projectId);
        if (updates.file_path && updates.file_path !== existing.file_path) {
@@ -317,6 +282,6 @@ export function updatePlugin(
 /** Get a single plugin by project and name. */
 export function getPlugin(projectId: string, name: string): Plugin | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  return db.prepare("SELECT * FROM plugins WHERE project_id = ? AND name = ?")
+  return db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
     .get(projectId, name) as Plugin | undefined;
 }

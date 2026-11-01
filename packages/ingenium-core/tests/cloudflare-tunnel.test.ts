@@ -16,7 +16,6 @@ const inventory: cloudflareTunnel.CloudflareTrustedIngressInventory = {
     dashboard: [{ publicUrl: "https://dashboard.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.dashboard }],
     opencode: [{ publicUrl: "https://opencode.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.opencode }],
     cli: [{ publicUrl: "https://cli.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.cli }],
-    vscode: [{ publicUrl: "https://vscode.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.vscode }],
     api: [{ publicUrl: "https://api.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.api }],
     info: [],
   },
@@ -78,6 +77,20 @@ describe("Cloudflare tunnel core boundary", () => {
     expect(cloudflareTunnel.validateCloudflareTunnelConfig(candidate, trusted).ok).toBe(false);
     trusted.routes.info[0]!.target = cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.dashboard;
     expect(cloudflareTunnel.validateCloudflareTrustedIngressInventory(trusted).ok).toBe(false);
+  });
+
+  it("reads historical editor metadata without trusting it or rewriting saved settings", () => {
+    const oldRoutes={...inventory.routes,vscode:[{publicUrl:"https://vscode.example.com/",target:"authenticated-production-vscode-audience-gateway"}]};
+    const projected=cloudflareTunnel.validateCloudflareTrustedIngressInventory({...inventory,routes:oldRoutes});
+    expect(projected.ok).toBe(true);if(!projected.ok)throw Error(projected.error);
+    expect(projected.inventory.routes).not.toHaveProperty("vscode");
+    const saved={...config(),services:{...config().services,vscode:{enabled:true,publicUrl:"https://vscode.example.com/"}}};
+    const raw=JSON.stringify(saved);settings.setSetting(projectId,cloudflareTunnel.CLOUDFLARE_TUNNEL_SETTING_KEY,raw);
+    const read=cloudflareTunnel.getCloudflareTunnelConfig(projected.inventory);
+    expect(read.status).toBe("ok");expect(read.config.services).not.toHaveProperty("vscode");
+    expect(settings.getSetting(projectId,cloudflareTunnel.CLOUDFLARE_TUNNEL_SETTING_KEY)).toBe(raw);
+    expect(cloudflareTunnel.validateCloudflareTunnelConfig(saved,projected.inventory).ok).toBe(false);
+    expect(()=>cloudflareTunnel.saveCloudflareTunnelConfig(saved,projected.inventory)).toThrow();
   });
 
   it("defaults disabled and persists only exact public service mappings", () => {

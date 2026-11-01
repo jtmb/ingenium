@@ -328,7 +328,7 @@ export class MemoryLifecycle {
     });
   }
   previewReset(scope) {
-    const key = this.access(scope, 'forget');
+    const key = this.access(scope, 'preview-forget');
     const rows = this.activeRows(key);
     return { scopeHash: digest(key), count: rows.length, confirmation: hash([key, rows.map((row) => [row.id, row.version, row.content_hash])]) };
   }

@@ -103,7 +103,7 @@ export interface StoredRuntimeOriginalProvision extends RuntimeOriginalProvision
 const originalColumns=`runtime_id,parent_container_id,daemon_id,host_id,image_id,start_identity,public_profile_sha256,spec_sha256,workspace_id,organization_id,project_id,owner_user_id,binding_hash,binding_epoch,provisioning_revision,request_id,request_sha256,cpu_millis,memory_bytes,pids_limit,disk_bytes,process_limit,container_created_at,created_at`;
 export function readRuntimeOriginalProvision(db:OriginalDb,id:string):StoredRuntimeOriginalProvision|undefined{
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_original_provisions'").get())return undefined;
- const raw=db.prepare('SELECT * FROM runtime_original_provisions WHERE runtime_id=?').get(id);if(!raw)return undefined;
+ const raw=db.prepare('SELECT * FROM runtime_original_provisions WHERE runtime_id=? AND project_id IS NOT NULL').get(id);if(!raw)return undefined;
  const r=obj(raw);if(!stamp(r.created_at))return fail();
  const value=decodeRuntimeOriginalProvision({schemaVersion:1,kind:'original-runtime-provision-v1',runtimeId:r.runtime_id,parentContainerId:r.parent_container_id,daemonId:r.daemon_id,hostId:r.host_id,imageId:r.image_id,startIdentity:r.start_identity,publicProfileSha256:r.public_profile_sha256,specSha256:r.spec_sha256,workspaceId:r.workspace_id,organizationId:r.organization_id,projectId:r.project_id,ownerUserId:r.owner_user_id,bindingHash:r.binding_hash,bindingEpoch:r.binding_epoch,provisioningRevision:r.provisioning_revision,requestId:r.request_id,requestSha256:r.request_sha256,limits:{cpuMillis:r.cpu_millis,memoryBytes:r.memory_bytes,pidsLimit:r.pids_limit,diskBytes:r.disk_bytes,processLimit:r.process_limit},containerCreatedAt:r.container_created_at});
  return frozen({...value,recordedAt:r.created_at});
@@ -127,4 +127,90 @@ export function insertRuntimeOriginalProvision(db:OriginalDb,current:ProvisionRu
  if(readRuntimeOriginalProvision(db,p.runtimeId))return;
  const values=[p.runtimeId,p.parentContainerId,p.daemonId,p.hostId,p.imageId,p.startIdentity,p.publicProfileSha256,p.specSha256,p.workspaceId,p.organizationId,p.projectId,p.ownerUserId,p.bindingHash,p.bindingEpoch,p.provisioningRevision,p.requestId,p.requestSha256,l.cpuMillis,l.memoryBytes,l.pidsLimit,l.diskBytes,l.processLimit,p.containerCreatedAt,timestamp];
  if(Number(db.prepare(`INSERT INTO runtime_original_provisions(${originalColumns}) VALUES(${values.map(()=>'?').join(',')})`).run(...values).changes)!==1)return fail();
+}
+
+
+/** Explicit workspace-scoped v2; v1 stays Project-required. */
+export type PublicWorkspaceProvisionRequest=Omit<PublicProvisionRequest,'projectId'|'projectName'>&{schemaVersion:2;scopeKind:'workspace';projectId:null};
+export type WorkspaceRuntimeOriginalProvision=Omit<RuntimeOriginalProvision,'schemaVersion'|'kind'|'projectId'>&{schemaVersion:2;scopeKind:'workspace';kind:'original-workspace-runtime-provision-v2';projectId:null};
+export interface StoredWorkspaceRuntimeOriginalProvision extends WorkspaceRuntimeOriginalProvision{readonly recordedAt:string}
+export function publicWorkspaceProvisionRequest(input:PublicWorkspaceProvisionRequest):PublicWorkspaceProvisionRequest{
+ const keys=['schemaVersion','scopeKind','originalRequestId','runtimeId','backendName','organizationId','projectId','ownerUserId','workspaceId','storagePath','storageMappingHash','securityEpoch','revision','limits'];
+ if(!input||Object.keys(input).sort().join('|')!==keys.sort().join('|')||input.schemaVersion!==2||input.scopeKind!=='workspace'||input.projectId!==null
+ ||![input.originalRequestId,input.runtimeId,input.organizationId,input.ownerUserId].every(v=>typeof v==='string'&&UUID.test(v))
+ ||input.backendName!=='ingenium-runtime-'+input.runtimeId.replaceAll('-','')||!text(input.workspaceId,256)
+ ||!text(input.storagePath,1024)||!input.storagePath.startsWith('/')||input.storagePath.includes('/../')||input.storagePath.includes('/./')||input.storagePath.endsWith('/..')||input.storagePath.endsWith('/.')
+ ||!HEX.test(input.storageMappingHash)||input.storageMappingHash!==provisionHash(input.workspaceId+'\0'+input.storagePath)||!integer(input.securityEpoch)||!integer(input.revision))return fail();
+ return frozen({...input,limits:limits(input.limits)});
+}
+export function originalWorkspaceProvisionFromNewFlow(input:{request:PublicWorkspaceProvisionRequest;spec:unknown;daemonBefore:unknown;daemonAfter:unknown;imageId:unknown;createdId:unknown;createStatus:number;startStatus:number;attachJoined:boolean;container:unknown}):WorkspaceRuntimeOriginalProvision{
+ const request=publicWorkspaceProvisionRequest(input.request),spec=obj(input.spec),h=obj(spec.HostConfig),raw=obj(input.container),c=obj(raw.Config),actual=obj(raw.HostConfig),s=obj(raw.State);
+ const daemon=obj(input.daemonBefore),after=obj(input.daemonAfter),labels=obj(c.Labels),expected=obj(spec.Labels),network=obj(spec.NetworkingConfig),endpoints=obj(network.EndpointsConfig);
+ if(input.createStatus!==201||input.startStatus!==204||input.attachJoined!==true||!text(daemon.ID,256)||daemon.ID!==after.ID||typeof input.createdId!=="string"||!HEX.test(input.createdId)
+  ||raw.Id!==input.createdId||raw.Name!=="/"+request.backendName||typeof input.imageId!=="string"||!/^sha256:[a-f0-9]{64}$/u.test(input.imageId)||raw.Image!==input.imageId||spec.Image!==input.imageId||c.Image!==input.imageId
+  ||c.User!=="1000:1000"||c.WorkingDir!=="/workspace"||!Object.hasOwn(c,"Entrypoint")||!Object.hasOwn(c,"Cmd")||!Array.isArray(c.Entrypoint)||!(c.Cmd===null||Array.isArray(c.Cmd))
+  ||!Array.isArray(raw.Mounts)||typeof raw.AppArmorProfile!=="string"||!stamp(raw.Created)||!stamp(s.StartedAt)||Date.parse(s.StartedAt)<Date.parse(raw.Created)||raw.RestartCount!==0||!integer(s.Pid)||s.Pid===0||s.Running!==true||s.Status!=="running"
+  ||!['starting','healthy'].includes(String(obj(s.Health).Status)))return fail();
+ if(Object.entries(expected).some(([key,value])=>labels[key]!==value)||labels['com.ingenium.managed']!=='runtime-manager'
+  ||labels['com.ingenium.runtime.id']!==request.runtimeId||labels['com.ingenium.runtime.organization']!==request.organizationId||Object.hasOwn(labels,'com.ingenium.runtime.project')||Object.hasOwn(expected,'com.ingenium.runtime.project')||labels['com.ingenium.runtime.scope']!=='workspace'||expected['com.ingenium.runtime.scope']!=='workspace'||labels['com.ingenium.runtime.owner']!==request.ownerUserId||labels['com.ingenium.runtime.workspace']!==request.workspaceId||labels['com.ingenium.runtime.storage']!==request.storageMappingHash||labels['com.ingenium.runtime.security-epoch']!==String(request.securityEpoch)||labels['com.ingenium.runtime.revision']!==String(request.revision))return fail();
+ // Compare every requested nonsecret HostConfig field against the actual raw
+ // daemon response, then hash the complete public profile including defaults.
+ for(const key of Object.keys(h)){
+  // Docker's closed empty Ulimits/PortBindings forms carry no additional grant;
+  // preserve the observed raw form in the profile hash rather than normalize it.
+  if(key==='Ulimits'&&Array.isArray(h[key])&&h[key].length===0&&(actual[key]===null||(Array.isArray(actual[key])&&actual[key].length===0)))continue;
+  if(key==='PortBindings'&&Object.keys(obj(h[key])).length===0&&(actual[key]===null||Object.keys(obj(actual[key])).length===0))continue;
+  if(!equal(actual[key],h[key]))return fail();
+ }
+ if(actual.ReadonlyRootfs!==true||actual.Privileged!==false||actual.Init!==true||actual.AutoRemove!==false||actual.PublishAllPorts!==false||!equal(actual.CapDrop,['ALL'])
+  ||(actual.CapAdd!==null&&(!Array.isArray(actual.CapAdd)||actual.CapAdd.length))||actual.PidMode||actual.IpcMode==='host'||actual.UsernsMode==='host'
+  ||(actual.Devices!==null&&(!Array.isArray(actual.Devices)||actual.Devices.length))||(actual.DeviceRequests!==null&&(!Array.isArray(actual.DeviceRequests)||actual.DeviceRequests.length))
+  ||actual.Memory!==request.limits.memoryBytes||actual.NanoCpus!==request.limits.cpuMillis*1000000||actual.PidsLimit!==Math.min(request.limits.pidsLimit,request.limits.processLimit))return fail();
+ const mounts=raw.Mounts.map(obj),workspace=mounts.filter(m=>m.Destination==='/workspace');
+ if(workspace.length!==1||workspace[0]!.Type!=='bind'||workspace[0]!.Source!==request.storagePath||workspace[0]!.RW!==true||workspace[0]!.Propagation!=='rprivate'||mounts.some(m=>m.Type==='bind'?m.Destination!=='/workspace':m.Type!=='tmpfs'||typeof m.Destination!=='string'||!Object.hasOwn(obj(h.Tmpfs),m.Destination)))return fail();
+ const networks=obj(obj(raw.NetworkSettings).Networks),names=Object.keys(endpoints);
+ if(names.length!==1||Object.keys(networks).sort().join('|')!==names.sort().join('|')||actual.NetworkMode!==names[0])return fail();
+ if([spec.Env,c.Env].some(env=>!Array.isArray(env)||env.some(v=>typeof v!=='string'||/^(INGENIUM_PROJECT|INGENIUM_PROJECT_ID|INGENIUM_PROJECT_NAME)=/.test(v))))return fail();
+ const profile={User:c.User,WorkingDir:c.WorkingDir,Entrypoint:c.Entrypoint,Cmd:c.Cmd,HostConfig:actual,Mounts:raw.Mounts,AppArmorProfile:raw.AppArmorProfile};
+ return decodeWorkspaceRuntimeOriginalProvision({schemaVersion:2,scopeKind:'workspace',kind:'original-workspace-runtime-provision-v2',requestId:request.originalRequestId,requestSha256:provisionHash(request),runtimeId:request.runtimeId,parentContainerId:input.createdId,daemonId:daemon.ID,hostId:'docker-daemon:'+provisionHash('veyra-docker-host-v1\0'+daemon.ID),imageId:input.imageId,startIdentity:provisionHash([s.StartedAt,raw.RestartCount]),publicProfileSha256:provisionHash(profile),specSha256:provisionHash(publicProvisionSpec(spec)),workspaceId:request.workspaceId,organizationId:request.organizationId,projectId:request.projectId,ownerUserId:request.ownerUserId,bindingHash:request.storageMappingHash,bindingEpoch:request.securityEpoch,provisioningRevision:request.revision,limits:request.limits,containerCreatedAt:raw.Created});
+}
+export function decodeWorkspaceRuntimeOriginalProvision(value:unknown):WorkspaceRuntimeOriginalProvision{
+ const v=obj(value),keys=['schemaVersion','scopeKind','kind','requestId','requestSha256','runtimeId','parentContainerId','daemonId','hostId','imageId','startIdentity','publicProfileSha256','specSha256','workspaceId','organizationId','projectId','ownerUserId','bindingHash','bindingEpoch','provisioningRevision','limits','containerCreatedAt'];
+ if(Object.keys(v).sort().join('|')!==keys.sort().join('|')||v.schemaVersion!==2||v.scopeKind!=='workspace'||v.projectId!==null||v.kind!=='original-workspace-runtime-provision-v2'
+  ||![v.requestId,v.runtimeId,v.organizationId,v.ownerUserId].every(x=>typeof x==='string'&&UUID.test(x))
+  ||![v.requestSha256,v.parentContainerId,v.startIdentity,v.publicProfileSha256,v.specSha256,v.bindingHash].every(x=>typeof x==='string'&&HEX.test(x))
+  ||!text(v.workspaceId,256)||!text(v.daemonId,256)||v.hostId!=='docker-daemon:'+provisionHash('veyra-docker-host-v1\0'+v.daemonId)
+  ||typeof v.imageId!=='string'||!/^sha256:[a-f0-9]{64}$/u.test(v.imageId)||!integer(v.bindingEpoch)||!integer(v.provisioningRevision)||!stamp(v.containerCreatedAt))return fail();
+ return frozen({...v,limits:limits(v.limits)}) as unknown as WorkspaceRuntimeOriginalProvision;
+}
+export function validateWorkspaceProvisionResponse(value:unknown,request:PublicWorkspaceProvisionRequest,backendId:unknown):WorkspaceRuntimeOriginalProvision{
+ const original=decodeWorkspaceRuntimeOriginalProvision(value),expected=publicWorkspaceProvisionRequest(request);
+ if(original.requestId!==expected.originalRequestId||original.requestSha256!==provisionHash(expected)||original.parentContainerId!==backendId||original.runtimeId!==expected.runtimeId
+  ||original.organizationId!==expected.organizationId||original.projectId!==expected.projectId||original.ownerUserId!==expected.ownerUserId||original.workspaceId!==expected.workspaceId||original.bindingHash!==expected.storageMappingHash||original.bindingEpoch!==expected.securityEpoch||original.provisioningRevision!==expected.revision||!equal(original.limits,expected.limits))return fail();
+ return original;
+}
+export function readWorkspaceRuntimeOriginalProvision(db:OriginalDb,id:string):StoredWorkspaceRuntimeOriginalProvision|undefined{
+ if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='veyra_evolution_137'").get())return undefined;
+ const raw=db.prepare('SELECT * FROM runtime_original_provisions WHERE runtime_id=? AND project_id IS NULL AND schema_version=2').get(id);if(!raw)return undefined;
+ const r=obj(raw);if(!stamp(r.created_at))return fail();
+ const value=decodeWorkspaceRuntimeOriginalProvision({schemaVersion:2,scopeKind:'workspace',kind:'original-workspace-runtime-provision-v2',runtimeId:r.runtime_id,parentContainerId:r.parent_container_id,daemonId:r.daemon_id,hostId:r.host_id,imageId:r.image_id,startIdentity:r.start_identity,publicProfileSha256:r.public_profile_sha256,specSha256:r.spec_sha256,workspaceId:r.workspace_id,organizationId:r.organization_id,projectId:r.project_id,ownerUserId:r.owner_user_id,bindingHash:r.binding_hash,bindingEpoch:r.binding_epoch,provisioningRevision:r.provisioning_revision,requestId:r.request_id,requestSha256:r.request_sha256,limits:{cpuMillis:r.cpu_millis,memoryBytes:r.memory_bytes,pidsLimit:r.pids_limit,diskBytes:r.disk_bytes,processLimit:r.process_limit},containerCreatedAt:r.container_created_at});
+ return frozen({...value,recordedAt:r.created_at});
+}
+export function insertWorkspaceRuntimeOriginalProvision(db:OriginalDb&{inTransaction:boolean},current:Omit<ProvisionRuntimeRow,'project_id'>&{project_id:null;schema_version:2},input:{toState:string;actorType:string;actorId:string;backendContainerId?:string|null;originalProvision?:WorkspaceRuntimeOriginalProvision},timestamp:string):void{
+ if(!db.inTransaction||current.schema_version!==2||current.project_id!==null)return fail();
+ if(input.toState!=='STARTING'){if(input.originalProvision)return fail();return;}
+ if(!input.originalProvision)return fail();
+ if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='veyra_evolution_137'").get())return fail(); // v2 never silently drops original proof
+ const p=decodeWorkspaceRuntimeOriginalProvision(input.originalProvision),l=p.limits;
+ if(current.state!=='PROVISIONING'||input.toState!=='STARTING'||input.actorType!=='manager'||input.actorId!=='runtime-manager'||current.backend_container_id!==null||input.backendContainerId!==p.parentContainerId
+  ||p.runtimeId!==current.id||p.provisioningRevision!==current.revision||p.organizationId!==current.organization_id||p.projectId!==current.project_id||p.ownerUserId!==current.owner_user_id||p.workspaceId!==current.workspace_id||p.bindingEpoch!==current.security_epoch
+  ||l.cpuMillis!==current.cpu_millis||l.memoryBytes!==current.memory_bytes||l.pidsLimit!==current.pids_limit||l.diskBytes!==current.disk_bytes||l.processLimit!==current.process_limit
+  ||!current.lease_owner_hash||!current.lease_expires_at||current.lease_expires_at<=timestamp)return fail();
+ const workspace=db.prepare("SELECT * FROM authorized_workspaces WHERE id=? AND organization_id=? AND project_id IS ? AND owner_user_id=? AND status='authorized' AND security_epoch=? AND storage_mapping_hash=?").get(p.workspaceId,p.organizationId,p.projectId,p.ownerUserId,p.bindingEpoch,p.bindingHash);if(!workspace)return fail();
+ const binding=db.prepare("SELECT 1 FROM runtime_capability_bindings b JOIN mcp_credentials c ON c.id=b.mcp_credential_id JOIN service_principals sp ON sp.id=c.service_principal_id WHERE b.runtime_id=? AND b.organization_id=? AND b.project_id IS ? AND b.owner_user_id=? AND b.workspace_id=? AND b.security_epoch=? AND b.revoked_at IS NULL AND b.expires_at>? AND c.revoked_at IS NULL AND c.expires_at=b.expires_at AND c.kind='runtime' AND c.audience='runtime' AND c.organization_id=b.organization_id AND c.project_id IS b.project_id AND c.workspace_id=b.workspace_id AND c.created_by_user_id=b.owner_user_id AND c.security_epoch=b.security_epoch AND sp.organization_id=b.organization_id AND sp.security_epoch=b.security_epoch AND sp.status='active'").get(p.runtimeId,p.organizationId,p.projectId,p.ownerUserId,p.workspaceId,p.bindingEpoch,timestamp);if(!binding)return fail();
+ // A replacement runtime keeps existing legacy lifecycle behavior, but cannot
+ // overwrite/requalify the initial physical original under the same runtimeId.
+ if(readWorkspaceRuntimeOriginalProvision(db,p.runtimeId))return;
+ const values=[p.runtimeId,p.parentContainerId,p.daemonId,p.hostId,p.imageId,p.startIdentity,p.publicProfileSha256,p.specSha256,p.workspaceId,p.organizationId,p.projectId,p.ownerUserId,p.bindingHash,p.bindingEpoch,p.provisioningRevision,p.requestId,p.requestSha256,l.cpuMillis,l.memoryBytes,l.pidsLimit,l.diskBytes,l.processLimit,p.containerCreatedAt,timestamp,2];
+ if(Number(db.prepare(`INSERT INTO runtime_original_provisions(${originalColumns},schema_version) VALUES(${values.map(()=>'?').join(',')})`).run(...values).changes)!==1)return fail();
 }

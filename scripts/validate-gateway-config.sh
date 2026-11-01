@@ -8,7 +8,6 @@ repo_root="$(CDPATH= cd -- "$config_dir/.." && pwd)"
 opencode_proxy_path="${config_dir}/proxy-opencode.conf"
 dashboard_proxy_path="${config_dir}/proxy-dashboard.conf"
 oauth_callback_proxy_path="${config_dir}/proxy-oauth-callback.conf"
-vscode_proxy_path="${config_dir}/proxy-vscode.conf"
 compatibility_aliases_path="${config_dir}/runtime-aliases-compatibility.conf"
 production_aliases_path="${config_dir}/runtime-aliases-production.conf"
 unavailable_alias_path="${config_dir}/runtime-alias-unavailable-location.conf"
@@ -53,10 +52,6 @@ if [ ! -f "$oauth_callback_proxy_path" ]; then
   echo "ERROR: OAuth callback proxy hardening configuration was not found: $oauth_callback_proxy_path"
   exit 1
 fi
-if [ ! -f "$vscode_proxy_path" ]; then
-  echo "ERROR: VS Code proxy hardening configuration was not found: $vscode_proxy_path"
-  exit 1
-fi
 for path in "$dashboard_safe_read_map_path" "$dashboard_safe_read_generator" "$dashboard_safe_read_policy"; do
   if [ ! -f "$path" ]; then
     echo "ERROR: Dashboard safe-read policy artifact was not found: $path"
@@ -80,15 +75,12 @@ require_literal "$config_path" "limit_req_zone \$binary_remote_addr zone=dashboa
 require_literal "$config_path" "limit_req_zone \$dashboard_api_read_limit_key zone=dashboard_api_read:10m rate=60r/s;"
 require_literal "$config_path" "limit_req_zone \$dashboard_api_strict_limit_key zone=dashboard_api_strict:10m rate=30r/s;"
 require_literal "$config_path" "limit_req_zone \$opencode_request_limit_key zone=opencode_request:10m rate=30r/s;"
-require_literal "$config_path" "limit_req_zone \$vscode_request_limit_key zone=vscode_request:10m rate=30r/s;"
 require_literal "$config_path" "limit_conn_zone \$binary_remote_addr zone=gateway_conn:10m;"
 require_literal "$config_path" "limit_conn gateway_conn 16;"
 # Dynamic OpenCode requests use the client bucket; static assets and upgrade
 # handshakes use an empty key so loading the UI does not exhaust that budget.
 require_literal "$config_path" "map \$http_upgrade \$opencode_upgrade_rate_limit_key {"
 require_literal "$config_path" "map \$uri \$opencode_request_limit_key {"
-require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_rate_limit_key {"
-require_literal "$config_path" "map \$uri \$vscode_request_limit_key {"
 require_literal "$config_path" "include /app/nginx/dashboard-safe-reads-map.conf;"
 require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_read_limit_key {"
 require_literal "$config_path" "map \$dashboard_api_limit_class \$dashboard_api_strict_limit_key {"
@@ -96,11 +88,6 @@ require_literal "$dashboard_safe_read_map_path" "map \$request_uri \$dashboard_a
 require_literal "$dashboard_safe_read_map_path" "map \"\$request_method|\$uri|\$dashboard_api_raw_path\" \$dashboard_api_limit_class {"
 require_literal "$dashboard_safe_read_map_path" "default strict;"
 reject_literal "$dashboard_safe_read_map_path" "GET|HEAD"
-require_literal "$config_path" "map \$http_upgrade \$vscode_upgrade_request {"
-require_literal "$config_path" "map \"\$vscode_upgrade_request:\$http_origin\" \$vscode_reject_upgrade {"
-require_literal "$config_path" "default                              1;"
-require_literal "$config_path" "~^0:"
-require_literal "$config_path" "\"1:http://vscode.localhost:3000\""
 require_literal "$config_path" "~^/(?:assets/|_next/|@vite/|node_modules/\\.vite/) \"\";"
 require_literal "$config_path" "map \$host \$dashboard_ipv6_loopback {"
 require_literal "$config_path" "\"::1\" 1;"
@@ -113,7 +100,6 @@ require_literal "$config_path" "limit_req zone=dashboard_request burst=60 nodela
 require_literal "$config_path" "limit_req zone=dashboard_api_read burst=360 nodelay;"
 require_literal "$config_path" "limit_req zone=dashboard_api_strict burst=60 nodelay;"
 require_literal "$compatibility_aliases_path" "limit_req zone=opencode_request burst=60 nodelay;"
-require_literal "$compatibility_aliases_path" "limit_req zone=vscode_request burst=60 nodelay;"
 require_literal "$config_path" "location ^~ /_next/static/ {"
 require_literal "$config_path" "location ^~ /api/v1/ {"
 reject_literal "$config_path" "location ^~ /_next/ {"
@@ -153,29 +139,11 @@ require_literal "$config_path" "error_page 429 = @dashboard_rate_limited;"
 require_literal "$config_path" "location @dashboard_rate_limited {"
 require_literal "$config_path" "add_header Retry-After \"1\" always;"
 require_literal "$config_path" "return 429 '{\"error\":{\"code\":\"RATE_LIMITED\""
-require_literal "$config_path" "upstream vscode {"
-require_literal "$config_path" "server 127.0.0.1:4100;"
 require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
-require_literal "$compatibility_aliases_path" "proxy_pass http://vscode;"
-require_literal "$compatibility_aliases_path" "include /app/nginx/proxy-vscode.conf;"
-require_literal "$compatibility_aliases_path" "if (\$vscode_reject_upgrade) {"
-require_literal "$compatibility_aliases_path" "proxy_set_header Host \"vscode.localhost:3000\";"
 require_literal "$compatibility_aliases_path" "proxy_set_header Origin \$http_origin;"
-require_literal "$config_path" "~^/(?:_static/|static/|stable/) \"\";"
 reject_literal "$config_path" "3002"
 reject_literal "$config_path" "proxy_set_header Origin \"http://vscode.localhost:3000\";"
 
-# Keep the VS Code root on the same dual-stack listener pair as OpenCode. The
-# bounded context is intentional: these two listen directives immediately
-# precede the exact server name in the virtual-host declaration.
-vscode_listener_block="$(grep -B 2 -F 'server_name vscode.localhost;' "$compatibility_aliases_path")"
-case "$vscode_listener_block" in
-  *"listen 3000;"*"listen [::]:3000;"*) ;;
-  *)
-    echo "ERROR: VS Code gateway must use the shared dual-stack port 3000 listener"
-    exit 1
-    ;;
-esac
 require_literal "$opencode_proxy_path" "proxy_set_header Authorization \"\";"
 require_literal "$opencode_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
 require_literal "$opencode_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
@@ -188,21 +156,6 @@ require_literal "$opencode_proxy_path" "proxy_hide_header Content-Security-Polic
 require_literal "$opencode_proxy_path" "proxy_hide_header X-Frame-Options;"
 require_literal "$opencode_proxy_path" "add_header Content-Security-Policy \"frame-ancestors http://localhost:3000 http://127.0.0.1:3000\" always;"
 reject_literal "$opencode_proxy_path" "frame-ancestors http://localhost:3000 http://127.0.0.1:3000 http://[::1]:3000"
-require_literal "$vscode_proxy_path" "proxy_set_header Authorization \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-For \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-Proto \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header X-Forwarded-Prefix \"\";"
-require_literal "$vscode_proxy_path" "proxy_set_header Forwarded \"\";"
-reject_literal "$vscode_proxy_path" "proxy_set_header Host"
-reject_literal "$vscode_proxy_path" "proxy_hide_header Content-Security-Policy;"
-require_literal "$vscode_proxy_path" "proxy_hide_header X-Frame-Options;"
-require_literal "$vscode_proxy_path" "add_header Content-Security-Policy \"frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000\" always;"
-reject_literal "$vscode_proxy_path" "frame-ancestors *"
-reject_literal "$vscode_proxy_path" "http://[::1]:3000"
-reject_literal "$vscode_proxy_path" "http://192.168."
-reject_literal "$vscode_proxy_path" "Bearer "
 require_literal "$dashboard_proxy_path" "proxy_set_header Authorization \"\";"
 require_literal "$dashboard_proxy_path" "proxy_set_header Proxy-Authorization \"\";"
 require_literal "$dashboard_proxy_path" "proxy_set_header X-Ingenium-Authenticated-User \"\";"
@@ -278,11 +231,11 @@ for directive in \
   esac
 done
 
-vscode_servers="$(grep -F -c 'server_name vscode.localhost;' "$compatibility_aliases_path")"
-if [ "$vscode_servers" -ne 1 ]; then
-  echo "ERROR: gateway must expose exactly one VS Code root host"
-  exit 1
-fi
+reject_literal "$compatibility_aliases_path" "proxy_pass http://vscode;"
+require_literal "$compatibility_aliases_path" "server_name vscode.localhost;"
+require_literal "$compatibility_aliases_path" "include /app/nginx/runtime-alias-unavailable-location.conf;"
+reject_literal "$config_path" "server 127.0.0.1:4100;"
+reject_literal "$config_path" "upstream vscode {"
 
 require_literal "$production_aliases_path" "server_name opencode.localhost cli.localhost vscode.localhost;"
 production_unavailable_includes="$(grep -F -c 'include /app/nginx/runtime-alias-unavailable-location.conf;' "$production_aliases_path")"

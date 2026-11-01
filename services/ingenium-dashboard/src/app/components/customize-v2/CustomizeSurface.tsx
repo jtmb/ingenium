@@ -4,12 +4,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../../lib/api";
+import {useAuth} from "../../../lib/AuthContext";
 import { useProject } from "../../../lib/ProjectContext";
 import Overlay from "../Overlay";
+import CatalogConnection from "./CatalogConnection";
 import { customizeViewIdentity, groupCatalogEntries, installationLabel, projectCatalog, readCatalogScope, resolveInstallationScope, scopedHref, visibleEntries, type CustomizeEntry, type CustomizeScopeBinding } from "./catalog.mjs";
 
 import { resolveHostedCatalogBindings } from "./catalog-reader.mjs";
-import { createServiceCatalogSource } from "./service-catalog-source";
+import { createServiceCatalogSource,createPublishedServiceCatalogSource } from "./service-catalog-source";
 
 type Kind = "plugin" | "skill";
 
@@ -28,11 +30,11 @@ const pending: CatalogState = { status: "loading", entries: [], error: "" };
 const control = "rounded-lg px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-blue-400 disabled:opacity-50";
 
 export default function CustomizeSurface({ kind, catalogSources = noCatalogSources }: { kind: Kind; catalogSources?: CustomizeCatalogSource[] }) {
-  const project = useProject();
-  return <HostedCustomize key={project} project={project} kind={kind} catalogSources={catalogSources} />;
+  const project = useProject(),{user}=useAuth();
+  return <HostedCustomize key={JSON.stringify([user.id,project])} actorUserId={user.id} project={project} kind={kind} catalogSources={catalogSources} />;
 }
 
-function HostedCustomize({ project, kind, catalogSources }: {project: string; kind: Kind; catalogSources: CustomizeCatalogSource[]}) {
+function HostedCustomize({ project, kind, catalogSources,actorUserId }: {project: string; kind: Kind; catalogSources: CustomizeCatalogSource[];actorUserId:string}) {
   const [sources, setSources] = useState<CustomizeCatalogSource[] | null>(null);
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -41,12 +43,13 @@ function HostedCustomize({ project, kind, catalogSources }: {project: string; ki
     setSources(null);
     setError(false);
     void api.projects.list().then(({ data }) => {
-      const defaults = resolveHostedCatalogBindings(data, project).map(createServiceCatalogSource);
+      const bindings=resolveHostedCatalogBindings(data, project),current=bindings.find(row=>row.visibility==="project")!;
+      const defaults = [...bindings.map(createServiceCatalogSource),...(["public","personal"] as const).map(visibility=>createPublishedServiceCatalogSource({actorUserId,projectId:current.projectId,apiProject:current.apiProject,visibility}))];
       const bound = [...defaults.filter(source => !catalogSources.some(override => override.id === source.id)), ...catalogSources];
       if (active) setSources(bound);
     }).catch(() => { if (active) setError(true); });
     return () => { active = false; };
-  }, [project, catalogSources, refresh]);
+  }, [project, actorUserId, catalogSources, refresh]);
   if (error) return <div role="alert" className="p-6 text-sm">
     <p>Catalog scope could not be resolved. Check project access, then retry.</p>
     <button type="button" className={control} onClick={() => setRefresh(value => value + 1)}>Retry scope resolution</button>
@@ -251,6 +254,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate, discoverS
           <p className="whitespace-pre-wrap break-words text-sm">{selected.description || "No description provided."}</p>
           <p className="text-sm">{installationLabel(selected)} · Scope: {selected.scope}</p>
           <p className="text-sm text-[var(--color-text-muted)]">Installed state comes from the scoped service records. Enabled does not establish that a connector is authenticated or healthy.</p>
+          {selected.catalog && <CatalogConnection key={selected.scopeId+":"+selected.id} entry={selected} />}
           {selected.installed && selectedProject && <Link className={control} href={scopedHref(`/customize/${selected.kind === "plugin" ? "plugins" : "skills"}/manage`, selectedProject)}>Open editor &amp; lifecycle controls</Link>}
         </div>}
       </Overlay>

@@ -1,5 +1,5 @@
 import type { RequestPrincipal } from "../middleware/auth.js";
-import { authorization, getDb, skills } from "ingenium-core";
+import { authorization, getDb, skills, isInstallationStorageProject } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { toAuthorizationPrincipal } from "../authorization-policy.js";
 import { createCustomizeRouter } from "../customize-v2/router.js";
@@ -9,7 +9,7 @@ import type { CustomizeContext, CustomizeAuthority } from "../customize-v2/catal
 /** Read-only catalog composition; existing lifecycle routes retain all writes. */
 export function createHostedCustomizeRouter() {
   const principals = new WeakMap<CustomizeContext, RequestPrincipal>();
-  const isSystem = (context: CustomizeContext) => Boolean(getDb().prepare("SELECT 1 FROM projects WHERE id=? AND is_global=1 AND archived_at IS NULL").get(context.projectId));
+  const isSystem = (context: CustomizeContext) => Boolean(isInstallationStorageProject(context.projectId)&&getDb().prepare("SELECT 1 FROM projects WHERE id=? AND archived_at IS NULL").get(context.projectId));
   const canRead: CustomizeAuthority["authorize"] = (context, action, kind, visibility, resourceId) => {
     const principal = principals.get(context);
     if (!principal || principal.id !== context.actorId || action !== "read" || !["plugin", "skill"].includes(kind)

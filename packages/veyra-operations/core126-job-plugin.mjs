@@ -1,3 +1,4 @@
+import {verifyCandidateAgentMaterial} from "./core126-candidate-material.mjs";
 import {verifyCore126AgentMaterial,BROKER_PLUGIN,JOB_AGENT_PLUGIN,JOB_MCP} from './core126-agent-material.mjs';
 import {hash,originalJsonHash,freeze,unavailable} from './core126-image-contract.mjs';
 export const JOB_PLUGIN_ID='ingenium.enforce-job-agent';
@@ -5,9 +6,9 @@ export const JOB_BUILTINS=Object.freeze(['opencode.models.dev','opencode.provide
 export const JOB_CONFIG_DIRECTORY='/run/ingenium-runtime/job/config';
 /** Source-verified v2.0.11 switches; actual candidate-image isolation remains a gate. */
 export function core126ClosedJobConfig(){return freeze({plugins:['-*',...JOB_BUILTINS,BROKER_PLUGIN,JOB_AGENT_PLUGIN],permissions:[{action:'*',resource:'*',effect:'deny'}],mcp:{servers:{}}});}
-function checkSnapshot(s,now){
+function checkSnapshot(s,now,verifyMaterial=verifyCore126AgentMaterial){
  if(!s||typeof s.agentName!=='string'||!s.admission||!s.material||!s.broker||!s.mcpEnvironment)unavailable('original private job bootstrap binding');
- const material=verifyCore126AgentMaterial(s.material,s.admission,s.agentName,now);
+ const material=verifyMaterial(s.material,s.admission,s.agentName,now);
  const b=s.broker;if(b.id!=='ingenium-llm-broker'||b.name!==b.id||b.mode!=='subagent'||b.hidden!==true||typeof b.system!=='string'||!Array.isArray(b.permissions))unavailable('original protected broker definition');
  const e=s.mcpEnvironment;let api;try{api=new URL(e.INGENIUM_API_URL);}catch{unavailable('original job API URL');}if(api.protocol!=='http:'||api.username||api.password||api.pathname!=='/api/v1'||api.search||api.hash)unavailable('original job API URL');if(e.INGENIUM_MCP_AUDIENCE!=='job-run'||e.INGENIUM_JOB_RUN_ID!==s.admission.runId||e.INGENIUM_JOB_ATTEMPT_ID!==s.admission.attemptId||e.INGENIUM_MCP_CREDENTIAL_FILE!=='/run/ingenium-runtime/capability'||e.INGENIUM_RUNTIME_CREDENTIAL_FILE!=='/run/ingenium-runtime/capability')unavailable('original job broker environment');
  if(Object.keys(e).some(k=>!['PATH','INGENIUM_API_URL','INGENIUM_MCP_AUDIENCE','INGENIUM_JOB_RUN_ID','INGENIUM_JOB_ATTEMPT_ID','INGENIUM_MCP_CREDENTIAL_FILE','INGENIUM_RUNTIME_CREDENTIAL_FILE'].includes(k))||Object.values(e).some(v=>typeof v!=='string'||v.includes('\0')))unavailable('closed broker environment');
@@ -16,12 +17,15 @@ function checkSnapshot(s,now){
 /** This returns the ORIGINAL native Promise plugin shape from v2.0.11; no npm
  * dependency or upstream edit. Root must supply original private bootstrap ports.
  * No default production export, fake ctx, label proof or authority is supplied. */
-export function createCore126JobAgentPlugin(ports){
+export function createCore126JobAgentPlugin(ports){return createCheckedJobAgentPlugin(ports,verifyCore126AgentMaterial);}
+/** Fixed candidate-only export; native transforms/hooks remain the same source. */
+export function createCore126CandidateJobAgentPlugin(ports){return createCheckedJobAgentPlugin(ports,verifyCandidateAgentMaterial);}
+function createCheckedJobAgentPlugin(ports,verifyMaterial){
  if(['loadOriginalBinding','assertOriginalIsolation','assertStaticImageFiles','revokeOriginalDispatch'].some(k=>typeof ports?.[k]!=='function'))unavailable('original job plugin producer missing');
  const now=ports.now??Date.now;
  return Object.freeze({id:JOB_PLUGIN_ID,async setup(ctx){
   if(ctx?.app?.version!=='2.0.11'||['agent','permission','tool','session','mcp','plugin'].some(k=>!ctx[k]))unavailable('actual pinned native plugin context');
-  const initial=checkSnapshot(await ports.loadOriginalBinding(),now()),binding=hash(initial.material.binding),selected=initial.agentName;
+  const initial=checkSnapshot(await ports.loadOriginalBinding(),now(),verifyMaterial),binding=hash(initial.material.binding),selected=initial.agentName;
   await ports.assertOriginalIsolation(initial);await ports.assertStaticImageFiles(initial);
   let fault=false,closed=false,lastMcpHash=null;const registrations=[];
   const abort=async()=>{fault=true;await ports.revokeOriginalDispatch(initial.admission,'CORE126_JOB_ENFORCEMENT_LOST');unavailable('original dispatch revoked');};
@@ -45,7 +49,7 @@ export function createCore126JobAgentPlugin(ports){
   const current=async(sessionID)=>{
    if(fault||closed)return abort();
    try{
-    const latest=checkSnapshot(await ports.loadOriginalBinding(),now());
+    const latest=checkSnapshot(await ports.loadOriginalBinding(),now(),verifyMaterial);
     if(hash(latest.material.binding)!==binding||latest.agentName!==selected||originalJsonHash(latest.material.agentConfig)!==initial.admission.agentHash)throw Error();
     await ports.assertOriginalIsolation(latest);await ports.assertStaticImageFiles(latest);
     const [agents,plugins,servers]=await Promise.all([ctx.agent.list(),ctx.plugin.list(),ctx.mcp.list()]);

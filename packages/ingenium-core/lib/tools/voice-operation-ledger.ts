@@ -1,3 +1,4 @@
+import {createOriginalAssistantSourceOwner,type OriginalAssistantSourceClaim,type OriginalAssistantSourceInspectors} from './voice-assistant-source.js';
 import { createHash } from "node:crypto";
 import { createVoiceCpuExtension, validateControl, initialCpu } from "./voice-operation-cpu.js";
 import type {CpuPrivate,VoiceControl} from "./voice-operation-contract.js";
@@ -19,6 +20,7 @@ export interface VoiceRetirement {operationId:string;owner:VoiceOwner;identity:C
 type Row=Record<string,any>;
 export interface VoiceSqlDb {prepare(sql:string):{get(...values:any[]):any;all(...values:any[]):any[];run(...values:any[]):{changes:number|bigint}}}
 export interface VoiceLedgerPorts<C> {
+  originalAssistantSources?:OriginalAssistantSourceInspectors<C>;
   db():VoiceSqlDb;transaction<T>(work:()=>T,mode:"deferred"|"immediate"):T;checkpoint():void;now():number;
   currentScope(context:C,scope:VoiceScope|null,action:"reserve"|"read"|"transition"|"settle"|"quarantine"):VerifiedVoiceContext;
   verifyRetirement(context:C,operation:Readonly<VoiceMetadata>,proof:unknown):VoiceRetirement;
@@ -140,10 +142,8 @@ export function createCoreVoiceOperationLedger<C>(ports:VoiceLedgerPorts<C>) {
     if(Number(result.changes)!==1)return fail("VOICE_REVISION_CONFLICT");
     const stored=get(row.operation_id);if(!stored)throw new Error("Voice operation vanished");return metadata(stored);
   }
-  const publicLedger={
-    reserve(context:C,input:unknown,ownerInput:unknown) {
+  function reserveWithinTransaction(context:C,input:unknown,ownerInput:unknown,assistantClaim:OriginalAssistantSourceClaim|null=null) {
       const original=validateVoiceOriginal(input),originalOwner=owner(ownerInput),originalHash=digest({original,owner:originalOwner});
-      return write(()=>{
         const current=authorize(context,original.scope,"reserve",true);
         if(!equal(current.owner,originalOwner))return fail("VOICE_ORIGINAL_OWNER_CHANGED",403);
         if(original.cpuIdentity&&!["instanceId","ownerId","ownerGeneration"].every(k=>original.cpuIdentity?.[k as keyof CpuIdentity]===originalOwner[k as keyof VoiceOwner]))return fail("VOICE_CPU_OWNER_CONFLICT",403);
@@ -161,7 +161,8 @@ export function createCoreVoiceOperationLedger<C>(ports:VoiceLedgerPorts<C>) {
           const control=get(original.controlOperationId);
           if(!control||control.kind!=="voice-cpu-supervisor"||control.scope_hash!==digest(original.scope)||control.resource_retired!==0||control.state!=="running"||!equal(JSON.parse(control.owner_json),originalOwner)||JSON.parse(control.control_json).workerBootId!==original.cpuIdentity.bootId)return fail("VOICE_CONTROL_UNAVAILABLE",403);
         }
-        if(original.parentOperationId){
+        if(assistantClaim!==null){sources.assertOriginalAssistantReservation(context,assistantClaim,original,originalOwner);}
+        else if(original.parentOperationId){
           const parent=get(original.parentOperationId);
           if(!parent||parent.scope_hash!==digest(original.scope)||parent.turn_generation!==original.turnGeneration||parent.kind!=="voice-agent-turn"||parent.deadline_at<=ports.now()
             ||(original.kind==="voice-speech-tts"?parent.state!=="terminal"||parent.outcome!=="completed"||!parent.result_fingerprint:parent.state!=="running"))return fail("VOICE_PARENT_UNAVAILABLE",403);
@@ -170,8 +171,10 @@ export function createCoreVoiceOperationLedger<C>(ports:VoiceLedgerPorts<C>) {
         ports.db().prepare("INSERT INTO veyra_voice_operations(operation_id,request_id,kind,scope_json,scope_hash,original_hash,original_json,input_sha256,actor_id,organization_id,project_id,runtime_id,workspace_id,user_epoch,workspace_epoch,runtime_epoch,turn_generation,parent_operation_id,cpu_identity_json,owner_json,deadline_at,control_operation_id,instance_id,owner_generation,control_json,cpu_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'reserved',?,?)")
           .run(original.operationId,original.requestId,original.kind,canonical(original.scope),digest(original.scope),originalHash,canonical(original),original.inputSha256,original.scope.actorId,original.scope.organizationId,original.scope.projectId,original.scope.runtimeId,current.workspaceId,current.userSecurityEpoch,current.workspaceSecurityEpoch,current.runtimeSecurityEpoch,original.turnGeneration,original.parentOperationId,original.cpuIdentity?canonical(original.cpuIdentity):null,canonical(originalOwner),original.deadlineAt,original.controlOperationId,originalOwner.instanceId,originalOwner.ownerGeneration,original.control?canonical({...original.control,workerBootId:null}):null,original.cpuIdentity?canonical(initialCpu(original.cpuIdentity)):null,now,now);
         const stored=get(original.operationId);if(!stored)throw new Error("Voice reserve was not retained");return {accepted:true,fresh:true,operation:metadata(stored)};
-      });
-    },
+  }
+  const sources=createOriginalAssistantSourceOwner(ports,{get,write,authorize,canonical,digest,equal,uuid,hash,integer,validateOriginal:validateVoiceOriginal,reserveAttached:reserveWithinTransaction});
+  const publicLedger={
+    reserve(context:C,input:unknown,ownerInput:unknown) {return write(()=>reserveWithinTransaction(context,input,ownerInput));},
     read(context:C,id:string):VoiceMetadata|null {
       if(!uuid(id))return fail("VOICE_OPERATION_INVALID",422);
       return ports.transaction(()=>{const row=get(id);authorize(context,row?validateVoiceScope(JSON.parse(row.scope_json)):null,"read",false);return row?metadata(row):null;},"deferred");
@@ -223,5 +226,5 @@ export function createCoreVoiceOperationLedger<C>(ports:VoiceLedgerPorts<C>) {
       });
     },
   };
-  return Object.assign(publicLedger,createVoiceCpuExtension(ports,{get,write,authorize,metadata,update,reserve:publicLedger.reserve,canonical,digest,equal,owner,uuid,hash,integer,text,exact,fail}));
+  return Object.assign(publicLedger,{reserveOriginalAssistantSource:sources.reserveOriginalAssistantSource,reserveAttachedAssistantTts:sources.reserveAttachedAssistantTts,spendOriginalAssistantSource:sources.spendOriginalAssistantSource,fenceOriginalAssistantSources:sources.fenceOriginalAssistantSources,requireOriginalAssistantCpuLive:sources.requireOriginalAssistantCpuLive},createVoiceCpuExtension(ports,{get,write,authorize,metadata,update,reserve:publicLedger.reserve,requireOriginalAssistantCpuLive:sources.requireOriginalAssistantCpuLive,canonical,digest,equal,owner,uuid,hash,integer,text,exact,fail}));
 }

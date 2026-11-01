@@ -6,6 +6,18 @@ if [ "$(id -u)" -ne 1000 ] || [ "$(id -g)" -ne 1000 ]; then
   exit 1
 fi
 
+# Explicit v2 branch, without a Project default/sentinel/adoption.
+case "${INGENIUM_EXECUTION_SCOPE:-project}" in
+  workspace)
+    if [ "${INGENIUM_PROJECT+x}" = x ] || [ "${INGENIUM_PROJECT_ID+x}" = x ] || [ "${INGENIUM_PROJECT_NAME+x}" = x ]; then
+      echo "ERROR: ambiguous runtime scope"; exit 1
+    fi
+    exec node /app/services/ingenium-api/dist/scripts/runtime-workspace-bootstrap.mjs
+    ;;
+  project) ;;
+  *) echo "ERROR: runtime scope unavailable"; exit 1 ;;
+esac
+
 for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGANIZATION_ID INGENIUM_RUNTIME_ID INGENIUM_RUNTIME_OWNER_ID INGENIUM_WORKSPACE_ID INGENIUM_STORAGE_MAPPING_HASH; do
   eval "value=\${$name:-}"
   if [ -z "$value" ]; then
@@ -21,6 +33,13 @@ if [ "$HOME" != "/home/appuser" ] || [ "$XDG_CONFIG_HOME" != "/home/appuser/.con
 fi
 
 case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
+  candidate)
+    export OPENCODE_CONFIG_PROJECT_DISABLE="1"
+    export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
+    export OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/job-opencode.json"
+    unset OPENCODE_CONFIG_CONTENT
+    exec node /app/services/ingenium-api/dist/scripts/runtime-candidate-bootstrap.js
+    ;;
   job)
     export OPENCODE_CONFIG_PROJECT_DISABLE="1"
     export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
@@ -71,10 +90,8 @@ mkdir -p \
   "/home/appuser/.config/opencode/runtime/agents" \
   "/home/appuser/.config/opencode/runtime" \
   "/home/appuser/.local/share/opencode/log" \
-  "/home/appuser/.local/state" \
-  "/home/appuser/vscode-data/user-data" \
-  "/home/appuser/vscode-data/extensions"
-chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state" "/home/appuser/vscode-data"
+  "/home/appuser/.local/state"
+chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state"
 chmod 0700 "/home/appuser/.config/opencode/runtime"
 
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents

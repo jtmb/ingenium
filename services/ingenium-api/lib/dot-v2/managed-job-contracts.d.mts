@@ -1,3 +1,4 @@
+import type {Core126ImageOwner} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
 import type {Core126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
 import type {ChildProcess} from "node:child_process";
 import type {IncomingHttpHeaders} from "node:http";
@@ -96,6 +97,8 @@ export interface Core126Profiles {
 export type ManagedJobCredential=mcpCredentials.ManagedJobCredential;
 export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential"|"withdrawManagedJobDispatch">;
 export interface Core126OwnerPorts {
+ imageOwner?:Core126ImageOwner;
+ originalCandidate?:{require(context:CoreActorContext,selection:Core126Selection):void};
  approvedDot?:{authorize(context:unknown,selection:Core126Selection,action:"execute"|"read"|"cancel"):boolean;describe(context:unknown,selection:Core126Selection):import("./dot-original-context.js").OriginalDotDeclaration|undefined;assertCurrent(admission:ManagedJobAdmission,selection:Core126Selection):void};
  getDb:typeof getDb;execTransaction:typeof execTransaction;checkpointAfterWrite:typeof checkpointAfterWrite;
  jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent"|"finishJobRun"|"cancelJobRun">;
@@ -111,7 +114,9 @@ export interface OriginalCandidateLease {readonly [originalCandidateLeaseBrand]:
 export interface Core126Owner {
  admissionPurpose(runId:string):ManagedAdmissionPurpose;
  /** Closed until the original image/physical-parent/source/canary constructor is installed. No lease parameter. */
- prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<never>;
+ prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<OriginalCandidateLease>;
+ describeCandidateLease(lease:OriginalCandidateLease):Readonly<{purpose:"candidate-inert-v1";candidateIntentHash:string;runId:string;attemptId:string;stage:"prepared-no-child-material"}>;
+ candidateLaunchMaterial():never;
  /** Private Root composition only; these are never HTTP operations or permission grants. */
  factsForImagePreparation(selection:Core126Selection,context:CoreActorContext):Core126Facts;
  factsForOriginalImageCheck(runId:string):Core126Facts;

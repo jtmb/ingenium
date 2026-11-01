@@ -13,8 +13,8 @@ export function hostedSelection(value) {
   const keys=value&&Object.hasOwn(value,'expectedProjectId')?[...selectionFields,'expectedProjectId']:selectionFields;
   if (!exact(value, keys) || selectionFields.some(k => !text(value[k]))
     || value.runtimeId==='compatibility'
-    || (value.expectedProjectId!==undefined&&!text(value.expectedProjectId))) fail();
-  // Missing client Project ID is just a workspace lookup, not projectless scope.
+    || (value.expectedProjectId!==undefined&&value.expectedProjectId!==null&&!text(value.expectedProjectId))) fail();
+  // Only the server-owned binding profile determines projectless scope; an optional null expectation narrows that lookup.
   return Object.freeze(Object.fromEntries([...selectionFields,
     ...(value.expectedProjectId===undefined?[]:['expectedProjectId'])].map(k => [k,value[k]])));
 }
@@ -23,8 +23,8 @@ export function sameSelection(a,b) { return selectionFields.every(k => a?.[k] ==
 export function hostedBinding(value, selected) {
   hostedSelection(selected);
   if (!exact(value, [...bindingFields,'schemaVersion','available','canChange','canForget'])
-    || value.schemaVersion !== 1 || value.available !== true || !sameSelection(value,selected)
-    || !text(value.projectId) || !text(value.contextConversationId) || !hash(value.scopeHash) || !hash(value.bindingHash)
+    || !((value.schemaVersion===1&&text(value.projectId))||(value.schemaVersion===2&&value.projectId===null)) || value.available !== true || !sameSelection(value,selected)
+    || !text(value.contextConversationId) || !hash(value.scopeHash) || !hash(value.bindingHash)
     || !integer(value.bindingEpoch) || typeof value.canChange !== 'boolean' || typeof value.canForget !== 'boolean') fail();
   return Object.freeze({ ...value });
 }

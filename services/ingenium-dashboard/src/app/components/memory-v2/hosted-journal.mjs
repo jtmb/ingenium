@@ -7,7 +7,7 @@ function validateIdentity(identity,binding) {
     ||identity.scopeHash!==binding.scopeHash||!text(identity.chatId)||!hash(identity.bindingHash)||!integer(identity.bindingEpoch))fail();
   let axes;try{axes=JSON.parse(identity.scopeKey);}catch{fail();}
   if(!Array.isArray(axes)||axes.length!==10||axes[0]!==binding.actorUserId||axes[1]!==binding.organizationId||axes[7]!==binding.scopeHash
-    ||axes.slice(0,7).some(v=>!text(v))||!hash(axes[8])||!integer(axes[9])
+    ||axes[2]!==binding.projectId||axes.slice(0,7).some((v,index)=>index===2&&v===null&&binding.schemaVersion===2?false:!text(v))||!hash(axes[8])||!integer(axes[9])
     ||axes[5]!==identity.chatId||axes[8]!==identity.bindingHash||axes[9]!==identity.bindingEpoch)fail();
 }
 function policyRecord(v,binding) {

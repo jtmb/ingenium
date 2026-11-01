@@ -7,6 +7,10 @@ set -eu
 # OpenCode V2 requires HTTP basic auth; use this identity's private copy,
 # never an ACL on the proxy's owner-private secret.
 opencode_server_password=""
+if [ "${INGENIUM_EXECUTION_SCOPE:-project}" = workspace ]; then
+  if [ ! -r /run/ingenium-runtime/opencode-server-password ]; then echo "ERROR: workspace OpenCode secret unavailable"; exit 1; fi
+  opencode_server_password="$(cat /run/ingenium-runtime/opencode-server-password)"
+else
 for candidate in \
   /run/ingenium-secrets/ttyd/opencode-server-password \
   /run/ingenium-runtime/opencode-server-password; do
@@ -15,6 +19,7 @@ for candidate in \
     break
   fi
 done
+fi
 
 # Keep the browser-facing terminal free of inherited credentials. OpenCode's
 # server process owns MCP/plugin access; this process is only an attach client.

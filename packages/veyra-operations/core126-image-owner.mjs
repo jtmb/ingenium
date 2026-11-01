@@ -1,5 +1,8 @@
+import {readInstalledCandidateSource,assertCandidateMeasuredClosure} from './core126-candidate-observation.mjs';
+import {assertCandidateInertIntentLive,MAX_CANDIDATE_LEASE_MS} from '../../tools/veyra-release/core126-candidate-intent.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {CORE126_PROTOCOL,UUID,hash,originalJsonHash,freeze,hex,imageId,text,integer,validateManifest,unavailable} from './core126-image-contract.mjs';
+const candidateImageOwners=new WeakMap();
 const clients=new WeakMap(),observations=new WeakMap(),registries=new WeakMap(),definitions=new WeakMap();
 const limitsOf=r=>Object.fromEntries(['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].map(k=>[k,r[k]]));
 function scopeOf(f){
@@ -15,7 +18,14 @@ function validateProof(p,now){
 /** requestOriginalManager must be the original private authenticated client; no caller header/token owner. */
 export function createCore126ObservationClient({requestOriginalManager,now=Date.now}){
  if(typeof requestOriginalManager!=='function')unavailable('original authenticated manager client export');
- const owner={async acquire(runtimeId){
+ const owner={async acquireCandidate(runtimeId){
+  if(!UUID.test(runtimeId??''))unavailable('candidate runtime selection');
+  const raw=await requestOriginalManager('/v1/runtimes/'+encodeURIComponent(runtimeId)+'/candidate-closure');
+  if(!raw||Object.keys(raw).sort().join('|')!=='completedAt|exec|kind|measurement|proof|schemaVersion|selectionSha256'||raw.schemaVersion!==1||raw.kind!=='original-manager-unapproved-candidate-closure-v1'||!hex(raw.selectionSha256)||!raw.exec||Object.keys(raw.exec).sort().join('|')!=='exitCode|id|inspectSha256|stdoutSha256'||!hex(raw.exec.id)||raw.exec.exitCode!==0||!hex(raw.exec.stdoutSha256)||!hex(raw.exec.inspectSha256)||!integer(raw.completedAt))unavailable('actual original candidate measurement');
+  const value=freeze(structuredClone(raw));validateProof(value.proof,now());if(value.proof.parent.runtimeId!==runtimeId||value.completedAt<value.proof.observedAt||value.completedAt>=value.proof.expiresAt)unavailable('candidate observation deadline');
+  const token=Object.freeze({});observations.set(token,{client:owner,value:value.proof,candidate:value});return token;
+ },
+ async acquire(runtimeId){
   if(!UUID.test(runtimeId??''))unavailable('runtime selection');
   const raw=await requestOriginalManager('/v1/runtimes/'+encodeURIComponent(runtimeId)+'/job-role-proof');
   const value=freeze(structuredClone(validateProof(raw,now())));if(value.parent.runtimeId!==runtimeId)unavailable('manager runtime response');
@@ -51,9 +61,33 @@ function imageIdentity(s,proof,manifestSha,model,modelBindingHash){
 export function createCore126ImageOwner({client,registry,originalProvisionProfile,inTransaction,now=Date.now}){
  if(!clients.has(client)||!registries.has(registry)||typeof originalProvisionProfile!=='function'||typeof inTransaction!=='function')unavailable('original owner exports missing');
  const local=new AsyncLocalStorage();
+ const candidateLocal=new AsyncLocalStorage();
+ const candidateCurrent=f=>{
+  const lease=candidateLocal.getStore();if(!lease?.active)unavailable('original candidate request observation missing');
+  const proof=proofFrom(lease.observation,client,now()),raw=observations.get(lease.observation)?.candidate,selected=readInstalledCandidateSource(now()),d=selected.definition;
+  if(!raw||selected.selectionSha256!==lease.selectionSha256||raw.selectionSha256!==selected.selectionSha256)unavailable('original candidate source changed');
+  assertCandidateMeasuredClosure(raw.measurement,d);
+  const scope=bindOriginal(f,proof,originalProvisionProfile(f),d,now()),c=d.canary;
+  if(scope.runId!==d.selection.runId||f.job.id!==c.jobId||f.run.effective_service_principal_id!==c.principalId||scope.organizationId!==c.organizationId||scope.projectId!==c.projectId||scope.ownerUserId!==c.ownerUserId||scope.workspaceId!==c.workspaceId||scope.agentHash!==c.agentHash||f.job.agent!=='qualification'||f.job.prompt_template!=='qualification-canary'||hash(f.job.prompt_template)!==c.promptHash||!integer(f.principalEpoch))unavailable('actual original public canary scope changed');
+  if(lease.scopeHash&&lease.scopeHash!==hash(scope))unavailable('original candidate request scope changed');return{lease,scope,proof,d};
+ };
+ const candidateState={async observe(f,work){
+  if(inTransaction()||typeof work!=='function')unavailable('candidate observation outside original transaction required');
+  const selected=readInstalledCandidateSource(now()),observation=await client.acquireCandidate(f.runtime.id),lease={observation,selectionSha256:selected.selectionSha256,scopeHash:null,active:true,spent:false};
+  try{return await candidateLocal.run(lease,async()=>{const current=candidateCurrent(f);lease.scopeHash=hash(current.scope);return await work();});}finally{lease.active=false;}
+ },spend(f,attemptId,runIdentityHash){
+  const {lease,scope,proof,d}=candidateCurrent(f);if(lease.spent||!inTransaction()||!UUID.test(attemptId??'')||!hex(runIdentityHash))unavailable('one-use original candidate observation unavailable');lease.spent=true;
+  const issuedAt=now(),expiresAt=Math.min(issuedAt+MAX_CANDIDATE_LEASE_MS,d.validUntil,Date.parse(f.runtime.absoluteExpiresAt),Date.parse(f.runtime.idleExpiresAt),issuedAt+f.job.timeout_minutes*60000);
+  const intent={schemaVersion:1,purpose:'candidate-inert-v1',caseId:d.selection.caseId,nonce:d.selection.nonce,source:{revision:d.source.revision,sha256:d.source.sha256,filesSha256:hash(d.source.files)},imageId:d.imageId,artifactClosureSha256:hash(d.files),rawSchemaSha256:d.rawSchemaSha256,probeSha256:d.probeSha256,
+   parent:{runtimeId:scope.runtimeId,containerId:scope.parentContainerId,daemonId:proof.daemonId,hostId:proof.hostId,startIdentity:proof.parent.startIdentity,publicProfileSha256:proof.parent.publicProfileSha256,provisioningRevision:proof.parent.provisioningRevision},
+   scope:{organizationId:scope.organizationId,projectId:scope.projectId,ownerUserId:scope.ownerUserId,workspaceId:scope.workspaceId,bindingHash:scope.bindingHash,bindingEpoch:scope.bindingEpoch,principalId:f.run.effective_service_principal_id,principalSecurityEpoch:f.principalEpoch,grantRevision:f.run.authorization_revision},
+   run:{runId:scope.runId,jobId:scope.jobId,attemptId,runIdentityHash,jobRevision:f.run.job_revision,scheduleRevision:f.run.schedule_revision,promptHash:hash(f.job.prompt_template),agentHash:scope.agentHash},resource:{admissionId:scope.runId,runtimeRevision:scope.runtimeRevision,limits:scope.limits},canary:{agent:'qualification',model:'opencode/qualification-canary',tool:'ingenium_project_detail',projectName:d.canary.projectName,trapOrigin:'http://127.0.0.1:39261',catalogSha256:d.catalogSha256},issuedAt:new Date(issuedAt).toISOString(),expiresAt:new Date(expiresAt).toISOString()};
+  assertCandidateInertIntentLive(intent,issuedAt);return freeze({intent,selectionSha256:lease.selectionSha256});
+ }};
+
  function current(f){const lease=local.getStore();if(!lease?.active)unavailable('fresh request-scoped observation missing');const proof=proofFrom(lease.observation,client,now()),d=definition(lease.definition,registry,now());
   const scope=bindOriginal(f,proof,originalProvisionProfile(f),d.manifest,now());if(hash(scope)!==lease.scopeHash)unavailable('request scope changed');return{scope,proof,d};}
- return Object.freeze({
+ const owner=Object.freeze({
   async withFreshOriginalJobRole(f,work){
    if(inTransaction())unavailable('manager observation must precede Core transaction');if(typeof work!=='function')unavailable('request continuation');
    const observation=await client.acquire(f.runtime.id),proof=proofFrom(observation,client,now()),def=await registry.load(proof.parent.imageId),d=definition(def,registry,now());
@@ -76,6 +110,7 @@ export function createCore126ImageOwner({client,registry,originalProvisionProfil
    if(admission.profileId!=='core126-image:'+d.approval.manifestSha256||admission.profileHash!==imageIdentity(scope,proof,d.approval.manifestSha256,admission.model,admission.modelBindingHash)||admission.imageId!==proof.parent.imageId||admission.parentContainerId!==proof.parent.id||admission.daemonId!==proof.daemonId||admission.provisioningRevision!==proof.parent.provisioningRevision)unavailable('original qualified admission changed');return true;
   },
  });
+ candidateImageOwners.set(owner,candidateState);return owner;
 }
 /** Manager calls after its own fresh raw Docker probe before EACH create/start.
  * The admitted Core profile hash was previously bound to the original projection. */
@@ -84,3 +119,8 @@ export function assertAdmissionOriginalImage(admission,proof,definitionToken,reg
  const scope={runId:admission.runId,jobId:admission.jobId,projectId:admission.projectId,organizationId:admission.organizationId,ownerUserId:admission.ownerUserId,runtimeId:admission.runtimeId,runtimeRevision:admission.runtimeRevision,parentContainerId:admission.parentContainerId,workspaceId:admission.workspaceId,bindingHash:admission.bindingHash,bindingEpoch:admission.bindingEpoch,limits:admission.limits,agentHash:admission.agentHash};
  if(!Number.isFinite(Date.parse(admission.deadlineAt))||Date.parse(admission.deadlineAt)<=now||hash(admission.approvedScopes)!==hash(d.manifest.approvedScopes)||admission.organizationId!==p.organizationId||admission.projectId!==p.projectId||admission.ownerUserId!==p.ownerUserId||admission.workspaceId!==p.workspaceId||p.name!=='/ingenium-runtime-'+admission.runtimeId.replaceAll('-','')||p.memoryBytes!==admission.limits.memoryBytes||p.nanoCpus!==admission.limits.cpuMillis*1000000||p.effectivePids!==Math.min(admission.limits.pidsLimit,admission.limits.processLimit)||hash(proof.image.config)!==hash(d.manifest.config)||admission.profileId!=='core126-image:'+d.approval.manifestSha256||admission.imageId!==p.imageId||d.manifest.imageId!==p.imageId||admission.parentContainerId!==p.id||admission.runtimeId!==p.runtimeId||admission.bindingHash!==p.bindingHash||admission.bindingEpoch!==p.bindingEpoch||admission.daemonId!==proof.daemonId||admission.provisioningRevision!==p.provisioningRevision||admission.profileHash!==imageIdentity(scope,proof,d.approval.manifestSha256,admission.model,admission.modelBindingHash))unavailable('fresh manager effect image/profile proof changed');return true;
 }
+
+/** Observation/data construction only; Core must authorize and commit the original
+ * candidate claim before minting its own lexical execution lease. */
+export function withOriginalCandidateSourceObservation(owner,facts,work){const state=candidateImageOwners.get(owner);if(!state)unavailable('same original image owner required');return state.observe(facts,work);}
+export function spendOriginalCandidateSourceObservation(owner,facts,attemptId,runIdentityHash){const state=candidateImageOwners.get(owner);if(!state)unavailable('same original image owner required');return state.spend(facts,attemptId,runIdentityHash);}

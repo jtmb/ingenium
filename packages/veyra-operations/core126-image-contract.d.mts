@@ -20,3 +20,5 @@ export interface Core126Manifest {
 export function validateManifest(value:unknown):Core126Manifest;
 /** Sanitizes the original Docker inspect result, returning hashes instead of Env/profile contents. */
 export function publicContainer(container:unknown):Core126ParentProof;
+/** Existing migration099 identity syntax; DATA validation is not authority. */
+export const SERVICE_PRINCIPAL_ID:RegExp;

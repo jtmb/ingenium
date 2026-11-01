@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "./api";
+import { useOptionalAuth } from "./AuthContext";
 
 const STORAGE_KEY = "ingenium_active_project";
 const GLOBAL_CACHE_KEY = "ingenium_global_project";
@@ -30,35 +31,19 @@ export function clearRevokedProjectSelection(): void {
   try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(GLOBAL_CACHE_KEY); } catch { /* storage is optional */ }
 }
 
-/**
- * Module-level cache for the global project name.
- *
- * Two-tier caching:
- * 1. `resolvedGlobalProject` — in-memory cache, survives React re-renders
- * 2. `fetchPromise` — deduplicates concurrent calls so multiple components
- *    hydrating at the same time share a single in-flight fetch
- *
- * Without this, every `useProject()` call in a tree of components would fire
- * its own API request on first render.
- */
-let resolvedGlobalProject: string | null = null;
 export type ProjectSummary = { name: string; is_global?: boolean | number; archived_at?: string };
-let fetchPromise: Promise<ProjectSummary[]> | null = null;
 
+// Project grants belong to the current browser session. Never retain a fulfilled
+// project-list promise across remounts, sign-in changes or session replacement.
 async function fetchProjects(): Promise<ProjectSummary[]> {
-  if (fetchPromise) return fetchPromise;
+  const response = await api.projects.list();
+  return Array.isArray(response.data) ? response.data : [];
+}
 
-  fetchPromise = api.projects.list()
-    .then((response) => Array.isArray(response.data) ? response.data : [])
-    .catch((error: unknown) => {
-      // Do not permanently cache a transient dashboard/API failure. A later
-      // mount should be able to retry resolution instead of reusing a rejected
-      // promise forever.
-      fetchPromise = null;
-      throw error;
-    });
-
-  return fetchPromise;
+function useProjectIdentityKey(): string {
+  const auth = useOptionalAuth();
+  return JSON.stringify([auth?.user.id ?? null, auth?.user.status ?? null,
+    auth?.session.id ?? null, auth?.installationAdmin ?? false]);
 }
 
 /**
@@ -128,7 +113,9 @@ export function resolveProjectSelection(
 
 /** Resolve the server-designated global project for instance-wide settings. */
 export function useGlobalProject(): GlobalProjectState {
-  const [state, setState] = useState<GlobalProjectState>({
+  const identityKey = useProjectIdentityKey();
+  const [state, setState] = useState<GlobalProjectState & { identityKey: string }>({
+    identityKey,
     project: null,
     loading: true,
     error: null,
@@ -140,11 +127,12 @@ export function useGlobalProject(): GlobalProjectState {
       .then((projects) => {
         if (cancelled) return;
         const project = resolveGlobalProjectName(projects);
-        setState({ project, loading: false, error: null });
+        setState({ identityKey, project, loading: false, error: null });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         setState({
+          identityKey,
           project: null,
           loading: false,
           error: error instanceof Error ? error : new Error("Unable to resolve the global project"),
@@ -152,9 +140,9 @@ export function useGlobalProject(): GlobalProjectState {
       });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [identityKey]);
 
-  return state;
+  return state.identityKey === identityKey ? state : {project: null, loading: true, error: null};
 }
 
 /**
@@ -163,13 +151,14 @@ export function useGlobalProject(): GlobalProjectState {
  * Priority (highest first):
  *  1. `?project=` URL parameter — explicit override (persisted to localStorage)
  *  2. localStorage `ingenium_active_project` — last user selection via ProjectSelector
- *  3. API fetch — find the project with `is_global=1` (cached in localStorage)
+ *  3. Fresh authorized API fetch — find the project with `is_global=1`
  *
  * The result remains unresolved until the API validates it. This avoids an
  * unverified URL/storage value or a failed canonical-global lookup causing a
  * project-scoped route to fetch another project's data.
  */
 export function useProjectResolution(): ProjectResolutionState {
+  const identityKey = useProjectIdentityKey();
   const searchParams = useSearchParams();
   const fromUrl = searchParams.get("project");
 
@@ -180,13 +169,9 @@ export function useProjectResolution(): ProjectResolutionState {
     return {
       explicitProject,
       hasExplicitPreference,
-      requestKey: resolveInitialProject(
-        fromUrl,
-        storedProject,
-        hasExplicitPreference ? null : resolvedGlobalProject ?? readStoredProject(GLOBAL_CACHE_KEY),
-      ),
+      requestKey: JSON.stringify([identityKey, fromUrl, storedProject]),
     };
-  }, [fromUrl]);
+  }, [fromUrl, identityKey]);
 
   const [state, setState] = useState<ProjectResolutionState & { requestKey: string | null }>({
     project: null,
@@ -204,13 +189,6 @@ export function useProjectResolution(): ProjectResolutionState {
         if (cancelled) return;
 
         const resolution = resolveProjectSelection(projects, preference.explicitProject);
-        if (resolution.project && !preference.hasExplicitPreference) {
-          resolvedGlobalProject = resolution.project;
-        }
-        if (!resolution.project && !preference.hasExplicitPreference) {
-          resolvedGlobalProject = null;
-        }
-
         setState({
           ...resolution,
           loading: false,
@@ -267,7 +245,13 @@ export function useProjectResolution(): ProjectResolutionState {
 const ActiveProjectContext = createContext<string | null>(null);
 
 /** Render children only after the dashboard has a validated active project. */
-export function ProjectProvider({ children }: { children: ReactNode }) {
+export function ProjectProvider({ children, projectless = false }: { children: ReactNode; projectless?: boolean }) {
+  return projectless ? <ActiveProjectContext.Provider value={null}>{children}</ActiveProjectContext.Provider> : <ResolvedProjectProvider>{children}</ResolvedProjectProvider>;
+}
+
+export function useOptionalProject(): string | null { return useContext(ActiveProjectContext); }
+
+function ResolvedProjectProvider({ children }: { children: ReactNode }) {
   const state = useProjectResolution();
 
   if (state.loading) {

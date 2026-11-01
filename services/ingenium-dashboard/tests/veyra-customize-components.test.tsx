@@ -9,6 +9,7 @@ const { listPlugins, listSkills, listProjects, request } = vi.hoisted(() => ({
 vi.mock("../src/lib/api", () => ({ request, api: {
   plugins: { list: listPlugins }, skills: { list: listSkills }, projects: { list: listProjects },
 } }));
+vi.mock("../src/lib/AuthContext",()=>({useAuth:()=>({user:{id:"fixture-actor"}})}));
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "active-project" }));
 vi.mock("next/image", () => ({
   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
@@ -185,14 +186,30 @@ describe("default hosted catalog bindings", () => {
     expect(listPlugins).not.toHaveBeenCalled();
   });
 
-  it("fails closed on full read denial and leaves unconfigured Personal unavailable", async () => {
+  it("fails closed on both project and Personal read denial without substituting storage", async () => {
     listProjects.mockResolvedValue({data: [{id: "current", name: "active-project"}]});
     request.mockRejectedValue(new Error("Catalog denied"));
     render(<CustomizeSurface kind="skill" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Skills could not be loaded");
     fireEvent.click(screen.getByRole("button", {name: "Personal", exact: true}));
-    expect(screen.getByText("Personal scope is not exposed by the current service.")).toBeVisible();
-    expect(request).toHaveBeenCalledTimes(2);
+    await screen.findByText("This scoped catalog could not be loaded. Check access and refresh; no other scope was substituted.");
+    expect(request).toHaveBeenCalledTimes(3);
+    const params=new URL("https://fixture.invalid"+request.mock.calls[2][0]).searchParams;expect(params.get("projectId")).toBe("current");expect(params.get("visibility")).toBe("personal");
     expect(listSkills).not.toHaveBeenCalled();
   });
+});
+
+it("loads the hosted Public catalog through the session-owned projection instead of the legacy unavailable pane",async()=>{
+ listProjects.mockResolvedValue({data:[{id:"current",name:"active-project"}]});
+ const legacy=request.getMockImplementation()!;
+ request.mockImplementation(async(path:string)=>{
+  if(path.startsWith("/customize/catalog?"))return {data:{projectId:"current",kind:"plugin",visibility:"public",data:[],next:null}};
+  return legacy(path);
+ });
+ render(<CustomizeSurface kind="plugin"/>);await screen.findByRole("heading",{name:"Plugins",exact:true});
+ fireEvent.click(screen.getByRole("button",{name:"Public",exact:true}));await screen.findByText("No resources in this scope.");
+ expect(screen.queryByText(/Public catalog is unavailable/)).toBeNull();
+ const calls=request.mock.calls.filter(([path])=>path.startsWith("/customize/catalog?"));expect(calls).toHaveLength(1);
+ const params=new URL("https://fixture.invalid"+calls[0][0]).searchParams;expect(params.get("projectId")).toBe("current");expect(params.get("visibility")).toBe("public");expect(params.has("ownerUserId")).toBe(false);expect(params.has("project")).toBe(false);
+ expect(listPlugins).not.toHaveBeenCalled();expect(listSkills).not.toHaveBeenCalled();
 });

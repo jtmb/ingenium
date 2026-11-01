@@ -203,7 +203,7 @@ function sendGlobalProjectUnavailable(res: Response): void {
 
 function resolveDocsProjectId(res: Response): string | null {
   let project: { id: string } | undefined;
-  try { project = projects.getGlobalProject(); } catch { sendGlobalProjectUnavailable(res); return null; }
+  try { project = projects.getInstallationStorageProject(); } catch { sendGlobalProjectUnavailable(res); return null; }
   if (!project) { sendGlobalProjectUnavailable(res); return null; }
   return project.id;
 }

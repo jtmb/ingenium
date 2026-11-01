@@ -2,7 +2,7 @@ export interface MemoryScope {
   organizationId: string; ownerUserId: string; hostId: string; environmentId: string;
   projectId: string | null; workspaceId: string; bindingHash: string; bindingEpoch: number; visibility: "private";
 }
-export type MemoryPermission = "read" | "write-policy" | "generate" | "read-source" | "forget" | "backup" | "restore";
+export type MemoryPermission = "read" | "write-policy" | "generate" | "read-source" | "forget" | "preview-forget" | "backup" | "restore";
 export interface HostPolicy { revision: number; enabled: boolean; generate: boolean; useMemory: boolean; externalContext: boolean }
 export interface ScopePolicy { schemaVersion: 1; scopeHash: string; bindingHash: string; bindingEpoch: number; policy: HostPolicy; available: true }
 export interface ChatPolicy { revision: number; useMemory: boolean; contribute: boolean }

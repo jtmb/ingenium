@@ -380,7 +380,7 @@ export function indexPublishedDoc(page: { id: number; space_id?: number; title: 
   }
   const space = db.prepare("SELECT organization_id FROM docs_spaces WHERE id = ?").get(page.space_id) as { organization_id: string } | undefined;
   if (!space) return;
-  const project = db.prepare("SELECT id FROM projects WHERE organization_id = ? AND is_global = 1 AND archived_at IS NULL").get(space.organization_id) as { id: string } | undefined
+  const project = db.prepare("SELECT id FROM projects WHERE organization_id = ? AND EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=projects.id) AND archived_at IS NULL").get(space.organization_id) as { id: string } | undefined
     ?? db.prepare("SELECT id FROM projects WHERE organization_id = ? AND archived_at IS NULL ORDER BY created_at, id LIMIT 1").get(space.organization_id) as { id: string } | undefined;
   if (!project) return;
   const sourcePath = `docs-page:${page.id}`;

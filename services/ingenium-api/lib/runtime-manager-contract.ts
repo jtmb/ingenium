@@ -259,3 +259,107 @@ export function buildRuntimeContainerSpec(
     NetworkingConfig: { EndpointsConfig: { [config.network]: {} } },
   };
 }
+
+
+/** Explicit v2 request. No synthetic Project/name and no v1 decoder widening. */
+export type WorkspaceRuntimeProvisionRequestV2=Omit<RuntimeProvisionRequest,'projectId'|'projectName'|'originalRequestId'>&{schemaVersion:2;scopeKind:'workspace';projectId:null;originalRequestId:string};
+function assertWorkspaceProvisionRequestV2(input: WorkspaceRuntimeProvisionRequestV2, mapping: RuntimeWorkspaceMapping): void {
+  if (input.schemaVersion!==2||input.scopeKind!=="workspace"||input.projectId!==null)throw new Error("Invalid workspace execution version");
+  if (![input.originalRequestId, input.runtimeId, input.organizationId, input.ownerUserId].every((value) => UUID.test(value))) {
+    throw new Error("Invalid runtime identity");
+  }
+  if (input.backendName !== `ingenium-runtime-${input.runtimeId.replaceAll("-", "")}` || !SAFE_NAME.test(input.backendName)) {
+    throw new Error("Invalid runtime backend name");
+  }
+  if (Object.hasOwn(input,"projectName") || input.workspaceId !== mapping.id || input.storagePath !== mapping.hostPath
+    || !SHA256.test(input.storageMappingHash)
+    || input.storageMappingHash !== runtimeStorageMappingHash(input.workspaceId, input.storagePath)) {
+    throw new Error("Invalid runtime workspace scope");
+  }
+  if (!Number.isSafeInteger(input.securityEpoch) || input.securityEpoch < 0
+    || !Number.isSafeInteger(input.revision) || input.revision < 0 || !CAPABILITY.test(input.capability)) {
+    throw new Error("Invalid runtime capability");
+  }
+  const expiresAt = new Date(input.capabilityExpiresAt);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) throw new Error("Invalid runtime capability expiry");
+  const { cpuMillis, memoryBytes, pidsLimit, diskBytes, processLimit } = input.limits;
+  if (![cpuMillis, memoryBytes, pidsLimit, diskBytes, processLimit].every(Number.isSafeInteger)
+    || cpuMillis < 100 || cpuMillis > 64_000 || memoryBytes < 134_217_728 || memoryBytes > 274_877_906_944
+    || pidsLimit < 16 || pidsLimit > 65_536 || diskBytes < 67_108_864 || diskBytes > 1_099_511_627_776
+    || processLimit < 16 || processLimit > pidsLimit) throw new Error("Invalid runtime resource limits");
+}
+
+export function workspaceRuntimeLabelsV2(input: WorkspaceRuntimeProvisionRequestV2): Record<string, string> {
+  return {
+    "com.ingenium.managed": "runtime-manager",
+    "com.ingenium.runtime.id": input.runtimeId,
+    "com.ingenium.runtime.organization": input.organizationId,
+    "com.ingenium.runtime.scope": "workspace",
+    "com.ingenium.runtime.owner": input.ownerUserId,
+    "com.ingenium.runtime.workspace": input.workspaceId,
+    "com.ingenium.runtime.storage": input.storageMappingHash,
+    "com.ingenium.runtime.security-epoch": String(input.securityEpoch),
+    "com.ingenium.runtime.revision": String(input.revision),
+  };
+}
+
+export function buildWorkspaceRuntimeContainerSpecV2(
+  input: WorkspaceRuntimeProvisionRequestV2,
+  mapping: RuntimeWorkspaceMapping,
+  config: RuntimeManagerConfig,
+): DockerContainerSpec {
+  assertWorkspaceProvisionRequestV2(input, mapping);
+  assertManagerConfig(config);
+  return {
+    Image: config.image,
+    User: "1000:1000",
+    WorkingDir: "/workspace",
+    AttachStdin: true,
+    AttachStdout: false,
+    AttachStderr: false,
+    OpenStdin: true,
+    StdinOnce: true,
+    Env: [
+      "HOME=/home/appuser",
+      "XDG_CONFIG_HOME=/home/appuser/.config",
+      "XDG_DATA_HOME=/home/appuser/.local/share",
+      "XDG_STATE_HOME=/home/appuser/.local/state",
+      "TMPDIR=/home/appuser/.tmp",
+      `INGENIUM_API_URL=${config.apiUrl}`,
+      "INGENIUM_EXECUTION_SCOPE=workspace",
+      `INGENIUM_ORGANIZATION_ID=${input.organizationId}`,
+      `INGENIUM_RUNTIME_ID=${input.runtimeId}`,
+      `INGENIUM_RUNTIME_OWNER_ID=${input.ownerUserId}`,
+      `INGENIUM_WORKSPACE_ID=${input.workspaceId}`,
+      `INGENIUM_STORAGE_MAPPING_HASH=${input.storageMappingHash}`,
+      "INGENIUM_WORKTREE=/workspace",
+      "INGENIUM_MCP_AUDIENCE=runtime",
+      "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
+      "INGENIUM_DEPLOYMENT_MODE=user-runtime",
+    ],
+    Labels: workspaceRuntimeLabelsV2(input),
+    StopTimeout: 30,
+    HostConfig: {
+      AutoRemove: false,
+      Binds: [`${mapping.hostPath}:/workspace:rw,rprivate`],
+      CapDrop: ["ALL"],
+      Init: true,
+      Memory: input.limits.memoryBytes,
+      NanoCpus: input.limits.cpuMillis * 1_000_000,
+      NetworkMode: config.network,
+      PidsLimit: Math.min(input.limits.pidsLimit, input.limits.processLimit),
+      PortBindings: {},
+      PublishAllPorts: false,
+      ReadonlyRootfs: true,
+      SecurityOpt: ["no-new-privileges:true"],
+      Tmpfs: {
+        "/home/appuser": `rw,nosuid,nodev,size=${input.limits.diskBytes},uid=1000,gid=1000,mode=0700`,
+        "/home/appuser/.tmp": "rw,exec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
+        "/run/ingenium-runtime": "rw,noexec,nosuid,nodev,size=1048576,uid=1000,gid=1000,mode=0700",
+        "/tmp": "rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
+      },
+      Ulimits: [],
+    },
+    NetworkingConfig: { EndpointsConfig: { [config.network]: {} } },
+  };
+}

@@ -3,6 +3,7 @@ import {getDb,execTransaction} from '../db.js';
 import * as plugins from './plugins.js';
 import type {Plugin} from '../schema.js';
 import {getPluginsBase,getPluginConfigPath,isGlobal} from './paths.js';
+import {committedPluginProjectionPaths} from './plugin-projection-transition.js';
 import {existsSync,lstatSync,readFileSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -17,6 +18,9 @@ export function withPluginCommand<T>(id:string,work:()=>T,related:readonly strin
  finally{commandId=undefined;relatedOriginals=[];}
 }
 export function assertPluginCommandClear(projectId:string):void{
+ const project=getDb().prepare('SELECT is_global FROM projects WHERE id=? AND archived_at IS NULL').get(projectId) as {is_global:number}|undefined;
+ if(!project)throw new Error('Active plugin project required');
+ if(project.is_global===0)committedPluginProjectionPaths(projectId);
  const allowed=[commandId??'',...relatedOriginals];
  const placeholders=allowed.map(()=>'?').join(',');
  if(getDb().prepare("SELECT 1 FROM customize_commands WHERE project_id=? AND kind='plugin' AND result_json IS NULL AND id NOT IN ("+placeholders+") LIMIT 1").get(projectId,...allowed))throw new Error('Unresolved original plugin command');

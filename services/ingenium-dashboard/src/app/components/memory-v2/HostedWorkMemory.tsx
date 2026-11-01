@@ -103,7 +103,7 @@ function BoundMemory({binding,session}:{binding:HostedBinding;session:Session}) 
       journal.management.remove(record.operationId);
       if(mounted.current){setUnknown(journal.management.get());setNotice('The original memory change has a committed receipt.');await controller.activate(identity);}
     }catch(error){
-      if(stored&&definitiveRejection(error)){
+      if(stored&&(api.rejectedBeforeDispatch(error)||definitiveRejection(error))){
         try{journal.management.remove(record.operationId);if(mounted.current){setUnknown(journal.management.get());await controller.activate(identity);}}
         catch{if(mounted.current)setUnknown(record);}
       }
@@ -131,7 +131,7 @@ function BoundMemory({binding,session}:{binding:HostedBinding;session:Session}) 
     {notice&&<p role="status">{notice}</p>}
     {unknown&&<div role="status"><p>A memory management operation has an unknown outcome.</p>
       <button type="button" disabled={busy} onClick={()=>{void reconcile();}}>Check original operation receipt</button></div>}
-    <p>Stored recall inspection is separate from turn context. No prompt-consumption receipt is available here.</p>
+    <p>These controls manage saved recall. Memory used in the current response is not shown here.</p>
     <button type="button" disabled={busy} onClick={()=>{void inspect();}}>Inspect stored recall</button>
     {page&&<section aria-label="Qualified recall page">
       <p>{page.items.length} qualified memories returned on this page. The total in this scope is unknown.</p>

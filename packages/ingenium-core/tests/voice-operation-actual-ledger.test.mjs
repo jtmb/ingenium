@@ -12,8 +12,9 @@ import * as crypto from 'node:crypto';
 
 const cpuModule=new SourceTextModule(stripTypeScriptTypes(readFileSync(new URL('../lib/tools/voice-operation-cpu.ts',import.meta.url),'utf8'),{mode:'strip'}));
 const ledgerModule=new SourceTextModule(stripTypeScriptTypes(readFileSync(new URL('../lib/tools/voice-operation-ledger.ts',import.meta.url),'utf8'),{mode:'strip'}));
+const sourceModule=new SourceTextModule(stripTypeScriptTypes(readFileSync(new URL('../lib/tools/voice-assistant-source.ts',import.meta.url),'utf8'),{mode:'strip'}));
 const cryptoModule=new SyntheticModule(Object.keys(crypto),function(){for(const [key,value]of Object.entries(crypto))this.setExport(key,value);});
-await ledgerModule.link(specifier=>specifier==='node:crypto'?cryptoModule:specifier==='./voice-operation-cpu.js'?cpuModule:(()=>{throw new Error('Unexpected module '+specifier);})());
+await ledgerModule.link(specifier=>specifier==='node:crypto'?cryptoModule:specifier==='./voice-operation-cpu.js'?cpuModule:specifier==='./voice-assistant-source.js'?sourceModule:(()=>{throw new Error('Unexpected module '+specifier);})());
 await ledgerModule.evaluate();
 const {createCoreVoiceOperationLedger,validateVoiceScope,validateCpuIdentity}=ledgerModule.namespace;
 

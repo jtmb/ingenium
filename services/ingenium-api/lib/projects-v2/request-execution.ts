@@ -1,3 +1,6 @@
+import {createWorkspaceRequestChatResolver} from './workspace-chat-binding.mjs';
+import {findWorkspaceEngineContext,getWorkspaceContext,resolveWorkspaceEngineMapping,getWorkspaceExecutionV2} from './projectless-context.mjs';
+import {resolveCurrentWorkspaceV2Execution} from './workspace-v2-placement.mjs';
 import {createCanonicalRequestChatResolver} from "./canonical-chat-binding.mjs";
 import type { Request } from "express";
 import { findRequestChatSourceIds, isRequestChatConversationActive } from "./request-chat-source.mjs";
@@ -74,14 +77,34 @@ const resolver = createRequestExecutionResolvers({
 });
 
 export function resolveRequestExecution(request: Request, selection: RequestExecutionSelection) {
+  if(selection.projectId===null)return resolveCurrentWorkspaceV2Execution(request,selection);
   return resolver.resolveRequestExecution(request, selection);
 }
 export function resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string, purpose: RequestChatPurpose = "active") {
+  if(execution.projectId===null)return workspaceChatResolver(request,execution,chatId,purpose,'engine');
   return resolver.resolveRequestChatBinding(request, execution, chatId, purpose);
 }
 
 /** Canonical Context ID adapter; the original engine-ID resolver remains unchanged. */
-export const resolveRequestContextChatBinding=createCanonicalRequestChatResolver({
+const projectContextChatResolver=createCanonicalRequestChatResolver({
   resolveExecution:resolveRequestExecution,resolveEngineChat:resolveRequestChatBinding,
   getConversation:contextConversations.getContextConversation,
 });
+
+function workspaceChatResolver(request:Request,execution:RequestExecutionFacts,id:string,purpose:RequestChatPurpose,representation:'engine'|'context') {
+ // Resolve these live module bindings after initialization: the original engine
+ // client also imports the voice/request binding owner. No authority is cached.
+ try {
+  return createWorkspaceRequestChatResolver({resolveExecution:getWorkspaceExecutionV2,findEngineContext:findWorkspaceEngineContext,getConversation:getWorkspaceContext,resolveMapping:resolveWorkspaceEngineMapping})(request,execution,id,purpose,representation);
+ } catch(error) {
+  if(error instanceof RequestExecutionError)throw error;
+  const code=error&&typeof error==='object'&&'code' in error?error.code:null;
+  if(['WORKSPACE_ENGINE_MAPPING_UNAVAILABLE','WORKSPACE_CONTEXT_NOT_FOUND','WORKSPACE_CONTEXT_ARCHIVED','WORKSPACE_CONTEXT_GENERATION_CHANGED'].includes(String(code)))throw new RequestExecutionError('CHAT_BINDING_UNAVAILABLE',404);
+  if(['WORKSPACE_CONTEXT_SCOPE_UNAVAILABLE','WORKSPACE_CONTEXT_IDENTITY_UNAVAILABLE'].includes(String(code)))throw new RequestExecutionError('EXECUTION_SCOPE_UNAVAILABLE',404);
+  if(['WORKSPACE_CONTEXT_MIGRATION_UNAVAILABLE','WORKSPACE_CONTEXT_EXECUTION_UNAVAILABLE','WORKSPACE_ORIGINAL_PROVISION_UNAVAILABLE'].includes(String(code)))throw new RequestExecutionError('EXECUTION_PLACEMENT_UNAVAILABLE',503);
+  throw error;
+ }
+}
+export function resolveRequestContextChatBinding(request:Request,execution:RequestExecutionFacts,contextId:string,purpose:RequestChatPurpose='active'){
+ return execution.projectId===null?workspaceChatResolver(request,execution,contextId,purpose,'context'):projectContextChatResolver(request,execution,contextId,purpose);
+}

@@ -18,16 +18,18 @@ function csv(line) {
     else if (c === ',' && !quoted) { cells.push(value); value = ''; } else value += c; }
   if (quoted) fail('RECORD_CSV'); cells.push(value); if (cells.length !== 3) fail('RECORD_COLUMNS'); return cells;
 }
-export function verifyInstalledClosure(siteRoot, packages, vadExpected) {
+export function verifyInstalledClosure(siteRoot, packages, vadExpected, environmentRoot = siteRoot) {
   if (process.platform !== 'linux') fail('QUALIFIED_PLATFORM_ENVIRONMENT_CUSTODY_UNSUPPORTED');
-  siteRoot = resolve(siteRoot); const files = new Map(), directories = [];
+  siteRoot = resolve(siteRoot); environmentRoot = resolve(environmentRoot);
+  if(relative(environmentRoot,siteRoot).startsWith('..'))fail('SITE_OUTSIDE_ENVIRONMENT');
+  const files = new Map(), directories = [];
   function walk(path, depth = 0) {
     if (depth > 64 || files.size > 131072) fail('ENVIRONMENT_BOUND');
     const stat = lstatSync(path); if (stat.isSymbolicLink() || stat.uid !== 0 || stat.mode & 0o022) fail('ENVIRONMENT_NOT_SEALED');
     if (stat.isDirectory()) { directories.push(path); for (const name of readdirSync(path)) walk(resolve(path, name), depth + 1); }
     else if (stat.isFile() && stat.nlink === 1) files.set(path, digest(path)); else fail('ENVIRONMENT_FILE_CUSTODY');
   }
-  walk(siteRoot);
+  walk(environmentRoot);
   const expected = new Map(packages.map(p => [normalize(p.name), p.version])), observed = new Set(), declared = new Set();
   const infos = directories.filter(path => relative(siteRoot, path).split(sep).length === 1 && path.endsWith('.dist-info'));
   if (expected.size !== 32 || infos.length !== expected.size) fail('EXACT_DEPENDENCY_CLOSURE_REQUIRED');
@@ -38,7 +40,7 @@ export function verifyInstalledClosure(siteRoot, packages, vadExpected) {
     const recordPath = resolve(info, 'RECORD'), record = readFileSync(recordPath, 'utf8'); if (Buffer.byteLength(record) > 8388608) fail('RECORD_BOUND');
     for (const line of record.split(/\r?\n/).filter(Boolean)) {
       const [name, encoded, length] = csv(line), path = resolve(siteRoot, name);
-      if (relative(siteRoot, path).startsWith('..') || !files.has(path)) fail('RECORD_OUTSIDE_DECLARED_ENVIRONMENT');
+      if (relative(environmentRoot, path).startsWith('..') || !files.has(path)) fail('RECORD_OUTSIDE_DECLARED_ENVIRONMENT');
       declared.add(path); const fact = files.get(path);
       if (!encoded && !length && path === recordPath) continue;
       if (!encoded.startsWith('sha256=') || Buffer.from(fact.sha256, 'hex').toString('base64url') !== encoded.slice(7)

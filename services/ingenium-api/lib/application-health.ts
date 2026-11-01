@@ -130,9 +130,9 @@ export function getSynthesisHealthSnapshot(projectId?: string): SynthesisHealthS
   const intervalMs = getSynthesisInterval();
   const base = { intervalMs, lastRunAt: null, lastProcessedAt: null, nextEstimate: null, stats: null };
   try {
-    const id = projectId ?? projects.getGlobalProject()?.id;
+    const id = projectId ?? projects.getInstallationStorageProject()?.id;
     if (!id) return { ...base, application: { name: "synthesis-engine", state: "idle",
-      description: "Synthesis pipeline", detail: "No global project configured", required: false } };
+      description: "Synthesis pipeline", detail: "Installation storage is not configured", required: false } };
     const status = synthesis.getSynthesisStatus(id);
     const lastProcessedAt = status.last_synthesis_at;
     const snapshot = { intervalMs, lastRunAt: lastProcessedAt, lastProcessedAt, nextEstimate: null,

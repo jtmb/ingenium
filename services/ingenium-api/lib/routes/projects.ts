@@ -1,6 +1,11 @@
 import { Router } from "express";
-import { authorization, projects } from "ingenium-core";
-import { authorizeProjectRestoreTarget } from "../authorization-policy.js";
+import { authorization, projects, authentication, isInstallationStorageProject } from "ingenium-core";
+import { authorizeProjectRestoreTarget,toAuthorizationPrincipal } from "../authorization-policy.js";
+import {createPositivePluginProjectionOwner,createCapturedProjectRestoreOwner,PluginProjectionTransitionRequired} from "ingenium-core/lib/tools/plugin-projection-transition";
+import {randomUUID} from "node:crypto";
+import {authenticateRequestWithoutActivity} from "../middleware/auth.js";
+import {csrfMiddleware} from "../middleware/csrf.js";
+import {AppError} from "../middleware/errors.js";
 
 const CANONICAL_GLOBAL_PROJECT_NAME = "global-default";
 
@@ -22,7 +27,7 @@ function rejectGlobalProjectLifecycle(res: import("express").Response): void {
 }
 
 function hasGlobalRole(name: string): boolean {
-  return Boolean(projects.getProject(name)?.is_global);
+  const project=projects.getProject(name);return !!project&&isInstallationStorageProject(project.id);
 }
 
 /** Handles /api/v1/projects — project CRUD while trusted lifecycle owns global designation. */
@@ -63,7 +68,17 @@ projectsRouter.post("/", (req, res) => {
     rejectGlobalProjectLifecycle(res);
     return;
   }
-  const project = projects.createProject(name, false, typeof organization_id === "string" ? organization_id : undefined);
+  const existedBeforeCreate=projects.getProject(name);
+  const creator=req.principal?.type==="user"?toAuthorizationPrincipal(req.principal):undefined;
+  const initializerSessionId=req.principal?.type==="user"?req.principal.session?.id:undefined;
+  const project = projects.createProject(name, false, typeof organization_id === "string" ? organization_id : undefined,creator);
+  if(!existedBeforeCreate&&creator?.type==="browser-user"){
+    const assertInitializerCurrent=()=>{authenticateRequestWithoutActivity(req);csrfMiddleware(req,res,()=>{});const p=req.principal;if(p?.type!=="user"||!p.session||p.id!==creator.id||p.session.id!==initializerSessionId)throw new AppError("Authentication is required","UNAUTHORIZED",401);};
+    assertInitializerCurrent();
+    try{const owner=createPositivePluginProjectionOwner(creator,assertInitializerCurrent),review=owner.review("fresh-project",project.id,"new-empty");
+    const receipt=owner.apply({operationId:randomUUID(),mode:"fresh-project",projectId:project.id,configOrigin:"new-empty",reviewSha256:review.reviewSha256});
+    assertInitializerCurrent();if(receipt.outcome!=="succeeded"){res.status(503).json({data:project,error:{code:"PROJECT_NAMESPACE_INITIALIZATION_UNCONFIRMED",message:"Project data is retained; inspect its original initialization before plugin use"},original:receipt});return;}}catch(e){assertInitializerCurrent();res.status(503).json({data:project,error:{code:"PROJECT_NAMESPACE_INITIALIZATION_REFUSED",message:"Project data is retained; review its namespace before plugin use",reason:e instanceof Error&&/^[A-Z][A-Z0-9_]{1,120}$/.test(e.message)?e.message:"PRIVATE_OWNER_REVIEW_REQUIRED"}});return;}
+  }
   res.status(201).json({ data: project });
 });
 
@@ -137,7 +152,7 @@ projectsRouter.post("/:name/restore", (req, res) => {
   }
   if (!target && !req.principal) {
     const project = projects.getProject(req.params.name!);
-    if (project) target = { id: project.id, name: project.name, organizationId: project.organization_id, archived: Boolean(project.archived_at), isGlobal: Boolean(project.is_global) };
+    if (project) target = { id: project.id, name: project.name, organizationId: project.organization_id, archived: project.archived_at!==null, isGlobal: isInstallationStorageProject(project.id) };
   }
   if (!target || target.name !== req.params.name || !target.archived) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
@@ -147,7 +162,15 @@ projectsRouter.post("/:name/restore", (req, res) => {
     rejectGlobalProjectLifecycle(res);
     return;
   }
-  const restored = projects.unarchiveProjectById(target.id);
+  let restored:boolean;
+  try{restored=projects.unarchiveProjectById(target.id);}catch(error){
+    if(!(error instanceof PluginProjectionTransitionRequired))throw error;
+    const original=req.principal;if(original?.type!=="user"||!original.session)throw new AppError("A browser session is required to restore this project","UNAUTHORIZED",401);
+    const actor=original.id,sessionId=original.session.id,principal=toAuthorizationPrincipal(original),projectId=target.id;
+    const current=()=>{authenticateRequestWithoutActivity(req);csrfMiddleware(req,res,()=>{});const p=req.principal;if(p?.type!=="user"||!p.session||p.id!==actor||p.session.id!==sessionId)throw new AppError("Authentication is required","UNAUTHORIZED",401);if(!authentication.hasRecentStepUp(p.session))throw new AppError("Recent authentication is required","STEP_UP_REQUIRED",403);};
+    current();const operationId=req.body?.operationId??randomUUID();if(typeof operationId!=="string"||!/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(operationId))throw new AppError("Invalid restore operation","VALIDATION_ERROR",422);
+    const owner=createCapturedProjectRestoreOwner(principal,current),review=owner.review(projectId),receipt=owner.apply({operationId,projectId,reviewSha256:review.reviewSha256});current();res.json({data:{restored:true,namespace_setup_required:true,plugins_activated:false},original:receipt});return;
+  }
   if (!restored) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Resource not found" } });
     return;

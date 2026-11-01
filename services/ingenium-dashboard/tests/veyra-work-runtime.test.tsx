@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({
   push: vi.fn(), replace: vi.fn(), query: "settings=general", send: vi.fn(), chat: vi.fn(), config: vi.fn(), create: vi.fn(),
   sessionReady: true, isStreaming: false, chatError: null as string | null,
   nativeVariant: "", extraSessions: [] as Array<{ id: string; title: string }>,
-  connected: true,
+  connected: true, stopWorkspace: vi.fn(),
   messages: [] as Array<{ id: string; role: "user" | "assistant"; content: string; parts: []; timestamp: number }>,
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/work", useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.query) }));
@@ -15,12 +15,12 @@ vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: React.ComponentProps<"a">) => <a {...props}>{children}</a> }));
 vi.mock("../src/lib/AuthContext", () => ({ useAuth: () => ({ user: { id: "owner-a" } }) }));
 vi.mock("../src/lib/OrganizationContext", () => ({ useOrganization: () => ({ active: { id: "org-a" } }) }));
-vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "project-a" }));
+vi.mock("../src/lib/ProjectContext", () => ({ useOptionalProject: () => "project-a" }));
 vi.mock("../src/lib/RuntimeContext", () => {
   const client = { chat: { config: state.config }, sessions: { diff: vi.fn() } };
   return { useRuntime: () => ({
   client: state.connected ? client : null,
-  runtimeId: "runtime-a", projectName: "project-a", workspace: { confirmedWorkspaceId: "workspace-a", mode: "isolated" },
+  runtimeId: "runtime-a", projectName: "project-a", workspace: { confirmedWorkspaceId: "workspace-a", mode: "isolated",canStop:true,stop:state.stopWorkspace },
 }) }; });
 vi.mock("../src/lib/use-opencode-sessions", () => ({ useOpenCodeSessions: () => ({
   sessions: [{ id: "ses-a", title: "First task", model: { id: "model-a", providerID: "provider-a", variant: state.nativeVariant || undefined } }, { id: "ses-b", title: "Second task", model: { id: "model-a", providerID: "provider-a" } }, ...state.extraSessions],
@@ -37,6 +37,9 @@ vi.mock("../src/app/chat/components/ChatMessages", () => ({ default: ({ messages
 vi.mock("../src/app/chat/components/ActivityDrawer", () => ({ default: () => null }));
 vi.mock("../src/app/components/veyra-work/WorkWebFrame", () => ({ default: ({ sessionId }: { sessionId: string | null }) => <p>Upstream frame: {sessionId}</p> }));
 vi.mock("../src/app/components/RuntimeWorkspacePicker", () => ({ default: () => <p>Workspace picker</p> }));
+
+// Project catalog has its own genuine actor/scope and lifecycle mounted tests.
+vi.mock("../src/app/components/projects-v2/HostedWorkspaceProjects", () => ({default: () => <span>Actor project catalog</span>}));
 
 import WorkRuntime from "../src/app/components/veyra-work/WorkRuntime";
 
@@ -259,7 +262,7 @@ describe("Work runtime boundary and conversation state", () => {
     const binding = { ownerId: "owner-a", organizationId: "org-a", projectId: "canonical-project-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: "ses-a" };
     const startVoice = vi.fn();
     const slots = { binding, voiceControl: <button type="button" onClick={startVoice}>Call selected agent</button>,
-      memoryControl: <button type="button">Memory policy</button>, dot: <button type="button">Your dot</button>, panels: <p>Bound domain panel</p> };
+      memoryControl: <button type="button">Memory policy</button>, dot: <button type="button">veyra-bot</button>, panels: <p>Bound domain panel</p> };
     const view = render(<WorkRuntime {...props} projectRefId="canonical-project-a" contextSlots={slots} />);
     await screen.findByRole("button", { name: "Call selected agent" });
     fireEvent.click(screen.getByRole("button", { name: "Call selected agent" }));
@@ -431,3 +434,6 @@ describe("Work runtime boundary and conversation state", () => {
     expect(state.send).not.toHaveBeenCalled();
   });
 });
+
+it('workspace stop is available in the existing environment menu for an empty settled draft',async()=>{render(<WorkRuntime {...props}/>);await waitFor(()=>expect(state.config).toHaveBeenCalled());fireEvent.click(screen.getByText('Isolated runtime'));const stop=await screen.findByRole('button',{name:'Stop workspace'});await waitFor(()=>expect((stop as HTMLButtonElement).disabled).toBe(false));fireEvent.click(stop);expect(state.stopWorkspace).toHaveBeenCalledTimes(1)});
+it('workspace stop protects unsent text and active streaming',async()=>{const mounted=render(<WorkRuntime {...props}/>);await waitFor(()=>expect(state.config).toHaveBeenCalled());fireEvent.click(screen.getByText('Isolated runtime'));const input=screen.getByRole('textbox',{name:'Message the working agent'});fireEvent.change(input,{target:{value:'Keep this exact draft'}});expect((screen.getByRole('button',{name:'Stop workspace'})as HTMLButtonElement).disabled).toBe(true);fireEvent.change(input,{target:{value:''}});state.isStreaming=true;mounted.rerender(<WorkRuntime {...props}/>);expect((screen.getByRole('button',{name:'Stop workspace'})as HTMLButtonElement).disabled).toBe(true)});

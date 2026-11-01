@@ -41,3 +41,9 @@ The editor also occurs in both the main code-server layer and the vendor
 security overlay, so dropping only the main editor layer is insufficient.
 No new image assembly, smaller build reserve, publication, or deployment is
 accepted by this content qualification.
+
+## Streaming frozen application artifacts
+
+ops/oci_artifact_layer.py encodes one explicit frozen /app file BOM into a caller-owned output stream. It installs nothing and creates no dependency copy, cache, registry upload or image import. It closes directory metadata deterministically, sets declared root ownership/modes and source epoch, and checks each original file descriptor, bytes, digest and post-read identity. Invalid targets, whiteout names, mutable modes, unsupported types and unlisted symlink targets refuse. A partial stream is never a successful artifact and must be discarded/refused by its owner.
+
+Twenty-six in-memory controls pass. A separate actual-data check streamed all 299,836,147 backend dependency bytes twice into hash-only sinks. Both passes produced a 58,578,201-byte compressed layer with the same compressed digest and complete diff ID. Observed peak RSS was 88,768,512 bytes. Neither layer stream was saved. This qualifies that dependency-layer encoder and frozen input set only; Core/API/SDK/email/frontend artifacts and full image/platform/source/OS provenance remain separate gates. The recorded Python/zlib toolchain is part of that observation. It does not establish reproducibility across different toolchains.

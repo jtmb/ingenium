@@ -1,3 +1,4 @@
+import {isInstallationStorageProject} from './paths.js';
 import { randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import {
@@ -135,7 +136,7 @@ function assertScopeOwnership(projectId: string, input: ChildMcpServerDefinition
   if (!owner) throw new ChildMcpServerError("MCP_SERVER_NOT_FOUND");
 
   if (input.scope === "global") {
-    if (owner.is_global !== 1) throw new ChildMcpServerError("GLOBAL_SCOPE_REQUIRED");
+    if (!isInstallationStorageProject(projectId)) throw new ChildMcpServerError("GLOBAL_SCOPE_REQUIRED");
     const localCollision = db.prepare(
       `SELECT 1
        FROM mcp_child_server_definitions AS definition
@@ -155,7 +156,7 @@ function assertScopeOwnership(projectId: string, input: ChildMcpServerDefinition
      INNER JOIN projects AS project ON project.id = definition.project_id
      WHERE definition.name = ?
        AND definition.scope = 'global'
-       AND project.is_global = 1
+       AND EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=project.id)
        AND project.archived_at IS NULL
      LIMIT 1`,
   ).get(input.name);
@@ -209,7 +210,7 @@ export function listEffectiveChildMcpServers(projectId: string): ChildMcpServerV
      WHERE project.archived_at IS NULL
        AND (
          definition.project_id = ?
-         OR (definition.scope = 'global' AND project.is_global = 1)
+         OR (definition.scope = 'global' AND EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=project.id))
        )
      ORDER BY CASE WHEN definition.project_id = ? THEN 0 ELSE 1 END, definition.name`,
   ).all(projectId, projectId);
@@ -383,7 +384,7 @@ export function listEffectiveChildMcpTools(projectId: string): EffectiveChildMcp
        AND project.archived_at IS NULL
        AND (
          definition.project_id = ?
-         OR (definition.scope = 'global' AND project.is_global = 1)
+         OR (definition.scope = 'global' AND EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=project.id))
        )
      ORDER BY tool.canonical_name`,
   ).all(projectId) as EffectiveChildMcpTool[];

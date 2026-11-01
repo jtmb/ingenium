@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {DatabaseSync} from "node:sqlite";
+import Database from "better-sqlite3";
 import {readFileSync,readdirSync} from "node:fs";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {inventoryLegacyReferences,legacyDigest,importLegacyCatalog,migrationInventoryHash} from "../lib/projects-v2/migration.mjs";
 
-test("authoritative migration schema copy: additive catalog leaves all existing tables unchanged", () => {
-  const db=new DatabaseSync(":memory:");
+test("authoritative migration schema copy: additive catalog leaves all existing tables unchanged", async () => {
+  const db=new Database(":memory:");
   db.function("sha256",{deterministic:true},value=>createHash("sha256").update(String(value)).digest("hex"));
   try {
     const directory=process.env.VEYRA_PROJECTS_MIGRATIONS_DIR ?
@@ -34,7 +34,18 @@ test("authoritative migration schema copy: additive catalog leaves all existing 
     const before=legacyDigest(db,beforeTables);
     const referencesBefore=inventoryLegacyReferences(db);
     assert.ok(referencesBefore.length>30);
-    for (const source of allocated) apply(source);
+    // Follow the real Core evolution owners. These versions rebuild tables
+    // before consuming their SQL tails and verify predecessor recipe/schema hashes.
+    const evolutionOwners={
+      136:["migration-136.mjs","installContext136"],
+      137:["migration-137.mjs","installWorkspaceExecution137"],
+      138:["migration-138.mjs","installWorkspaceSuccessors138"],
+    };
+    for (const source of allocated) {
+      const owner=evolutionOwners[Number(source.name.slice(0,3))];
+      if(owner){const module=await import(new URL(owner[0],directory));module[owner[1]](db);}
+      else apply(source);
+    }
     const catalogAllocated=Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='veyra_workspace_projects'").get());
     if(!catalogAllocated) db.exec(readFileSync(new URL("../lib/projects-v2/schema.sql",import.meta.url),"utf8"));
     assert.deepEqual(legacyDigest(db,beforeTables),before);

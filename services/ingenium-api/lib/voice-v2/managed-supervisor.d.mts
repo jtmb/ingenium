@@ -2,6 +2,7 @@ import type { CoreVoiceLedger, VoiceOperationAuthorities, voiceOperations } from
 import type { VoiceScope, VoiceTurn } from '../../../../packages/veyra-voice/session.mjs';
 import type { ManagedCpuProfile } from './managed-profile.mjs';
 import type { ChildProcess } from 'node:child_process';
+import type {OriginalAssistantSourceClaim,OriginalAssistantDispatchFacts} from 'ingenium-core';
 declare const originalScope: unique symbol;
 declare const originalDispatch: unique symbol;
 export interface CpuAdmission { readonly deadlineAt: number }
@@ -44,6 +45,14 @@ export interface ManagedCpuDependencies<C> {
 export class ManagedCpuSupervisor<C> {
   constructor(dependencies: ManagedCpuDependencies<C>);
   status(): CpuSupervisorStatus;
+  beginOriginalAttachmentScope(input:{context:C;scope:VoiceScope;deadlineAt:number;signal:AbortSignal}):AttachmentScopeBootstrap;
+  waitOriginalAttachmentScope(handle:AttachmentScopeBootstrap,signal:AbortSignal):Promise<CpuSupervisorStatus>;
+  bindOriginalAttachmentScope(handle:AttachmentScopeBootstrap,freshActualContext:C):C;
+  releaseOriginalAttachmentScope(handle:AttachmentScopeBootstrap):Promise<void>;
+  bindAttachmentContext(context:C):C;
+  captureAttachmentLease(context:C,scope:SupervisedCpuScope<C>,callId:string,deadlineAt:number):AttachmentCpuLease;
+  inspectAttachmentLease(lease:AttachmentCpuLease):AttachmentCpuFacts;
+  releaseAttachmentLease(lease:AttachmentCpuLease):Promise<void>;
   inspectResourceRetirement(proof:object):Readonly<{manager:ManagedCpuSupervisor<C>;scope:SupervisedCpuScope<C>;owner:voiceOperations.VoiceOwner;admission:CpuAdmission|null;retired:true;kind:"physical"|"sealed-before-fork"|"witness-retired"|"witness-before-fork"}>;
   isOwnedScope(value: unknown): value is SupervisedCpuScope<C>;
   requireOriginalResource: VoiceOperationAuthorities<C>['requireOriginalResource'];
@@ -51,8 +60,25 @@ export class ManagedCpuSupervisor<C> {
   openScope(input: { context: C; scope: VoiceScope; sessionId: string; deadlineAt: number; signal?: AbortSignal }): Promise<CpuSupervisorStatus>;
   releaseSession(input: { sessionId: string; scope: VoiceScope }): Promise<void>;
   reserveCpu(input: { context: C; scope: VoiceScope; turn: VoiceTurn; requestId: string; parentOperationId?: string | null; deadlineAt: number; kind: 'transcribe' | 'synthesize'; pcm?: Uint8Array; text?: string; voice?: string }): CpuDispatch;
+  reserveOriginalAssistantSource(context:C,actualPrivatePlan:object):OriginalAssistantSourceClaim;
+  reserveAttachedAssistantCpu(input:Parameters<ManagedCpuSupervisor<C>['reserveCpu']>[0],sourceClaim:OriginalAssistantSourceClaim):CpuDispatch;
+  spendOriginalAssistantSource(context:C,sourceClaim:OriginalAssistantSourceClaim,actualOpaqueDispatch:object):void;
+  fenceOriginalAssistantSources(actualOriginalCall:object,reason:string):void;
+  inspectOriginalAssistantCpuDispatch(context:C,actualOpaqueDispatch:object):OriginalAssistantDispatchFacts;
   executeCpu(handle: CpuDispatch, options?: { signal?: AbortSignal }): Promise<{ retired: true; resultAvailable: boolean; bytes?: Uint8Array; status?: number; operationId: string; requestId: string }>;
   inspectCpu(handle: CpuDispatch): voiceOperations.VoiceMetadata;
   cancelPrepared(handle: CpuDispatch): void;
   stopScope(scope?: SupervisedCpuScope<C>, deadlineAt?: number): Promise<void>;
 }
+
+export interface AttachmentCpuFacts {readonly scope:VoiceScope;readonly owner:voiceOperations.VoiceOwner;readonly controlOperationId:string;readonly profileDigest:string;readonly defaultVoice:string;readonly deadlineAt:number}
+declare const attachmentLease:unique symbol;
+export interface AttachmentCpuLease {readonly [attachmentLease]:true}
+// Insert into existing ManagedCpuSupervisor<C> declaration:
+// bindAttachmentContext(context:C):C;
+// captureAttachmentLease(context:C,scope:SupervisedCpuScope<C>,callId:string,deadlineAt:number):AttachmentCpuLease;
+// inspectAttachmentLease(lease:AttachmentCpuLease):AttachmentCpuFacts;
+// releaseAttachmentLease(lease:AttachmentCpuLease):Promise<void>;
+
+declare const attachmentScopeBootstrap:unique symbol;
+export interface AttachmentScopeBootstrap {readonly [attachmentScopeBootstrap]:true}

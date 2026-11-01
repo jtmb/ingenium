@@ -62,9 +62,6 @@ services:
       - ingenium-data:/app/.ingenium
       - opencode-config:/home/ingenium-opencode/.config
       - opencode-data:/home/ingenium-opencode/.local
-      # code-server is an administrator-grade, auth-none local profile with a
-      # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
-      - vscode-data:/home/ingenium-vscode/vscode-data
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
       - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
@@ -285,7 +282,6 @@ volumes:
   ingenium-data:
   opencode-config:
   opencode-data:
-  vscode-data:
 
 networks:
   runtime-control:

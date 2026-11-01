@@ -90,45 +90,12 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/cloudflared "https://github.co
     install -o root -g root -m 0555 /tmp/cloudflared /usr/local/bin/cloudflared && \
     cloudflared --version | grep -F "cloudflared version ${CLOUDFLARED_VERSION}" && \
     rm /tmp/cloudflared
-RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/releases/download/v4.143.1/code-server-4.143.1-linux-amd64.tar.gz" && \
-    echo "614877cf71005f14ea252bd2d9b1c12237cf7d73681ef150f0dff7f13849fdb5  /tmp/code-server.tar.gz" | sha256sum -c - && \
-    mkdir -p /usr/local/lib/code-server && \
-    tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1 && \
-    ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server && \
-    code-server --version | grep -Eq '^4\.143\.1([[:space:]]|$)' && \
-    rm /tmp/code-server.tar.gz
 # Upstream vendor bundles can lag compatible security patches. Verify expected old
 # identities, registry integrity and all resolved dependency ranges before overlaying.
 COPY --from=vendor-security /vendor-security/ /tmp/ingenium-vendor-security/
 COPY --chown=root:root --chmod=0444 scripts/install-vendor-security.mjs /tmp/install-vendor-security.mjs
 RUN node /tmp/install-vendor-security.mjs /tmp/ingenium-vendor-security && \
     rm -rf /tmp/ingenium-vendor-security /tmp/install-vendor-security.mjs
-COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
-COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs
-RUN set -eu; \
-    builtin_manifest="/usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json"; \
-    builtin_dir="$(dirname "$builtin_manifest")"; \
-    test -d "/usr/local/lib/code-server/lib/vscode/extensions"; \
-    test -d "$builtin_dir"; \
-    chmod 0755 "$builtin_dir"; \
-    chmod 0444 "$builtin_manifest"; \
-    test "$(stat -c '%U:%G:%a' "$builtin_manifest")" = "root:root:444"; \
-    node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest" "$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')"; \
-    rm /tmp/validate-vscode-theme-manifest.mjs
-RUN set -eu; \
-    extension_file="/usr/local/share/ingenium/vscode-extensions/sst-dev.opencode-0.0.13.vsix"; \
-    install -d -o root -g root -m 0755 /usr/local/share/ingenium/vscode-extensions; \
-    curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/sst-dev.opencode-0.0.13.vsix "https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix"; \
-    echo "e9a75751aa21fce3f9c9822d1f718043b1a9ba97e64c66b190a3fa85850c60d4  /tmp/sst-dev.opencode-0.0.13.vsix" | sha256sum -c -; \
-    install -o root -g root -m 0444 /tmp/sst-dev.opencode-0.0.13.vsix "$extension_file"; \
-    rm /tmp/sst-dev.opencode-0.0.13.vsix; \
-    extension_temp_dir="$(mktemp -d)"; \
-    code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --install-extension "$extension_file" --force; \
-    extension_list="$(code-server --user-data-dir "$extension_temp_dir/user-data" --extensions-dir "$extension_temp_dir/extensions" --list-extensions --show-versions)"; \
-    test "$extension_list" = "sst-dev.opencode@0.0.13"; \
-    EXTENSION_MANIFEST="$extension_temp_dir/extensions/sst-dev.opencode-0.0.13/package.json" CODE_SERVER_VSCODE_VERSION="$(code-server --version | sed -n 's/.* with Code \([0-9][0-9.]*\)$/\1/p')" node -e 'const fs=require("fs"); const manifest=JSON.parse(fs.readFileSync(process.env.EXTENSION_MANIFEST,"utf8")); const version=(value)=>{const match=/^(\d+)\.(\d+)\.(\d+)$/.exec(value ?? ""); return match ? match.slice(1).map(Number) : null;}; const compare=(left,right)=>left[0]-right[0] || left[1]-right[1] || left[2]-right[2]; const satisfies=(range,actual)=>range.split("||").some((clause)=>clause.trim().split(/\s+/).every((token)=>{if (token==="*" || token==="x") return true; const match=/(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/.exec(token); if (!match) return false; const [,operator="",major,minor="0",patch="0"]=match; const minimum=[Number(major),Number(minor === "x" || minor === "*" ? 0 : minor),Number(patch === "x" || patch === "*" ? 0 : patch)]; const result=compare(actual,minimum); if (minor === "x" || minor === "*") return actual[0]===minimum[0]; if (patch === "x" || patch === "*") return actual[0]===minimum[0] && actual[1]===minimum[1]; if (operator==="^") return result>=0 && (minimum[0] > 0 ? actual[0]===minimum[0] : minimum[1] > 0 ? actual[0]===0 && actual[1]===minimum[1] : actual[0]===0 && actual[1]===0 && actual[2]===minimum[2]); if (operator==="~") return result>=0 && actual[0]===minimum[0] && actual[1]===minimum[1]; return ({">":result>0,">=":result>=0,"<":result<0,"<=":result<=0,"=":result===0,"":result===0})[operator];})); const runtime=version(process.env.CODE_SERVER_VSCODE_VERSION); if (manifest.publisher!=="sst-dev" || manifest.name!=="opencode" || manifest.version!=="0.0.13" || typeof manifest.engines?.vscode!=="string" || !runtime || !satisfies(manifest.engines.vscode,runtime)) throw new Error("baked VSIX manifest identity or VS Code engine compatibility check failed");'; \
-    rm -rf "$extension_temp_dir"; \
-    test "$(stat -c '%U:%G:%a' "$extension_file")" = "root:root:444"
 RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64" && \
     echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /tmp/ttyd.x86_64" | sha256sum -c - && \
     mv /tmp/ttyd.x86_64 /usr/local/bin/ttyd && \
@@ -145,7 +112,6 @@ RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appus
     groupadd --system --gid 1104 ingenium-gateway && useradd --system --uid 1104 --gid 1104 --home-dir /home/ingenium-gateway --shell /usr/sbin/nologin ingenium-gateway && \
     groupadd --system --gid 1105 ingenium-opencode && useradd --system --uid 1105 --gid 1105 --groups ingenium-opencode-config,ingenium-opencode-restore --home-dir /home/ingenium-opencode --shell /usr/sbin/nologin ingenium-opencode && \
     groupadd --system --gid 1106 ingenium-ttyd && useradd --system --uid 1106 --gid 1106 --home-dir /home/ingenium-ttyd --shell /usr/sbin/nologin ingenium-ttyd && \
-    groupadd --system --gid 1107 ingenium-vscode && useradd --system --uid 1107 --gid 1107 --home-dir /home/ingenium-vscode --shell /usr/sbin/nologin ingenium-vscode && \
     groupadd --system --gid 1108 ingenium-restore && useradd --system --uid 1108 --gid 1108 --groups ingenium-api,ingenium-restore-data,ingenium-opencode-restore --home-dir /home/ingenium-restore --shell /usr/sbin/nologin ingenium-restore && \
     groupadd --system --gid 1109 ingenium-runtime-manager && useradd --system --uid 1109 --gid 1109 --home-dir /home/ingenium-runtime-manager --shell /usr/sbin/nologin ingenium-runtime-manager && \
     groupadd --system --gid 1110 ingenium-runtime-gateway && useradd --system --uid 1110 --gid 1110 --home-dir /home/ingenium-runtime-gateway --shell /usr/sbin/nologin ingenium-runtime-gateway && \
@@ -167,15 +133,13 @@ RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appus
     install -d -o ingenium-gateway -g ingenium-gateway -m 0700 /home/ingenium-gateway && \
     install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /home/ingenium-opencode && \
     install -d -o ingenium-ttyd -g ingenium-ttyd -m 0700 /home/ingenium-ttyd && \
-    install -d -o ingenium-vscode -g ingenium-vscode -m 0700 /home/ingenium-vscode && \
     install -d -o ingenium-restore -g ingenium-restore -m 0700 /home/ingenium-restore && \
     install -d -o ingenium-runtime-manager -g ingenium-runtime-manager -m 0700 /home/ingenium-runtime-manager && \
     install -d -o ingenium-runtime-gateway -g ingenium-runtime-gateway -m 0700 /home/ingenium-runtime-gateway && \
     install -d -o ingenium-cloudflare -g ingenium-cloudflare -m 0700 /run/ingenium-secrets/cloudflare && \
     install -d -o root -g root -m 0755 /usr/local/libexec && \
     install -o root -g ingenium-restore -m 0750 /usr/local/bin/node /usr/local/libexec/ingenium-restore-node && \
-    setcap cap_chown,cap_fowner=ep /usr/local/libexec/ingenium-restore-node && \
-    runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
+    setcap cap_chown,cap_fowner=ep /usr/local/libexec/ingenium-restore-node
 
 WORKDIR /app
 
@@ -219,6 +183,7 @@ RUN node /tmp/smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /u
     rm /tmp/smoke-opencode-plugin-load.mjs
 # Some configured builders retain checkout modes despite COPY --chmod. Normalize
 # these narrow executable inputs explicitly before the build-time smoke check.
+COPY --chown=root:root --chmod=0444 scripts/derive-workspace-opencode-config.mjs ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh
 RUN chmod 0555 \
@@ -238,7 +203,7 @@ COPY --chown=root:root supervisord.conf control-plane-supervisord.conf runtime-s
 COPY --chown=root:root --chmod=0555 scripts/docker-entrypoint.sh ./entrypoint.sh
 # `/dev/shm` is a container-runtime tmpfs. Do not create this VAULT-101 root at
 # build time: the entrypoint provisions and validates it on every container start.
-COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-cloudflare-tunnel.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
+COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-cloudflare-tunnel.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
 COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
 COPY --chown=root:root --chmod=0555 scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
 COPY --chown=root:root --chmod=0444 scripts/provision-opencode-mcp-credential.mjs ./scripts/
@@ -246,7 +211,7 @@ COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh sc
 COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
-COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
+COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
 # Validate the rendered Nginx configuration as its production user. Runtime
 # startup recreates these ephemeral directories before Nginx starts.
 RUN install -d -o ingenium-gateway -g ingenium-gateway -m 0700 \
@@ -273,6 +238,10 @@ COPY --chown=root:root config/computer-use.lock.json /usr/local/share/veyra/comp
 COPY --chown=root:root config/opencode-managed ./config/opencode-managed
 # Copy database migrations (needed for incremental DB upgrades)
 COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
+# Require the explicit candidate/authority artifacts; no discovery or runtime execution.
+RUN node -e 'const fs=require('\''node:fs'\'');const files=["/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-candidate-material.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-bootstrap-runtime.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-carrier.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-docker-stream.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-loopback.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-original-invocation.mjs","/app/services/ingenium-api/dist/lib/dot-v2/candidate-private-plugin.mjs","/app/services/ingenium-api/dist/scripts/runtime-candidate-bootstrap.js","/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-image-contract.mjs","/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-manager-proof.mjs","/app/services/ingenium-api/dist/lib/dot-v2/core126-actual-factory.js","/app/services/ingenium-api/dist/lib/dot-v2/dot-original-context.js","/app/services/ingenium-api/dist/lib/dot-v2/installed-dot-approved-scope.js","/app/services/ingenium-api/dist/lib/dot-v2/dot-approved-scope.mjs","/app/services/ingenium-api/dist/lib/dot-v2/dot-job-policy.mjs","/app/services/ingenium-api/dist/lib/dot-v2/repository.js","/app/services/ingenium-api/dist/lib/dot-v2/request-binding.js","/app/services/ingenium-api/dist/lib/dot-v2/service.js","/app/services/ingenium-api/dist/lib/dot-v2/schedule.js","/app/services/ingenium-api/dist/lib/dot-v2/existing-jobs.js","/app/services/ingenium-api/dist/lib/projects-v2/request-chat-source.mjs","/app/services/ingenium-api/dist/lib/job-response-verification.js","/app/services/ingenium-api/dist/lib/runtime-manager-client.js","/app/services/ingenium-api/dist/lib/runtime-manager-auth.js","/app/services/ingenium-api/dist/lib/runtime-placement-contract.js","/app/services/ingenium-api/dist/lib/dot-v2/core126-runtime.js","/app/services/ingenium-api/dist/lib/dot-v2/core126-provider-resolution.js","/app/services/ingenium-api/dist/lib/job-native-provider.js","/app/services/ingenium-api/dist/lib/opencode-client.js","/app/services/ingenium-api/dist/lib/dot-v2/managed-job-owner.mjs","/app/services/ingenium-api/dist/lib/dot-v2/managed-job-core-client.mjs","/app/services/ingenium-api/dist/lib/dot-v2/core126-broker.js","/app/services/ingenium-api/dist/lib/dot-v2/core126-broker.mjs","/app/packages/ingenium-core/dist/lib/index.js","/app/packages/ingenium-core/dist/lib/db.js","/app/packages/ingenium-core/dist/lib/schema.js","/app/packages/ingenium-core/dist/lib/tools/dot-execution-delegation.js","/app/packages/ingenium-core/dist/lib/tools/jobs.js","/app/packages/ingenium-core/dist/lib/tools/runtimes.js","/app/packages/ingenium-core/dist/lib/tools/context-conversations.js","/app/packages/ingenium-core/dist/lib/tools/trusted-job-events.js","/app/packages/ingenium-core/dist/lib/tools/agents.js","/app/packages/ingenium-core/dist/lib/tools/authorization.js","/app/packages/ingenium-core/dist/lib/tools/mcp-authorization-policy.js","/app/packages/ingenium-core/dist/lib/tools/job-providers.js","/app/packages/ingenium-core/dist/lib/tools/vault.js","/app/packages/ingenium-core/dist/lib/tools/runtime-original-provision.js","/app/packages/ingenium-core/dist/lib/tools/authentication.js"];for(const file of files){const st=fs.lstatSync(file);if(fs.realpathSync(file)!==file||!st.isFile()||st.isSymbolicLink()||st.uid!==0||st.gid!==0||(st.mode&0o022)||st.size<1)throw Error('\''Missing or mutable original candidate artifact: '\''+file);}'
+# Verify the same Core build-owned explicit restore helper closure and actual SQL132 consumer path.
+RUN node -e 'const fs=require('\''node:fs'\'');for(const file of ["/app/packages/ingenium-core/dist/lib/tools/backups.js","/app/packages/ingenium-core/dist/lib/tools/learned-memory-restore.mjs","/app/packages/ingenium-core/dist/lib/tools/learned-memory-restore.d.mts","/app/packages/ingenium-core/dist/lib/tools/voice-attachment-restore.mjs","/app/packages/ingenium-core/dist/lib/tools/voice-attachment-restore.d.mts","/app/packages/ingenium-core/dist/veyra-core-runtime-closure.json","/app/packages/ingenium-core/dist/data/migrations/132_voice_attachment_deliveries.sql"]){const st=fs.lstatSync(file);if(fs.realpathSync(file)!==file||!st.isFile()||st.isSymbolicLink()||st.uid!==0||st.gid!==0||(st.mode&0o022)||st.size<1)throw Error('\''Original Core restore artifact unavailable: '\''+file);}'
 # COPY already assigns root ownership. Avoid copying every unchanged inode into
 # a new overlay layer; repair only deviations, without following symbolic links.
 RUN find /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx \
@@ -283,9 +252,11 @@ RUN find /app/node_modules /app/packages /app/services /app/scripts /app/docs /a
     install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent /etc/opencode && \
     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
     install -o root -g root -m 0444 /app/config/opencode-managed/job-opencode.json /usr/local/share/ingenium/opencode-managed/job-opencode.json && \
+    install -o root -g root -m 0444 /app/config/opencode-managed/candidate-inert-catalog.json /usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json && \
     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-job-agent/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs && \
     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs && \
     install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md && \
+    node /app/scripts/derive-workspace-opencode-config.mjs && \
     ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json && \
     chown root:root /app /app/packages /app/services /app/services/ingenium-api /app/entrypoint.sh /app/control-plane-supervisord.conf /app/runtime-supervisord.conf /app/supervisord.conf && \
     chmod 0755 /app /app/packages /app/services /app/services/ingenium-api && chmod 0555 /app/scripts /app/entrypoint.sh /app/scripts/*.sh && \
@@ -301,11 +272,7 @@ RUN mkdir -p /app/config /app/.ingenium/logs /workspace && \
 # OpenCode persists configuration and state under its dedicated home directory.
 RUN mkdir -p /home/ingenium-opencode/.config/opencode /home/ingenium-opencode/.local/share/opencode/log && \
     chown -R ingenium-opencode:ingenium-opencode /home/ingenium-opencode
-# Docker initializes an empty named volume from this appuser-owned path. Keep
-# code-server state separate from OpenCode state so user data/extensions persist
-# without sharing an application data directory.
-RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/vscode-data/extensions && \
-    chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
+# The bundled editor was retired; preserve legacy data outside the new package.
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
 RUN echo '{"$schema":"https://opencode.ai/config.json","skills":[".opencode/skills"],"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/usr/local/share/veyra/computer-use-plugin","/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail","/app/packages/ingenium-extension/plugins/v2/goal"]}' > /app/config/opencode.container.json && \

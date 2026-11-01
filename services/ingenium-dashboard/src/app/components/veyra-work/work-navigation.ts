@@ -18,10 +18,10 @@ export function workConversationNavigation(input: {
   hash: string;
   sessionId: string;
   runtimeId: string;
-  project: string;
+  project: string | null;
   intent: "select" | "canonicalize";
 }): { action: "none" | "push" | "replace"; href: string } {
-  if (!input.sessionId || !input.runtimeId || !input.project) throw new Error("A conversation needs its exact workspace identity.");
+  if (!input.sessionId || !input.runtimeId || (input.project !== null && !input.project)) throw new Error("A conversation needs its exact workspace identity.");
   if (input.hash && !input.hash.startsWith("#")) throw new Error("Invalid conversation fragment.");
   const current = new URLSearchParams(input.search);
   // A Back/Forward URL can arrive before the server's session prop. Canonical
@@ -32,14 +32,14 @@ export function workConversationNavigation(input: {
   const next = new URLSearchParams(current);
   next.set("session", input.sessionId);
   next.set("runtime", input.runtimeId);
-  next.set("project", input.project);
+  if(input.project === null) next.delete("project"); else next.set("project", input.project);
   const href = `/work?${next.toString()}${input.hash}`;
   if (next.toString() === current.toString()) return { action: "none", href };
   const sameSession = current.get("session") === input.sessionId;
   return { action: input.intent === "canonicalize" || sameSession ? "replace" : "push", href };
 }
 
-export function workLocationMatches(search: string, expected: { sessionId: string | null; runtimeId: string; project: string }): boolean {
+export function workLocationMatches(search: string, expected: { sessionId: string | null; runtimeId: string; project: string | null }): boolean {
   const params = new URLSearchParams(search);
   if (["session", "runtime", "project"].some((key) => params.getAll(key).length > 1 || params.get(key) === "")) return false;
   return params.get("session") === expected.sessionId

@@ -113,11 +113,11 @@ describe("LAN runtime audience grants", () => {
   it("rejects anonymous access, wrong audience and foreign origins without consuming a valid proof", async () => {
     expect((await access()).status).toBe(401);
     const issued = await launch();
-    expect((await exchange(issued.proof, `vscode.${root}`)).status).toBe(401);
+    expect((await exchange(issued.proof, `vscode.${root}`)).status).toBe(404);
     expect((await exchange(issued.proof, `opencode.${root}`, "https://foreign.example")).status).toBe(401);
     const exchanged = await exchange(issued.proof);
     const cookie = exchanged.headers.get("set-cookie")!.split(";")[0];
-    expect((await access(cookie, `vscode.${root}`)).status).toBe(401);
+    expect((await access(cookie, `vscode.${root}`)).status).toBe(404);
     expect((await access(cookie)).status).toBe(204);
   });
 

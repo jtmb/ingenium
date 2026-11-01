@@ -81,7 +81,6 @@ export interface WorkFeature { label: string; href: string; description: string;
 export const workFeatures: readonly WorkFeature[] = [
   { label: "Chat", href: "/chat", description: "Open ordinary Chat" },
   { label: "Tasks", href: "/tasks", description: "Track work and its status" },
-  { label: "Files and editor", href: "/vscode", description: "Browse, search and edit workspace files" },
   { label: "Terminal", href: "/opencode?mode=cli", description: "Open the authorized workspace terminal" },
   { label: "Documents", href: "/docs", description: "Read and edit project documentation" },
   { label: "Mail", href: "/mail", description: "Open the existing mail workspace" },

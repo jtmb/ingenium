@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { authentication, authorization, projects, securityAudit } from "ingenium-core";
+import { authentication, authorization, projects, securityAudit, protectedSettings, isInstallationStorageProject } from "ingenium-core";
 import { AppError } from "./middleware/errors.js";
 import { isRuntimeGatewayPrivateRequest, type RequestPrincipal } from "./middleware/auth.js";
 
@@ -73,8 +73,15 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
   return req.method === "POST" && /^\/api\/v1\/context\/conversations\/[^/]+\/(?:maintenance\/authorize|archive)$/.test(req.path);
 }
 
-export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
+export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query" | "body">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
+  // Installation preferences retain the original audited permission boundary;
+  // their request owner separately revalidates the exact current storage owner.
+  if (/^\/api\/v1\/installation\/preferences(?:\/|$)/i.test(req.path)) {
+    const permission = permissionFor(req as Request);
+    return {action:'installation.settings.'+permission,resource:'settings',permission,
+      target:'installation',browserSessionOnly:true,sensitive:!READ_METHODS.has(req.method)};
+  }
   // Dot's request-local service rechecks each command's original private source,
   // jobs write/execute and capability policy. This outer read admission is never a command grant.
   const dotRead=req.method==="GET"&&/^\/api\/v1\/dot\/(?:(?:suggestions|followups|operations|notifications)(?:\/[^/]+)?|queue|job-policy\/[^/]+)$/.test(req.path);
@@ -118,6 +125,16 @@ export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial
     const collection = req.method === "GET" && (req.path === "/api/v1/projects" || req.path === "/api/v1/projects/archive");
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
   }
+  const currentVoiceCall=/^\/api\/v1\/voice\/current-calls\/(?:begin|selection|[a-f0-9-]{36}\/(?:inspect|events|plan|prepare|execute|barge|end|message))$/.test(req.path)||/^\/api\/v1\/voice\/current-calls\/[a-f0-9-]{36}\/transcribe\/[a-f0-9-]{36}$/.test(req.path);
+  if(currentVoiceCall)return {action:'voice.current-call.'+req.path.split('/').at(-1),resource:'context',permission:'read',target:'private',browserSessionOnly:true,sensitive:!['inspect','events'].includes(req.path.split('/').at(-1)??'')};
+  const namespaceTransition=req.method==='POST'&&/^\/api\/v1\/customize-scoped-v1\/(?:plugin-namespace(?:\/restore-initialization)?|project-restore)\/(?:review|apply|reconcile)$/.test(req.path)||req.method==='GET'&&/^\/api\/v1\/customize-scoped-v1\/(?:plugin-namespace(?:\/restore-initialization)?|project-restore)\/operations\/[^/]+$/.test(req.path);
+  if(namespaceTransition)return {action:'plugins.namespace.'+(req.method==='GET'?'read':'admin'),resource:'plugins',permission:'read',target:'private',browserSessionOnly:true,sensitive:req.method!=='GET',stepUp:req.method==='POST'&&!req.path.endsWith('/review')};
+  const nativeScoped=req.method==='GET'&&/^\/api\/v1\/customize-scoped-v1\/(?:offer|consents\/[^/]+\/(?:receipt|context|operations\/[^/]+))$/.test(req.path)
+    ||req.method==='POST'&&/^\/api\/v1\/customize-scoped-v1\/(?:consents(?:\/[^/]+\/revoke)?|read|effects)$/.test(req.path);
+  if(nativeScoped)return {action:'customize.scoped.v1.'+(req.method==='GET'?'read':'command'),resource:'plugins',permission:'read',target:'private',browserSessionOnly:true,sensitive:req.method!=='GET'};
+  const scopedCustomize=req.method==="GET"&&/^\/api\/v1\/customize\/(?:catalog|sources(?:\/[^/]+)?|project-source|archived-plugins|installations|commands\/[^/]+|projection-reconciliation\/[^/]+)\/?$/i.test(req.path)
+    ||req.method==="POST"&&/^\/api\/v1\/customize\/commands\/?$/i.test(req.path);
+  if(scopedCustomize)return {action:"customize.scoped."+(req.method==="GET"?"read":"command"),resource:"plugins",permission:"read",target:"private",browserSessionOnly:true,sensitive:req.method!=="GET"};
   if (req.method === "GET" && /^\/api\/v1\/customize\/?$/i.test(req.path)) {
     const resource = req.query?.kind === "skill" ? "skills" : "plugins";
     return { action: resource + ".read", resource, permission: "read", target: "project" };
@@ -128,6 +145,14 @@ export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial
   }
   if (/^\/api\/v1\/jobs\/runs\/[^/]+\/logs$/.test(req.path)) {
     return { action: "jobs.raw-logs.read", resource: "jobs", permission: "read", target: "installation", sensitive: true };
+  }
+  // OAuth application credentials belong to the installation. A selected
+  // workspace/organization administrator cannot acquire their shared authority.
+  if (/^\/api\/v1\/settings\/?$/i.test(req.path)
+    && (req.method==='GET'||req.method==='POST')
+    && protectedSettings.isOAuthClientSecretKey(req.method==='GET'?req.query?.key:req.body?.key)) {
+    const permission=permissionFor(req as Request);
+    return {action:`settings.oauth-client-secret.${permission}`,resource:'settings',permission,target:'installation',sensitive:true};
   }
   if (req.path.startsWith("/api/v1/settings/provider-configs") || req.path.startsWith("/api/v1/settings/llm-config")) {
     const permission = permissionFor(req as Request);
@@ -254,19 +279,19 @@ function requestedProject(req: Request): { id: string; organizationId: string } 
     ? (req.body as Record<string, unknown>).source_type
     : undefined;
   if (captureSource === "chat" || captureSource === "email") {
-    const global = projects.getGlobalProject();
+    const global = projects.getInstallationStorageProject();
     return global ? { id: global.id, organizationId: global.organization_id } : undefined;
   }
   // The versioned memory lifecycle selects stable project IDs; retain the legacy name contract elsewhere.
   if (/^\/api\/v1\/memory\/lifecycle(?:\/|$)/u.test(req.path) && typeof req.query.projectId==="string") {
     const project=projects.getProjectById(req.query.projectId);
-    return project && !project.archived_at ? {id:project.id,organizationId:project.organization_id} : undefined;
+    return project && project.archived_at === null ? {id:project.id,organizationId:project.organization_id} : undefined;
   }
   const projectPathName = req.path.startsWith("/api/v1/projects/") ? req.path.slice("/api/v1/projects/".length).split("/")[0] : undefined;
   const name = projectPathName ?? req.params.name ?? (typeof req.query.project === "string" ? req.query.project : undefined);
   if (!name || !projects.isValidProjectName(name)) return undefined;
   const project = projects.getProject(name);
-  return project && !project.archived_at ? { id: project.id, organizationId: project.organization_id } : undefined;
+  return project && project.archived_at === null ? { id: project.id, organizationId: project.organization_id } : undefined;
 }
 
 function projectLifecycleTarget(req: Request): AuthorizedProjectTarget | undefined {
@@ -275,16 +300,16 @@ function projectLifecycleTarget(req: Request): AuthorizedProjectTarget | undefin
   if (!projects.isValidProjectName(name)) return undefined;
   const project = projects.getProject(name);
   if (!project) return undefined;
-  return { id: project.id, name: project.name, organizationId: project.organization_id, archived: Boolean(project.archived_at), isGlobal: Boolean(project.is_global) };
+  return { id: project.id, name: project.name, organizationId: project.organization_id, archived: project.archived_at !== null, isGlobal: isInstallationStorageProject(project.id) };
 }
 
 export function authorizeProjectRestoreTarget(principal: RequestPrincipal, name: string): AuthorizedProjectTarget | undefined {
   if (!projects.isValidProjectName(name)) return undefined;
   const target = projects.getProject(name);
-  if (!target || !target.archived_at) return undefined;
+  if (!target || target.archived_at === null) return undefined;
   const decision = authorization.requireProjectLifecyclePermission(toAuthorizationPrincipal(principal), target.id);
   if (!decision.allowed) return undefined;
-  return { id: target.id, name: target.name, organizationId: target.organization_id, archived: true, isGlobal: Boolean(target.is_global) };
+  return { id: target.id, name: target.name, organizationId: target.organization_id, archived: true, isGlobal: isInstallationStorageProject(target.id) };
 }
 
 function audit(principal: RequestPrincipal, policy: AuthorizationPolicy, outcome: "success" | "denied", decision?: authorization.AuthorizationDecision): void {

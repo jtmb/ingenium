@@ -42,7 +42,7 @@ export async function readRequestMemoryInspection(
     const page = await readBoundedMemoryInspection({ memory: session.memory, scope, reader, candidateOffset, limit,
       consume: read => ports.withPlacement(request, selected, () => {
         if (scopeKey(session.resolveScope("read")) !== scopeKey(scope)) throw new MemoryError("FORBIDDEN");
-        const runtime = runtimes.getRuntimeInstance(selected.runtimeId);
+        const runtime = scope.projectId === null ? runtimes.getWorkspaceRuntimeV2(selected.runtimeId) : runtimes.getRuntimeInstance(selected.runtimeId);
         if (ownerBindings.size && (!runtime?.backendContainerId
           || [...ownerBindings.values()].some(id => id !== `managed-container:${runtime.backendContainerId}`))) throw new MemoryError("SOURCE_UNAVAILABLE");
         return read();

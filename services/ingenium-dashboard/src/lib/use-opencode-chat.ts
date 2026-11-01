@@ -30,18 +30,18 @@ export interface SendOptions {
 }
 
 export interface ChatPersistenceScope {
-  project: string;
+  project: string | null;
   runtimeId: string | null;
   title: string;
 }
 
 function chatScopeKey(
   sessionId: string | null,
-  project: string | undefined,
+  project: string | null | undefined,
   runtimeId: string | null | undefined,
 ): string | null {
   if (!sessionId) return null;
-  return `${project ?? "unscoped"}\0${runtimeId === undefined ? "unbound" : runtimeId ?? "compatibility"}\0${sessionId}`;
+  return `${project === null ? "workspace" : project ?? "unscoped"}\0${runtimeId === undefined ? "unbound" : runtimeId ?? "compatibility"}\0${sessionId}`;
 }
 
 export interface ChatMessage {
@@ -979,8 +979,8 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   }, [opencode, scopeKey, sessionId]);
 
   const ensureContextLink = useCallback(async (refresh = false) => {
-    if (!sessionId || !persistenceProject || persistenceRuntimeId === undefined) return null;
-    const key = `${persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sessionId}`;
+    if (!sessionId || (persistenceProject !== null && !persistenceProject) || persistenceRuntimeId === undefined || (persistenceProject === null && persistenceRuntimeId === null)) return null;
+    const key = `${persistenceProject === null ? "workspace" : persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sessionId}`;
     if (!refresh && contextLinkRef.current?.key === key) {
       return contextLinkRef.current.current ?? contextLinkRef.current.promise;
     }
@@ -1001,7 +1001,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   }, [persistenceProject, persistenceRuntimeId, persistenceTitle, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || !persistenceProject || persistenceRuntimeId === undefined) return;
+    if (!sessionId || (persistenceProject !== null && !persistenceProject) || persistenceRuntimeId === undefined || (persistenceProject === null && persistenceRuntimeId === null)) return;
     const requestScope = scopeKey;
     void ensureContextLink().catch(() => {
       if (activeScopeRef.current !== requestScope) return;
@@ -1010,7 +1010,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   }, [ensureContextLink, persistenceProject, persistenceRuntimeId, scopeKey, sessionId]);
 
   const persistCompletedTurn = useCallback(async (sid: string): Promise<void> => {
-    if (!persistenceProject || persistenceRuntimeId === undefined || sid !== sessionId) return Promise.resolve();
+    if ((persistenceProject !== null && !persistenceProject) || persistenceRuntimeId === undefined || (persistenceProject === null && persistenceRuntimeId === null) || sid !== sessionId) return Promise.resolve();
     try {
       const rawMessages = await opencode.sessions.messages(sid) as unknown as OpenCodeApiMessage[];
       let assistantIndex = -1;
@@ -1039,7 +1039,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
       const userContent = user ? content(user) : "";
       const assistantContent = content(assistant);
       if (!user || !userContent || !assistantContent) return;
-      const sessionKey = `${persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sid}`;
+      const sessionKey = `${persistenceProject === null ? "workspace" : persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sid}`;
       const turnKey = `${sessionKey}\0${assistant.info.id}`;
       if (persistedTurnsRef.current.has(turnKey)) return;
       const existing = persistingTurnsRef.current.get(turnKey);

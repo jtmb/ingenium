@@ -10,6 +10,7 @@ const {
   legacyListProposals,
   proposalCounts,
   proposalPage,
+  submitProposal,
   approveProposal,
   rejectProposal,
   rollbackProposal,
@@ -21,6 +22,7 @@ const {
   legacyListProposals: vi.fn(),
   proposalCounts: vi.fn(),
   proposalPage: vi.fn(),
+  submitProposal: vi.fn(),
   approveProposal: vi.fn(),
   rejectProposal: vi.fn(),
   rollbackProposal: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock("../src/lib/api", () => ({
         list: legacyListProposals,
         counts: proposalCounts,
         page: proposalPage,
+        submit: submitProposal,
         approve: approveProposal,
         reject: rejectProposal,
         rollback: rollbackProposal,
@@ -54,6 +57,7 @@ vi.mock("../src/app/components/proposals/ProposalReviewOverlay", () => ({
     isOpen,
     proposal,
     proposalDetail,
+    onSubmit,
     onApprove,
     onReject,
     onRollback,
@@ -61,6 +65,7 @@ vi.mock("../src/app/components/proposals/ProposalReviewOverlay", () => ({
     isOpen: boolean;
     proposal: { targetName: string };
     proposalDetail: { targetName: string } | null;
+    onSubmit: () => void;
     onApprove: (reviewer: string, reason: string) => void;
     onReject: (reviewer: string, reason: string) => void;
     onRollback: (reviewer: string, reason: string) => void;
@@ -72,6 +77,7 @@ vi.mock("../src/app/components/proposals/ProposalReviewOverlay", () => ({
         data-testid={proposalDetail ? "proposal-detail-loaded" : "proposal-detail-loading"}
       >
         {proposalDetail?.targetName ?? proposal.targetName}
+        <button type="button" onClick={onSubmit}>Submit draft proposal</button>
         <button type="button" onClick={() => onApprove("test-reviewer", "")}>Approve proposal</button>
         <button type="button" onClick={() => onReject("test-reviewer", "")}>Reject proposal</button>
         <button type="button" onClick={() => onRollback("test-reviewer", "reason")}>Rollback proposal</button>
@@ -159,6 +165,7 @@ describe("SkillsPage detail overlay", () => {
     proposalCounts.mockReset().mockResolvedValue(proposalCountsResponse());
     proposalPage.mockReset().mockResolvedValue(proposalPageResponse());
     getProposal.mockReset().mockResolvedValue({ data: createProposal });
+    submitProposal.mockReset().mockResolvedValue({data:createProposal});
     approveProposal.mockReset().mockResolvedValue({ data: createProposal });
     rejectProposal.mockReset().mockResolvedValue({ data: createProposal });
     rollbackProposal.mockReset().mockResolvedValue({ data: createProposal });
@@ -167,6 +174,23 @@ describe("SkillsPage detail overlay", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("submits the selected draft once to its original project and retains separate approval", async () => {
+    const draft=proposalFor("draft","catalog-draft","catalog-target");
+    proposalCounts.mockResolvedValue(proposalCountsResponse(1));proposalPage.mockResolvedValue(proposalPageResponse([draft]));
+    getProposal.mockResolvedValue({data:draft});
+    let finish!: (value: {data: typeof draft})=>void;
+    submitProposal.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+    render(<SkillsPage/>);fireEvent.click(screen.getByTestId("tab-proposals"));
+    fireEvent.click(await screen.findByRole("button",{name:"Open create proposal for catalog-target"}));
+    await screen.findByTestId("proposal-detail-loaded");
+    const submit=screen.getByRole("button",{name:"Submit draft proposal"});fireEvent.click(submit);fireEvent.click(submit);
+    expect(submitProposal).toHaveBeenCalledTimes(1);expect(submitProposal).toHaveBeenCalledWith("catalog-draft","test-project");
+    expect(approveProposal).not.toHaveBeenCalled();
+    finish({data:{...draft,status:"pending"}});
+    await waitFor(()=>expect(screen.getByTestId("proposal-detail-loaded")).toBeTruthy());
+    expect(approveProposal).not.toHaveBeenCalled();
   });
 
   it("distinguishes historical consolidation from active skills", async () => {

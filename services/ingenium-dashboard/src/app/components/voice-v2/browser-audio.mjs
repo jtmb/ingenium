@@ -11,6 +11,7 @@ export class BrowserAudio {
   #playback;
   #epoch = 0;
   #starting = false;
+  #captureClosures = new Set();
 
   constructor(environment = globalThis) { this.environment = environment; }
   async devices() {
@@ -22,6 +23,8 @@ export class BrowserAudio {
     this.#starting = true; const epoch = ++this.#epoch;
     let stream, context;
     try {
+      if(this.#captureClosures.size)await this.joinCapture();
+      if(epoch!==this.#epoch)return false;
       stream = await this.environment.navigator.mediaDevices.getUserMedia({ audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       if (epoch !== this.#epoch) { stream.getTracks().forEach(track => track.stop()); return false; }
       this.#stream = stream;
@@ -56,8 +59,15 @@ export class BrowserAudio {
     this.#stream?.getTracks().forEach(track => { track.onended = null; track.stop(); });
     const context = this.#context;
     this.#stream = this.#processor = this.#source = this.#sink = this.#context = undefined;
-    if (context && context.state !== 'closed') void context.close().catch(() => undefined);
+    if (context && context.state !== 'closed') {
+      // Publish the original close before invoking its effect; keep failures for
+      // the actual owner to join instead of treating stopped tracks as a join.
+      const closing=Promise.resolve().then(()=>context.close());this.#captureClosures.add(closing);
+      closing.then(()=>this.#captureClosures.delete(closing),()=>undefined);
+    }
+    const joined=this.joinCapture();joined.catch(()=>undefined);return joined;
   }
+  async joinCapture() { await Promise.all([...this.#captureClosures]); }
   async play({ wav, signal, outputDeviceId }) {
     signal.throwIfAborted(); validateWav(wav); this.stopPlayback();
     const blob = new this.environment.Blob([wav], { type: 'audio/wav' });
@@ -86,5 +96,5 @@ export class BrowserAudio {
     });
   }
   stopPlayback() { this.#playback?.stop(); }
-  dispose() { this.stopCapture(); this.stopPlayback(); }
+  dispose() { const capture=this.stopCapture(); this.stopPlayback(); capture.catch(()=>undefined); return capture; }
 }

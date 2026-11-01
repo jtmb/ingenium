@@ -10,6 +10,9 @@ import {assertNativeGovernanceLifecycleClear,assertNativeGovernanceRecoveryResto
  */
 
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import {assertCapturedProjectRestoreAvailable} from "./plugin-projection-transition.js";
+import type {AuthorizationPrincipal} from "./authorization.js";
+import {recordProjectCreationInCurrentTransaction} from "./plugin-projection-transition.js";
 import { logger } from "../logger.js";
 import { Project } from "../schema.js";
 import { randomUUID } from "node:crypto";
@@ -111,7 +114,7 @@ function projectDirectory(name: string): string {
   return candidate;
 }
 
-export function createProject(name: string, isGlobal = false, organizationId = BOOTSTRAP_ORGANIZATION_ID): Project {
+export function createProject(name: string, isGlobal = false, organizationId = BOOTSTRAP_ORGANIZATION_ID, principal?:AuthorizationPrincipal): Project {
   assertProjectName(name);
   // Idempotent: return existing project on container restart
   const existing = getProject(name);
@@ -134,8 +137,9 @@ export function createProject(name: string, isGlobal = false, organizationId = B
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now, organizationId);
     if (isGlobal) recordGlobalProjectTransition(db, id, "became_global", now);
-    // Auto-load global skills into new project
-    const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
+    if(principal&&!isGlobal)recordProjectCreationInCurrentTransaction(principal,id);
+    // Inherit installation skills from the original storage owner, independent of workspace flags.
+    const globalProject = getInstallationStorageProject();
     if (globalProject && globalProject.id !== id) {
       const count = skills.copySkillsInCurrentTransaction(globalProject.id, id);
       if (count > 0) {
@@ -159,7 +163,7 @@ export function archiveProject(name: string): boolean {
   const changed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name) as Project | undefined;
-    if (!existing || existing.is_global) return false;
+    if (!existing || existing.is_global || db.prepare("SELECT 1 FROM veyra_installation_legacy_refs WHERE legacy_project_id=?").get(existing.id)) return false;
     assertNativeGovernanceLifecycleClear(db,existing.id);
     const now = new Date().toISOString();
     db.prepare("UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL").run(now, now, existing.id);
@@ -177,6 +181,7 @@ export function unarchiveProject(name: string): boolean {
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NOT NULL").get(name);
     if (!existing) return false;
     assertNativeGovernanceRecoveryRestore(db,(existing as Project).id);
+    assertCapturedProjectRestoreAvailable((existing as Project).id);
     const activeGlobal = db.prepare(
       "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
     ).get((existing as Project).id) as { id: string } | undefined;
@@ -198,6 +203,7 @@ export function unarchiveProjectById(projectId: string): boolean {
     const existing = db.prepare("SELECT * FROM projects WHERE id = ? AND archived_at IS NOT NULL").get(projectId) as Project | undefined;
     if (!existing) return false;
     assertNativeGovernanceRecoveryRestore(db,existing.id);
+    assertCapturedProjectRestoreAvailable(existing.id);
     const activeGlobal = db.prepare(
       "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
     ).get(existing.id) as { id: string } | undefined;
@@ -269,6 +275,7 @@ export function deleteProject(name: string): ProjectDeletionResult {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const project = db.prepare("SELECT id, is_global FROM projects WHERE name = ?").get(name) as { id: string; is_global: number } | undefined;
     if (!project) return { status: "not_found" } as ProjectDeletionResult;
+    if(db.prepare("SELECT 1 FROM veyra_installation_legacy_refs WHERE legacy_project_id=?").get(project.id))return {status:"has_children",childTables:["veyra_installation_legacy_refs"]}as ProjectDeletionResult;
     assertNativeGovernanceLifecycleClear(db,project.id);
     const childTables = projectChildTables(db, project.id);
     if (childTables.length > 0) return { status: "has_children", childTables } as ProjectDeletionResult;
@@ -281,6 +288,19 @@ export function deleteProject(name: string): ProjectDeletionResult {
 }
 
 /** Look up a project by name (case-sensitive). Returns undefined if not found. */
+/** Installation storage is the existing lossless migration122 reference. This
+ * factual reader creates no scope/grant, copies no data and never follows the
+ * selected/active workspace or changes the legacy public global-project API. */
+export function getInstallationStorageProject():Project|undefined{
+ const db=getDb(process.env.INGENIUM_CORE_DB_PATH??"./data");
+ const row=db.prepare(`SELECT p.*,i.instance_id AS __installation_id,r.revision AS __owner_revision
+  FROM veyra_installation_identity i JOIN veyra_installation_legacy_refs r ON r.instance_id=i.instance_id
+  JOIN projects p ON p.id=r.legacy_project_id AND p.archived_at IS NULL WHERE i.singleton=1`).get()as(Project&{__installation_id:string;__owner_revision:number})|undefined;
+ if(!row)return undefined;
+ if(!/^[a-f0-9]{32}$/.test(row.__installation_id)||!Number.isSafeInteger(row.__owner_revision)||row.__owner_revision<1)throw Error("Installation storage reference is invalid");
+ const {__installation_id:installationId,__owner_revision:ownerRevision,...project}=row;void installationId;void ownerRevision;return project;
+}
+
 /** Stable identity lookup; labels and archive filtering remain the caller's policy. */
 export function getProjectById(id: string): Project | undefined {
   return getDb().prepare("SELECT * FROM projects WHERE id = ?").get(id) as Project | undefined;

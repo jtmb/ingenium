@@ -778,7 +778,7 @@ export async function runDurableSynthesis(
   opts?: DurableSynthesisOptions,
 ): Promise<DurableSynthesisResult> {
   const result = emptyResult();
-  const globalProjectId = projects.getGlobalProject()?.id;
+  const globalProjectId = projects.getInstallationStorageProject()?.id;
   const synthModel = globalProjectId ? getSetting(globalProjectId, "synthesis_model") : undefined;
   const synthEndpoint = globalProjectId ? getSetting(globalProjectId, "synthesis_endpoint") : undefined;
   const synthProvider = globalProjectId ? getSetting(globalProjectId, "synthesis_provider") : undefined;

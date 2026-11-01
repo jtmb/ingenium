@@ -21,7 +21,7 @@ import {
 } from "ingenium-email";
 
 function resolveGlobalProjectId(): string {
-  const global = projects.getCanonicalGlobalProject();
+  const global = projects.getInstallationStorageProject();
   if (!global) throw new Error("No canonical global project found. Create global-default before using email.");
   return global.id;
 }

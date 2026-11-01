@@ -1,0 +1,131 @@
+// SYNTHETIC authorization/plan/CPU ports. Actual SQL128 + proposed SQL134 and
+// source-owner code execute in ONE process, :memory: only. No runtime acceptance.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire,stripTypeScriptTypes} from 'node:module';
+import {SourceTextModule,SyntheticModule} from 'node:vm';
+import * as crypto from 'node:crypto';
+const app=process.env.VEYRA_SOURCE_APP;if(!app)throw Error('VEYRA_SOURCE_APP required');
+const Database=createRequire(app+'/package.json')('better-sqlite3');
+const mod=new SourceTextModule(stripTypeScriptTypes(readFileSync(new URL('../lib/tools/voice-assistant-source.ts',import.meta.url),'utf8'),{mode:'strip'}));
+await mod.link(s=>{assert.equal(s,'node:crypto');return new SyntheticModule(Object.keys(crypto),function(){for(const [k,v]of Object.entries(crypto))this.setExport(k,v);});});await mod.evaluate();
+const {createOriginalAssistantSourceOwner}=mod.namespace;
+const canon=x=>x===null||typeof x!=='object'?JSON.stringify(x):Array.isArray(x)?'['+x.map(canon).join(',')+']':'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canon(x[k])).join(',')+'}';
+const sha=x=>crypto.createHash('sha256').update(x).digest('hex'),digest=x=>sha(canon(x)),uuid=()=>crypto.randomUUID();
+const restoreSql="UPDATE veyra_voice_assistant_sources SET fenced=1,fence_reason=COALESCE(fence_reason,'CORE_STARTUP_OR_RESTORE'),phase=CASE WHEN phase IN ('reserved','linked') THEN 'unknown' ELSE phase END,revision=revision+1 WHERE fenced=0";
+function fixture(){
+ const db=new Database(':memory:');db.pragma('foreign_keys=ON');db.pragma('cache_size=-8192');db.pragma('temp_store=MEMORY');
+ db.exec('CREATE TABLE users(id TEXT PRIMARY KEY);CREATE TABLE organizations(id TEXT PRIMARY KEY);CREATE TABLE projects(id TEXT PRIMARY KEY);CREATE TABLE authorized_workspaces(id TEXT PRIMARY KEY);CREATE TABLE runtime_instances(id TEXT PRIMARY KEY,backend_container_id TEXT);');
+ db.exec(readFileSync(app+'/packages/ingenium-core/data/migrations/128_voice_operations.sql','utf8'));db.exec(readFileSync(new URL('../data/migrations/134_voice_assistant_sources.sql',import.meta.url),'utf8'));
+ const now=1900000000000,context={},call={},plan={},controlId=uuid(),scope={actorId:'u',accountId:'a',organizationId:'o',projectId:'p',conversationId:'c',runtimeId:uuid(),executionBindingId:'b',executionRevision:'r',agentId:'g'},owner={instanceId:'fixture',bootId:uuid(),ownerId:uuid(),ownerGeneration:1,leaseId:'fixture-only'},profile=digest('profile');
+ db.exec("INSERT INTO users VALUES('u');INSERT INTO organizations VALUES('o');INSERT INTO projects VALUES('p');INSERT INTO authorized_workspaces VALUES('w');");db.prepare('INSERT INTO runtime_instances VALUES(?,?)').run(scope.runtimeId,sha('backend'));
+ const state={authenticated:true,now,inspect:true,changed:false,dispatchChanged:false,failAck:false,failFence:false,insertCpu:true};
+ function insertOperation(patch={}){
+  const row={operation_id:uuid(),request_id:uuid(),kind:'voice-cpu-supervisor',scope_json:canon(scope),scope_hash:digest(scope),original_hash:sha('fixture'),original_json:'{}',input_sha256:profile,actor_id:'u',organization_id:'o',project_id:'p',runtime_id:scope.runtimeId,workspace_id:'w',user_epoch:1,workspace_epoch:2,runtime_epoch:3,turn_generation:0,parent_operation_id:null,control_operation_id:null,cpu_identity_json:null,owner_json:canon(owner),instance_id:owner.instanceId,owner_generation:1,control_json:canon({profileDigest:profile}),cpu_json:null,deadline_at:now+10000,state:'running',created_at:now,updated_at:now,...patch};
+  db.prepare('INSERT INTO veyra_voice_operations('+Object.keys(row).join(',')+') VALUES('+Object.keys(row).map(k=>'@'+k).join(',')+')').run(row);return row;
+ }
+ insertOperation({operation_id:controlId});
+ const texts=['hello',' ','world'];
+ const metadata={version:1,sourceId:uuid(),callId:uuid(),callInstanceId:uuid(),callGeneration:0,turnGeneration:0,scope,controlOperationId:controlId,controlOwnerHash:digest(owner),profileDigest:profile,voice:'fixture-voice',policyId:'verbatim-assistant-text-v1',agentSettlementProof:false,deadlineAt:now+10000,userEpoch:1,workspaceEpoch:2,runtimeEpoch:3,observedAt:now,
+  segments:texts.map((s,index)=>({index,kind:s.trim()?'tts':'text-gap',digest:sha(s),sourceStart:0,sourceEnd:Buffer.byteLength(s)}))};
+ for(const key of ['sessionBeforeSha256','responseSha256','sessionAfterSha256','snapshotSha256','rangeSha256','prefixSha256','policyImplementationSha256','segmenterImplementationSha256','rawTextSha256','projectedSha256'])metadata[key]=sha(key);
+ metadata.sourceHash=digest(metadata);metadata.planHash=digest({sourceHash:metadata.sourceHash,profileDigest:metadata.profileDigest,voice:metadata.voice,policyId:metadata.policyId,policyImplementationSha256:metadata.policyImplementationSha256,segmenterImplementationSha256:metadata.segmenterImplementationSha256,projectedSha256:metadata.projectedSha256,segments:metadata.segments});
+ const dispatches=new WeakMap();let api,depth=0;
+ const write=fn=>{if(depth)return fn();db.exec('BEGIN IMMEDIATE');depth++;let value;try{value=fn();db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}finally{depth--;}if(state.failAck){state.failAck=false;throw Error('fixture committed ACK lost');}return value;};
+ const inspectors={inspectPlan(c,p){if(!state.inspect||p!==plan||c!==context||!state.authenticated)throw Error('fixture original unavailable');return {call,plan,metadata:state.changed?{...metadata,voice:'changed'}:metadata,authSessionId:'auth-fixture',backendId:sha('backend'),startIdentity:sha('start'),owner,segments:texts.map((s,index)=>({index,kind:s.trim()?'tts':'text-gap',textSha256:sha(s),bytes:Buffer.byteLength(s),characters:s.length}))};},inspectDispatch(c,h){if(c!==context||!dispatches.has(h))throw Error('fixture dispatch unavailable');const f=dispatches.get(h);return state.dispatchChanged?{...f,textSha256:sha('changed')}:f;},inspectCallForFence(h){if(h!==call)throw Error('fixture call unavailable');return {call,callId:metadata.callId,callInstanceId:metadata.callInstanceId,generation:metadata.callGeneration};}};
+ const ports={db:()=>db,now:()=>state.now,originalAssistantSources:inspectors};
+ const internal={write,get:id=>db.prepare('SELECT * FROM veyra_voice_operations WHERE operation_id=?').get(id),authorize(c,s){if(c!==context||!state.authenticated||canon(s)!==canon(scope))throw Error('fixture auth unavailable');return {authSessionId:'auth-fixture',scope,owner,userSecurityEpoch:1,workspaceSecurityEpoch:2,runtimeSecurityEpoch:3,deadlineAt:now+10000};},canonical:canon,digest,equal:(a,b)=>canon(a)===canon(b),uuid:v=>typeof v==='string'&&/^[a-f0-9-]{36}$/.test(v),hash:v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v),integer:v=>Number.isSafeInteger(v)&&v>=0,validateOriginal:v=>v,
+ reserveAttached(c,o,w,claim){api.assertOriginalAssistantReservation(c,claim,o,w);if(state.insertCpu)insertOperation({operation_id:o.operationId,request_id:o.requestId,kind:o.kind,parent_operation_id:o.parentOperationId,control_operation_id:o.controlOperationId,turn_generation:o.turnGeneration,cpu_identity_json:canon(o.cpuIdentity),cpu_json:canon({phase:'bound',dispatchClaimed:false}),state:'reserved'});return {accepted:true,fresh:true,operation:{original:o}};}};
+ api=createOriginalAssistantSourceOwner(ports,internal);
+ const row=()=>db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY segment_index').get();
+ function linked(){const claim=api.reserveOriginalAssistantSource(context,plan),operationId=uuid(),identity={kind:'synthesize',operationId,digest:sha('fixture-payload')},original={operationId,requestId:claim.requestId,kind:'voice-speech-tts',scope,turnGeneration:0,parentOperationId:controlId,controlOperationId:controlId,deadlineAt:now+9000,cpuIdentity:identity};api.reserveAttachedAssistantTts(context,claim,original,owner);const handle={},facts={scope,owner,operationId,identity,controlOperationId:controlId,textSha256:sha(texts[claim.segmentIndex]),voice:metadata.voice,requestId:claim.requestId,segmentIndex:claim.segmentIndex,sourceClaim:claim,prepared:true};dispatches.set(handle,facts);return {claim,operationId,original,handle,facts};}
+ return {db,api,state,ports,internal,context,call,plan,owner,metadata,row,linked,insertOperation,dispatches,controlId};
+}
+const run=fn=>{const f=fixture();try{fn(f);assert.ok(f.db.pragma('page_count',{simple:true})*f.db.pragma('page_size',{simple:true})<64*1024*1024);}finally{f.db.close();}};
+test('private originals reserve next TTS segment only, copies do not authorize',()=>run(f=>{const a=f.api.reserveOriginalAssistantSource(f.context,f.plan),b=f.api.reserveOriginalAssistantSource(f.context,f.plan);assert.equal(a.segmentIndex,0);assert.equal(b.segmentIndex,2);assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/EXHAUSTED/);assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,{...a},{}),/ORIGINAL_REQUIRED/);assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,{}),/original unavailable/);}));
+test('missing fixed inspectors deny named unavailable',()=>run(f=>{delete f.ports.originalAssistantSources;const api=createOriginalAssistantSourceOwner(f.ports,f.internal);assert.throws(()=>api.reserveOriginalAssistantSource(f.context,f.plan),/INSPECTORS_UNAVAILABLE/);}));
+test('reserve link spend and both later live gates preserve original CPU tuple',()=>run(f=>{const x=f.linked();assert.equal(f.row().phase,'linked');assert.throws(()=>f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/FENCED/);f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);assert.equal(f.row().phase,'spent');f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner);x.facts.prepared=false;f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner);assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/ALREADY_SPENT/);assert.equal(f.db.prepare("SELECT count(*) n FROM veyra_voice_operations WHERE kind='voice-agent-turn'").get().n,0);}));
+test('copied dispatch cannot spend and source uncertainty never reopens',()=>run(f=>{const x=f.linked();assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,{}),/dispatch unavailable/);assert.equal(f.row().phase,'unknown');assert.equal(f.row().fenced,1);assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/ORIGINAL_REQUIRED/);}));
+test('dispatch mutation after spend is denied at later CPU gate',()=>run(f=>{const x=f.linked();f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);f.state.dispatchChanged=true;assert.throws(()=>f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/DISPATCH_ORIGINAL_REQUIRED/);}));
+test('plan mutation after spend is denied at later CPU gate',()=>run(f=>{const x=f.linked();f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);f.state.changed=true;assert.throws(()=>f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/PLAN_HASH_CHANGED/);}));
+test('auth loss blocks spend but genuine negative fence needs no positive authorization',()=>run(f=>{const x=f.linked();f.state.authenticated=false;assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/original unavailable/);delete f.ports.originalAssistantSources.inspectPlan;delete f.ports.originalAssistantSources.inspectDispatch;f.api.fenceOriginalAssistantSources(f.call,'AUTH_LOST');assert.equal(f.row().phase,'fenced');assert.equal(f.db.prepare('SELECT state FROM veyra_voice_operations WHERE operation_id=?').get(f.controlId).state,'running');}));
+test('barge fences spent without rewriting spend or retiring control',()=>run(f=>{const x=f.linked();f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);const before=f.row();f.api.fenceOriginalAssistantSources(f.call,'BARGE_IN');const after=f.row();assert.equal(after.phase,'spent');assert.equal(after.dispatch_id,before.dispatch_id);assert.equal(after.fenced,1);assert.throws(()=>f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/FENCED/);assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/FENCED/);}));
+test('fence SQL failure still closes retained local handles',()=>run(f=>{const x=f.linked();f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);f.db.exec("CREATE TRIGGER fixture_fence_failure BEFORE UPDATE ON veyra_voice_assistant_sources WHEN NEW.fenced=1 BEGIN SELECT RAISE(ABORT,'fixture fence failed');END;");assert.throws(()=>f.api.fenceOriginalAssistantSources(f.call,'END'),/fixture fence failed/);assert.throws(()=>f.api.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/ORIGINAL_REQUIRED|UNAVAILABLE/);}));
+test('committed spend ACK loss retains spent fenced, no replay',()=>run(f=>{const x=f.linked();f.state.failAck=true;assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/ACK lost/);assert.equal(f.row().phase,'spent');assert.equal(f.row().fenced,1);assert.ok(f.row().dispatch_id);assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/ORIGINAL_REQUIRED/);}));
+test('deferred FK rolls back link when original CPU insertion is missing',()=>run(f=>{f.state.insertCpu=false;assert.throws(()=>f.linked(),/FOREIGN KEY/);assert.equal(f.row().phase,'reserved');assert.equal(f.row().cpu_operation_id,null);}));
+test('unlinked raw CPU child cannot borrow genuine control as parent',()=>run(f=>{assert.throws(()=>f.insertOperation({kind:'voice-speech-tts',state:'reserved',parent_operation_id:f.controlId,control_operation_id:f.controlId}),/linked assistant claim/);}));
+test('claim identity, deletion, duplicate and REPLACE are rejected with recursive triggers OFF',()=>run(f=>{f.api.reserveOriginalAssistantSource(f.context,f.plan);f.db.pragma('recursive_triggers=OFF');const r=f.row(),keys=Object.keys(r);assert.throws(()=>f.db.prepare('UPDATE veyra_voice_assistant_sources SET voice=?,revision=revision+1').run('different'),/immutable/);assert.throws(()=>f.db.exec('DELETE FROM veyra_voice_assistant_sources'),/retained/);for(const mode of ['INSERT','INSERT OR REPLACE'])assert.throws(()=>f.db.prepare(mode+' INTO veyra_voice_assistant_sources('+keys.join(',')+') VALUES('+keys.map(k=>'@'+k).join(',')+')').run(r),/already retained/);assert.equal(f.row().claim_id,r.claim_id);}));
+test('restore tombstones retain original identities and cannot adopt private handles',()=>run(f=>{const x=f.linked();f.db.exec(restoreSql);const r=f.row();assert.equal(r.phase,'unknown');assert.equal(r.cpu_operation_id,x.operationId);assert.equal(r.fenced,1);const other=createOriginalAssistantSourceOwner(f.ports,f.internal);assert.throws(()=>other.spendOriginalAssistantSource(f.context,x.claim,x.handle),/ORIGINAL_REQUIRED/);assert.throws(()=>f.db.prepare("UPDATE veyra_voice_assistant_sources SET phase='linked',fenced=0,fence_reason=NULL,revision=revision+1").run(),/immutable|CHECK/);assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_operations').get().n,2);}));
+test('restart without explicit tombstone still cannot rehydrate spent private originals',()=>run(f=>{const x=f.linked();f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle);const other=createOriginalAssistantSourceOwner(f.ports,f.internal);assert.throws(()=>other.requireOriginalAssistantCpuLive(f.context,x.operationId,f.owner),/RESTART_ORIGINAL_UNAVAILABLE/);f.db.exec(restoreSql);assert.equal(f.row().phase,'spent');assert.equal(f.row().fenced,1);}));
+test('deadline, live control and backend drift fail positive reservation',()=>run(f=>{f.state.now+=10001;assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/SOURCE_UNAVAILABLE/);f.state.now-=10001;f.db.prepare('UPDATE runtime_instances SET backend_container_id=?').run(sha('new'));assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/BACKEND_CHANGED/);}));
+test('quarantined original CPU control cannot mint attached source',()=>run(f=>{f.db.prepare("UPDATE veyra_voice_operations SET state='quarantined',revision=revision+1 WHERE operation_id=?").run(f.controlId);assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/CPU_CONTROL_REQUIRED/);assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_assistant_sources').get().n,0);}));
+for(const field of ['prepared','scope','owner','controlOperationId','identity','textSha256','voice','requestId','segmentIndex','sourceClaim'])test('spend denies changed original dispatch '+field,()=>run(f=>{const x=f.linked();x.facts[field]=field==='prepared'?false:field==='scope'?{...x.facts.scope,conversationId:'other'}:field==='owner'?{...f.owner,ownerGeneration:2}:field==='identity'?{...x.facts.identity,digest:sha('other')}:field==='segmentIndex'?2:field==='sourceClaim'?{...x.claim}:'different';assert.throws(()=>f.api.spendOriginalAssistantSource(f.context,x.claim,x.handle),/DISPATCH_ORIGINAL_REQUIRED/);assert.equal(f.row().phase,'unknown');assert.equal(f.row().fenced,1);}));
+test('wrong original call cannot fence and END cannot be undone',()=>run(f=>{f.api.reserveOriginalAssistantSource(f.context,f.plan);assert.throws(()=>f.api.fenceOriginalAssistantSources({},'END'),/call unavailable/);assert.equal(f.row().fenced,0);f.api.fenceOriginalAssistantSources(f.call,'END');assert.throws(()=>f.api.reserveOriginalAssistantSource(f.context,f.plan),/FENCED/);assert.throws(()=>f.api.fenceOriginalAssistantSources(f.call,'REOPEN'),/FENCE_REASON/);}));
+test('startup tombstones untouched reserved originals without creating CPU/agent rows',()=>run(f=>{const claim=f.api.reserveOriginalAssistantSource(f.context,f.plan);f.db.exec(restoreSql);assert.equal(f.row().phase,'unknown');assert.equal(f.row().cpu_operation_id,null);assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_operations').get().n,1);assert.throws(()=>f.api.reserveAttachedAssistantTts(f.context,claim,{},f.owner),/FENCED/);}));
+
+// Regression: c649 protected INSERT conflicts but not null-to-bound UNIQUE
+// updates. Compare every column of BOTH originals and the exact row count.
+const sourceSnapshot=db=>Buffer.from(JSON.stringify(db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY claim_id').all()),'utf8');
+for(const recursive of [0,1])for(const mode of ['UPDATE','UPDATE OR IGNORE','UPDATE OR REPLACE']){
+ for(const unique of ['claim_id','call_instance/source/segment','cpu_operation_id','dispatch_id']){
+  test(`${mode} cross-original ${unique} aborts without changing either original (recursive_triggers=${recursive})`,()=>run(f=>{
+   f.db.pragma('recursive_triggers='+recursive);
+   let first,second,assignments,parameters;
+   if(unique==='cpu_operation_id'){
+    const a=f.linked();f.api.reserveOriginalAssistantSource(f.context,f.plan);
+    [first,second]=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY segment_index').all();
+    assignments="phase='linked',cpu_operation_id=?,revision=revision+1";parameters=[a.operationId];
+   }else if(unique==='dispatch_id'){
+    const a=f.linked();f.api.spendOriginalAssistantSource(f.context,a.claim,a.handle);const b=f.linked();
+    [first,second]=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY segment_index').all();
+    assignments="phase='spent',dispatch_id=?,cpu_identity_json=?,spent_at=?,revision=revision+1";
+    parameters=[first.dispatch_id,canon(b.original.cpuIdentity),f.state.now];
+   }else{
+    f.api.reserveOriginalAssistantSource(f.context,f.plan);f.api.reserveOriginalAssistantSource(f.context,f.plan);
+    [first,second]=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY segment_index').all();
+    if(unique==='claim_id'){assignments='claim_id=?,revision=revision+1';parameters=[first.claim_id];}
+    else{assignments='call_instance_id=?,source_id=?,segment_index=?,revision=revision+1';parameters=[first.call_instance_id,first.source_id,first.segment_index];}
+   }
+   assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_assistant_sources').get().n,2);
+   const before=sourceSnapshot(f.db);
+   assert.throws(()=>f.db.prepare(mode+' veyra_voice_assistant_sources SET '+assignments+' WHERE claim_id=?').run(...parameters,second.claim_id),/cross-original update collision/);
+   assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_assistant_sources').get().n,2);
+   assert.deepEqual(sourceSnapshot(f.db),before,'all serialized column bytes of both original rows retained');
+  }));
+ }
+ test(`${mode} noncolliding lifecycle retains both originals (recursive_triggers=${recursive})`,()=>run(f=>{
+  f.db.pragma('recursive_triggers='+recursive);
+  const first=f.linked(),second=f.api.reserveOriginalAssistantSource(f.context,f.plan),secondId=uuid(),identity={...first.original.cpuIdentity,operationId:secondId};
+  const before=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources WHERE cpu_operation_id=?').get(first.operationId);
+  // Same transaction links genuine synthetic CPU FK before inserting its row.
+  f.db.exec('BEGIN IMMEDIATE');
+  try{
+   assert.equal(f.db.prepare(mode+" veyra_voice_assistant_sources SET phase='linked',cpu_operation_id=?,revision=revision+1 WHERE request_id=?").run(secondId,second.requestId).changes,1);
+   f.insertOperation({operation_id:secondId,request_id:second.requestId,kind:'voice-speech-tts',parent_operation_id:f.controlId,control_operation_id:f.controlId,cpu_identity_json:canon(identity),cpu_json:canon({phase:'bound',dispatchClaimed:false}),state:'reserved'});
+   f.db.exec('COMMIT');
+  }catch(error){f.db.exec('ROLLBACK');throw error;}
+  assert.equal(f.db.prepare(mode+" veyra_voice_assistant_sources SET phase='spent',dispatch_id=?,cpu_identity_json=?,spent_at=?,revision=revision+1 WHERE cpu_operation_id=?").run(uuid(),canon(identity),f.state.now,secondId).changes,1);
+  assert.equal(f.db.prepare(mode+" veyra_voice_assistant_sources SET fenced=1,fence_reason='END',revision=revision+1 WHERE cpu_operation_id=?").run(secondId).changes,1);
+  const a=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources WHERE cpu_operation_id=?').get(secondId);
+  assert.equal(a.phase,'spent');assert.equal(a.fenced,1);assert.ok(a.dispatch_id);
+  assert.deepEqual(f.db.prepare('SELECT * FROM veyra_voice_assistant_sources WHERE cpu_operation_id=?').get(first.operationId),before);
+ }));
+}
+test('exact old c649 hole reproduced only in disposable in-memory fixture with new guard removed',()=>run(f=>{
+ f.db.pragma('recursive_triggers=OFF');const first=f.linked();f.api.reserveOriginalAssistantSource(f.context,f.plan);
+ const [a,b]=f.db.prepare('SELECT * FROM veyra_voice_assistant_sources ORDER BY segment_index').all();
+ f.db.exec('DROP TRIGGER veyra_voice_assistant_update_no_replace');
+ assert.equal(f.db.prepare("UPDATE OR REPLACE veyra_voice_assistant_sources SET phase='linked',cpu_operation_id=?,revision=revision+1 WHERE claim_id=?").run(first.operationId,b.claim_id).changes,1);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_voice_assistant_sources').get().n,1);
+ assert.equal(f.db.prepare('SELECT * FROM veyra_voice_assistant_sources WHERE claim_id=?').get(a.claim_id),undefined);
+ assert.equal(f.db.prepare('SELECT * FROM veyra_voice_assistant_sources').get().claim_id,b.claim_id);
+}));
+
+test('ordinary SQL128 CPU gate does not require an assistant table or inspector',()=>{
+ const ports={db(){assert.fail('legacy operation must not query134');}};
+ for(const operation of [{kind:'voice-speech-stt',parent_operation_id:null,control_operation_id:'control'},{kind:'voice-speech-tts',parent_operation_id:'agent',control_operation_id:'control'}]){
+  const source=createOriginalAssistantSourceOwner(ports,{get:()=>operation});
+  assert.equal(source.requireOriginalAssistantCpuLive({},'operation',{}),undefined);
+ }
+});

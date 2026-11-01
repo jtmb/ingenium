@@ -72,7 +72,7 @@ export function createInstalledDotRouter(){
  router.use(createRequestDotRouter(createInstalledDotRequestSession));
  router.use((error:unknown,_request:Request,response:Response,next:NextFunction)=>{
   if(error instanceof DotError){const result=dotErrorResponse(error);response.status(result.status).json(result.body);return;}
-  if(error instanceof RequestExecutionError){response.status(error.status).json({error:{code:error.code,message:"Dot execution binding unavailable"}});return;}
+  if(error instanceof RequestExecutionError){response.status(error.status).json({error:{code:error.code,message:"veyra-bot execution is unavailable"}});return;}
   if(error&&typeof error==="object"&&"status" in error&&error.status===503){response.status(503).json({error:{code:"DOT_EXECUTION_UNAVAILABLE",message:"Dot execution unavailable"}});return;}
   next(error);
  });return router;

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { servers, projects } from "ingenium-core";
+import { servers, isInstallationStorageProject } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 /** Handles /api/v1/mcp-servers — child MCP server definitions (add, remove, update running state, bulk sync). */
@@ -9,10 +9,8 @@ serversRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const list = servers.listServers(projectId);
-  // Query the project record for is_global flag
-  const projectName = req.query.project as string;
-  const project = projects.getProject(projectName);
-  res.json({ data: list, is_global: project?.is_global ?? false });
+  // Preserve the numeric compatibility field; derive installation role from its fixed owner.
+  res.json({ data: list, is_global: isInstallationStorageProject(projectId) ? 1 : 0 });
 });
 
 serversRouter.post("/", (req, res) => {

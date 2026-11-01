@@ -28,15 +28,14 @@ const status: CloudflareTunnelStatus = {
       dashboard: { enabled: true, publicUrl: "https://dashboard.example.com/" },
       opencode: { enabled: false, publicUrl: "" },
       cli: { enabled: false, publicUrl: "" },
-      vscode: { enabled: false, publicUrl: "" },
       api: { enabled: false, publicUrl: "" },
       info: { enabled: false, publicUrl: "" },
     },
   },
   token: { configured: true, readiness: "ready" },
   connector: { state: "absent", observedAt: "2026-09-05T00:00:00.000Z" },
-  routes: ["dashboard", "opencode", "cli", "vscode", "api", "info"].map((service) => ({
-    service: service as "dashboard" | "opencode" | "cli" | "vscode" | "api" | "info",
+  routes: ["dashboard", "opencode", "cli", "api", "info"].map((service) => ({
+    service: service as "dashboard" | "opencode" | "cli" | "api" | "info",
     enabled: service === "dashboard",
     publicUrl: service === "dashboard" ? "https://dashboard.example.com/" : "",
     target: `authenticated-${service}`,
@@ -70,7 +69,8 @@ describe("CloudflarePanel", () => {
     expect(await screen.findByText("Configured (Ready)")).toBeTruthy();
     expect(screen.queryByDisplayValue(/eyJ/)).toBeNull();
     const origins = screen.getAllByRole("combobox", { name: "Public HTTPS origin" });
-    expect(origins).toHaveLength(6);
+    expect(origins).toHaveLength(5);
+    expect(screen.queryByText(/VS Code|code-server/i)).toBeNull();
     fireEvent.change(origins[1], { target: { value: "https://opencode.example.com/" } });
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Enable desired connector configuration" }));

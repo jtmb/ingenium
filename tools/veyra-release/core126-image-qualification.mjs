@@ -1,7 +1,11 @@
+import {deriveWorkspaceOpenCodeConfig} from '../../scripts/derive-workspace-opencode-config.mjs';
+import {WORKSPACE_V2_SOURCE_INPUTS,WORKSPACE_V2_ARTIFACTS,WORKSPACE_V2_CASES,WORKSPACE_V2_CREDENTIAL_SCOPES,validateWorkspaceV2ImageInputs,validateWorkspaceV2ImageManifest} from '../../services/ingenium-api/lib/projects-v2/workspace-v2-image.mjs';
 import {CORE126_PROTOCOL,SOURCE_INPUTS,IMAGE_INPUTS,PROTOCOL_CASES,hash,canonical,hex,imageId,integer,scopes,validateManifest,unavailable} from '../../packages/veyra-operations/core126-image-contract.mjs';
 /** Root supplies actual build/image reader and inert image-harness owners. No Docker
  * call, process launch, credential or approval implementation is hidden here. */
-export async function produceCore126ImageManifest(ports,{imageId:expectedImageId,approvedScopes}){
+export async function produceCore126ImageManifest(ports,{imageId:expectedImageId,approvedScopes,workspaceRuntimeV2=false}){
+ if(workspaceRuntimeV2!==false&&workspaceRuntimeV2!==true)unavailable('explicit runtime role required');
+ if(workspaceRuntimeV2&&typeof ports?.inertWorkspaceProtocolCase!=='function')unavailable('actual workspace image harness owner missing');
  if(!imageId(expectedImageId)||!['frozenSource','sourceFile','imageConfig','imageFile','inertProtocolCase','harnessIdentity'].every(k=>typeof ports?.[k]==='function'))unavailable('actual producer owners missing');
  const source=await ports.frozenSource();if(!/^[a-f0-9]{40}$/.test(source?.revision??'')||!hex(source?.sha256)||!Array.isArray(source?.files))unavailable('exact frozen source owner');
  const rawConfig=await ports.imageConfig(expectedImageId);if(!Buffer.isBuffer(rawConfig)||rawConfig.length>1024*1024||'sha256:'+hash(rawConfig)!==expectedImageId)unavailable('actual immutable config bytes');
@@ -9,10 +13,19 @@ export async function produceCore126ImageManifest(ports,{imageId:expectedImageId
  const sourceFiles=[];for(const path of SOURCE_INPUTS){const bytes=await ports.sourceFile(path);if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>16*1024**2)unavailable('missing bounded source: '+path);const declared=source.files.find(row=>row.path===path);if(declared?.sha256!==hash(bytes)||declared.bytes!==bytes.length)unavailable('critical Source does not match frozen original: '+path);sourceFiles.push({path,bytes:bytes.length,sha256:hash(bytes)});}
  const files=[];for(const path of IMAGE_INPUTS){const f=await ports.imageFile(expectedImageId,path);if(!f||!Buffer.isBuffer(f.bytes)||!f.bytes.length||f.bytes.length>256*1024**2||f.uid!==0||f.gid!==0||f.kind!=='file'||!integer(f.mode)||(f.mode&0o022))unavailable('missing immutable artifact: '+path);files.push({path,bytes:f.bytes.length,sha256:hash(f.bytes),uid:f.uid,gid:f.gid,kind:f.kind,mode:f.mode});}
  const closureFile=await ports.imageFile(expectedImageId,'/app/services/ingenium-api/dist/veyra-runtime-closure.json');if(hash(closureFile.bytes)!==files.find(row=>row.path==='/app/services/ingenium-api/dist/veyra-runtime-closure.json').sha256)unavailable('image closure changed during measurement');const closure=JSON.parse(closureFile.bytes.toString('utf8'));
- for(const sourcePath of ['services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','packages/veyra-operations/core126-agent-material.mjs','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/core126-purpose.mjs','tools/veyra-release/core126-candidate-intent.mjs']){
-  const emittedPath=sourcePath.startsWith('packages/')?'veyra-packages/'+sourcePath.slice('packages/'.length):sourcePath.startsWith('tools/')?'veyra-tools/'+sourcePath.slice('tools/'.length):sourcePath.slice('services/ingenium-api/'.length);
-  const row=closure.files?.find(row=>row.source===sourcePath),original=sourceFiles.find(row=>row.path===sourcePath),emitted=files.find(row=>row.path==='/app/services/ingenium-api/dist/'+emittedPath);
+ for(const sourcePath of ['services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','packages/veyra-operations/core126-agent-material.mjs','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/core126-purpose.mjs','tools/veyra-release/core126-candidate-intent.mjs',"services/ingenium-api/lib/dot-v2/manager-process-source.mjs","services/ingenium-api/lib/dot-v2/manager-process-source.d.mts","services/ingenium-api/lib/dot-v2/manager-peer-source.mjs","services/ingenium-api/lib/dot-v2/manager-peer-source.d.mts","services/ingenium-api/lib/dot-v2/manager-connection-source.mjs","services/ingenium-api/lib/dot-v2/manager-connection-source.d.mts","services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs","services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts","services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs","services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts","services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs","services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts","services/ingenium-api/lib/dot-v2/candidate-control-context.mjs","services/ingenium-api/lib/dot-v2/candidate-control-context.d.mts","services/ingenium-api/lib/runtime-manager-client.ts"]){
+  const emittedPath=sourcePath.startsWith('packages/')?'veyra-packages/'+sourcePath.slice('packages/'.length):sourcePath.startsWith('tools/')?'veyra-tools/'+sourcePath.slice('tools/'.length):sourcePath.slice('services/ingenium-api/'.length).replace(/\.ts$/,'.js');
+  const row=closure.files?.find(row=>row.source===sourcePath&&row.path===emittedPath),original=sourceFiles.find(row=>row.path===sourcePath),emitted=files.find(row=>row.path==='/app/services/ingenium-api/dist/'+emittedPath);
   if(!row||row.path!==emittedPath||row.sourceSha256!==original.sha256||row.emittedSha256!==emitted.sha256)unavailable('actual emitted/source closure mismatch');
+ }
+ const workspaceSource=[],workspaceFiles=[];
+ if(workspaceRuntimeV2){
+  for(const path of WORKSPACE_V2_SOURCE_INPUTS){const bytes=await ports.sourceFile(path),declared=source.files.find(row=>row.path===path);if(!Buffer.isBuffer(bytes)||bytes.length===0||bytes.length>16*1024**2||declared?.bytes!==bytes.length||declared.sha256!==hash(bytes))unavailable('workspace source missing from actual frozen archive: '+path);workspaceSource.push({path,bytes:bytes.length,sha256:hash(bytes)});}
+  for(const path of WORKSPACE_V2_ARTIFACTS){const f=await ports.imageFile(expectedImageId,path);if(!f||!Buffer.isBuffer(f.bytes)||!f.bytes.length||f.bytes.length>4*1024**2||f.uid!==0||f.gid!==0||f.kind!=='file'||!integer(f.mode)||f.mode>0o7777||(f.mode&0o022))unavailable('workspace immutable artifact missing: '+path);workspaceFiles.push({path,bytes:f.bytes.length,sha256:hash(f.bytes),uid:f.uid,gid:f.gid,kind:f.kind,mode:f.mode});}
+  validateWorkspaceV2ImageInputs(workspaceSource,workspaceFiles);
+  const originalConfig=await ports.sourceFile('config/opencode-managed/opencode.json'),imageOriginalConfig=await ports.imageFile(expectedImageId,'/usr/local/share/ingenium/opencode-managed/opencode.json'),derivedConfig=await ports.imageFile(expectedImageId,'/usr/local/share/ingenium/opencode-managed/opencode-workspace.json');
+  if(hash(imageOriginalConfig.bytes)!==hash(originalConfig))unavailable('workspace base policy differs from frozen source');
+  if(JSON.stringify(canonical(JSON.parse(derivedConfig.bytes)))!==JSON.stringify(canonical(deriveWorkspaceOpenCodeConfig(JSON.parse(originalConfig)))))unavailable('workspace managed config differs from original policy source');
  }
  const filesSha256=hash(files),harnessSha256=await ports.harnessIdentity();if(!hex(harnessSha256))unavailable('actual inert harness identity');
  const evidence=[];for(const [caseId,expected]of Object.entries(PROTOCOL_CASES)){
@@ -22,5 +35,16 @@ export async function produceCore126ImageManifest(ports,{imageId:expectedImageId
  }
  const after=await ports.frozenSource();if(after.revision!==source.revision||after.sha256!==source.sha256)unavailable('Source changed during qualification');
  const manifest=validateManifest({schemaVersion:1,format:'core126-immutable-image-qualification',target:'user-runtime',transport:CORE126_PROTOCOL,jobRunAudience:'job-run',imageId:expectedImageId,configSha256:hash(rawConfig),config:{User:config.config.User,WorkingDir:config.config.WorkingDir,Entrypoint:config.config.Entrypoint,Cmd:config.config.Cmd??null},source:{revision:source.revision,sha256:source.sha256,files:sourceFiles},files,filesSha256,harnessSha256,approvedScopes:scopes(approvedScopes),protocolEvidence:evidence});
+ if(workspaceRuntimeV2){
+  const sourceFilesSha256=hash(workspaceSource),artifactSetSha256=hash(workspaceFiles),protocolEvidence=[];
+  for(const [caseId,expected]of Object.entries(WORKSPACE_V2_CASES)){
+   const result=await ports.inertWorkspaceProtocolCase({imageId:expectedImageId,artifactSetSha256,sourceFilesSha256,harnessSha256,caseId});
+   if(result?.imageId!==expectedImageId||result.artifactSetSha256!==artifactSetSha256||result.sourceFilesSha256!==sourceFilesSha256||result.harnessSha256!==harnessSha256||result.caseId!==caseId||result.exitCode!==0||JSON.stringify(canonical(result.trace))!==JSON.stringify(canonical(expected))||result.evidenceClass!=='actual-image-inert-workspace-v2-harness')unavailable('missing actual workspace image protocol case: '+caseId);
+   protocolEvidence.push({caseId,imageId:expectedImageId,artifactSetSha256,sourceFilesSha256,harnessSha256,traceSha256:hash(result.trace),exitCode:0,evidenceClass:result.evidenceClass});
+  }
+  const final=await ports.frozenSource();if(final.revision!==source.revision||final.sha256!==source.sha256||await ports.harnessIdentity()!==harnessSha256)unavailable('original source or harness changed during workspace qualification');
+  manifest.workspaceRuntimeV2={schemaVersion:2,sourceFiles:workspaceSource,sourceFilesSha256,files:workspaceFiles,credentialScopes:[...WORKSPACE_V2_CREDENTIAL_SCOPES],harnessSha256,protocolEvidence};
+  validateWorkspaceV2ImageManifest(manifest);
+ }
  const bytes=Buffer.from(JSON.stringify(canonical(manifest),null,2)+'\n');return{manifest,bytes,sha256:hash(bytes),approvalGranted:false,evidenceClass:'exact-image-file-and-inert-protocol; no model dispatch or final platform acceptance'};
 }

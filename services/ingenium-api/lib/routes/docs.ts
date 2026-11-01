@@ -209,7 +209,7 @@ function organizationId(req: any, res: any): string | null {
   const supplied = typeof req.query.organization_id === "string" ? req.query.organization_id : undefined;
   const principal = authorizationPrincipal(requestPrincipal);
   const target = supplied ?? principal.organizationId
-    ?? projects.getGlobalProject()?.organization_id
+    ?? projects.getInstallationStorageProject()?.organization_id
     ?? organizations.BOOTSTRAP_ORGANIZATION_ID;
   if (!req.authorizationPolicy) return target;
   if (!target) {

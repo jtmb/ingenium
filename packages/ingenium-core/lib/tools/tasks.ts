@@ -527,7 +527,7 @@ function taskSourceReferenceScope(
   taskId: string,
 ): TaskSourceReferenceTaskScope | undefined {
   return db.prepare(
-    `SELECT t.id, t.project_id, t.organization_id, p.is_global, p.archived_at
+    `SELECT t.id, t.project_id, t.organization_id, EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=p.id) AS is_global, p.archived_at
      FROM tasks t
      INNER JOIN projects p ON p.id = t.project_id
      WHERE t.id = ? AND t.project_id = ?`,
@@ -765,7 +765,7 @@ function createTaskWithVerifiedSourceSnapshot(
     const replay = receipt<CreateTaskWithSourceReferenceResult>(db, projectId, options.idempotencyKey, hash);
     if (replay !== undefined) return { result: replay, written: false, created: false };
     const project = db.prepare(
-      "SELECT id AS project_id, organization_id, is_global, archived_at FROM projects WHERE id = ?",
+      "SELECT id AS project_id, organization_id, EXISTS (SELECT 1 FROM veyra_installation_legacy_refs installation_ref JOIN veyra_installation_identity installation_id ON installation_id.instance_id=installation_ref.instance_id WHERE installation_id.singleton=1 AND installation_ref.legacy_project_id=projects.id) AS is_global, archived_at FROM projects WHERE id = ?",
     ).get(projectId) as Omit<TaskSourceReferenceTaskScope, "id"> | undefined;
     if (!project) return { result: { status: "not_found" } as CreateTaskWithSourceReferenceResult, written: false, created: false };
 

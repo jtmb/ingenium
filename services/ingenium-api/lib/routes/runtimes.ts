@@ -1,3 +1,4 @@
+import {validateWorkspaceGatewaySessionV2,recordWorkspaceGatewayActivityV2} from '../projects-v2/workspace-v2-gateway.mjs';
 import { issueCompatibilityLaunch } from "../compatibility-runtime-access.js";
 import { Router } from "express";
 import { getDb, runtimes, securityAudit } from "ingenium-core";
@@ -22,14 +23,14 @@ const runtimeActivityInput = z.object({
   observedAt: z.string().datetime(),
 }).strict();
 const browserLaunchInput = z.object({
-  audience: z.enum(["web", "cli", "vscode"]),
+  audience: z.enum(["web", "cli"]),
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   workspaceId: z.string().min(1).max(256),
 }).strict();
-const browserHealthInput = z.object({ audience: z.enum(["web", "cli", "vscode"]) }).strict();
+const browserHealthInput = z.object({ audience: z.enum(["web", "cli"]) }).strict();
 const gatewayExchangeInput = z.object({
   exchangeProof: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-  audience: z.enum(["web", "cli", "vscode"]),
+  audience: z.enum(["web", "cli"]),
   origin: z.string().url().max(512),
   host: z.string().min(1).max(253),
   launcherOrigin: z.string().url().max(512),
@@ -131,14 +132,14 @@ function runtimeScheme(): runtimes.RuntimeTransportScheme {
   return value;
 }
 
-export function compatibilityRuntimeTarget(audience: "web" | "cli" | "vscode"): string {
+export function compatibilityRuntimeTarget(audience: "web" | "cli"): string {
   if (audience === "web") return "http://127.0.0.1:4098/api/info";
   if (audience === "cli") return "http://127.0.0.1:3000/_ingenium/health";
-  return "http://127.0.0.1:4100/?folder=/workspace";
+  throw new Error("Runtime audience is unavailable");
 }
 
 export async function compatibilityRuntimeReady(
-  audience: "web" | "cli" | "vscode",
+  audience: "web" | "cli",
   probe: typeof fetch = fetch,
 ): Promise<boolean> {
   try {
@@ -333,7 +334,7 @@ runtimesRouter.post("/gateway/exchange", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime exchange request is invalid" } });
     return;
   }
-  const exchanged = runtimes.consumeRuntimeBrowserLaunchTicket(parsed.data);
+  const exchanged = runtimes.consumeWorkspaceBrowserLaunchTicketV2(parsed.data) ?? runtimes.consumeRuntimeBrowserLaunchTicket(parsed.data);
   if (!exchanged) {
     res.status(401).json({ error: { code: "INVALID_LAUNCH_TICKET", message: "Runtime launch ticket is invalid or expired" } });
     return;
@@ -342,11 +343,16 @@ runtimesRouter.post("/gateway/exchange", (req, res) => {
   res.json({ data: { sessionToken: exchanged.token, session: exchanged.session } });
 });
 
-runtimesRouter.post("/gateway/validate", (req, res) => {
+runtimesRouter.post("/gateway/validate", async (req, res) => {
   const parsed = gatewayValidateInput.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime session request is invalid" } });
     return;
+  }
+  // Secret-bearing v2 response is ONLY for the original private gateway principal.
+  if(req.principal?.type==='runtime-service'&&req.principal.id==='runtime-gateway'&&req.principal.audience==='runtime-gateway'){
+    try{const workspace=await validateWorkspaceGatewaySessionV2(parsed.data);if(workspace){res.set('Cache-Control','no-store');res.json({data:workspace});return;}}
+    catch{res.status(503).json({error:{code:'WORKSPACE_V2_GATEWAY_UNAVAILABLE'}});return;}
   }
   const resolved = runtimes.resolveRuntimeBrowserSession({
     token: parsed.data.sessionToken,
@@ -363,11 +369,15 @@ runtimesRouter.post("/gateway/validate", (req, res) => {
   res.json({ data: { backendName: resolved.backendName, session: resolved.session } });
 });
 
-runtimesRouter.post("/gateway/activity", (req, res) => {
+runtimesRouter.post("/gateway/activity", async (req, res) => {
   const parsed = gatewayActivityInput.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Runtime activity request is invalid" } });
     return;
+  }
+  if(req.principal?.type==='runtime-service'&&req.principal.id==='runtime-gateway'&&req.principal.audience==='runtime-gateway'){
+    try{const workspace=await recordWorkspaceGatewayActivityV2(parsed.data,runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS",1_800_000,60_000));if(workspace){res.set('Cache-Control','no-store');res.json({data:workspace});return}}
+    catch{res.status(503).json({error:{code:'WORKSPACE_V2_GATEWAY_ACTIVITY_UNAVAILABLE'}});return}
   }
   const resolved = runtimes.resolveRuntimeBrowserSession({
     token: parsed.data.sessionToken,

@@ -1,4 +1,7 @@
 import {AsyncLocalStorage} from "node:async_hooks";
+import {readInstalledCandidateSource} from "../../../../packages/veyra-operations/core126-candidate-observation.mjs";
+import {candidateInertIntentHash} from "../../../../tools/veyra-release/core126-candidate-intent.mjs";
+import {parseStrictJobJson} from "./job-bootstrap-frame.mjs";
 import {dotExecutionDelegation,getDb} from "ingenium-core";
 import {installedDotApprovedScopeReader,revalidateInstalledDotApproval,readInstalledDotOperationEvidence} from "./installed-dot-approved-scope.js";
 import {scopeKey} from "./repository.js";
@@ -90,5 +93,63 @@ export async function refreshOriginalApprovedDotContext<T>(context:unknown,selec
  if(old.database!==getDb())return fail();
  return withOriginalApprovedDotOperation(approval,selection.runId,fresh=>{
   const value=requireContext(fresh,selection,"execute");if(!same(value.declaration,old.declaration))return fail();return work(fresh);
+ });
+}
+type CandidateOriginal=ReturnType<typeof dotExecutionDelegation.acquireCandidateDotExecutionOriginal>;
+type CandidateContext={database:ReturnType<typeof getDb>;original:CandidateOriginal;approval:Approval;selectionSha256:string;operationId:string;followupId:string;runIdentityHash:string};
+const candidateContexts=new WeakMap<object,CandidateContext>(),candidateCurrent=new AsyncLocalStorage<object>();
+/** Protected source selection is data. This private brand additionally requires
+ * the existing actual approval reader and separately branded Core candidate. */
+export function requireOriginalCandidateCoordinatorContext(context:unknown,selection:Core126Selection):void{
+ if(!context||typeof context!=="object"||candidateCurrent.getStore()!==context)return fail();
+ const original=candidateContexts.get(context);if(!original||original.database!==getDb())return fail();
+ const facts=dotExecutionDelegation.requireCandidateDotExecutionOriginal(original.original,expected(selection));
+ const source=readInstalledCandidateSource(),d=source.definition;
+ const evidence=readInstalledDotOperationEvidence(original.approval,selection.runId);
+ const run=getDb().prepare("SELECT job_id,effective_service_principal_id FROM job_runs WHERE id=? AND project_id=?").get(selection.runId,selection.projectId) as {job_id:string;effective_service_principal_id:string}|undefined;
+ if(source.selectionSha256!==original.selectionSha256||d.selection.runId!==selection.runId||!run||
+  d.canary.organizationId!==facts.scope.organizationId||d.canary.ownerUserId!==facts.scope.ownerUserId||d.canary.projectId!==selection.projectId||d.canary.workspaceId!==selection.workspaceId||d.canary.jobId!==run.job_id||d.canary.principalId!==run.effective_service_principal_id||
+  facts.selection.followupId!==original.followupId||facts.selection.operationId!==original.operationId||facts.runIdentityHash!==original.runIdentityHash||
+  evidence.followupId!==original.followupId||evidence.operation.id!==original.operationId||evidence.runIdentityHash!==original.runIdentityHash||!['claimed','running'].includes(evidence.operation.state)||
+  scopeKey(evidence.scope)!==scopeKey(facts.scope)||evidence.execution.runtimeId!==selection.runtimeId||evidence.execution.workspaceId!==selection.workspaceId||evidence.automationPrincipalId!==facts.automationPrincipalId)return fail();
+}
+/** Called only by Root's original installed candidate coordinator after the
+ * SAME Core claim persisted candidate protocol. No HTTP/body/boolean brand. */
+export function withOriginalCandidateCoordinatorOperation<T>(approval:Approval,runId:string,work:(context:object)=>T):T{
+ const evidence=readInstalledDotOperationEvidence(approval,runId);if(!['claimed','running'].includes(evidence.operation.state)||!evidence.scope.projectId)return fail();
+ const original=dotExecutionDelegation.acquireCandidateDotExecutionOriginal({followupId:evidence.followupId,operationId:evidence.operation.id,runId}),source=readInstalledCandidateSource();
+ const context=Object.freeze({});candidateContexts.set(context,{database:getDb(),original,approval,selectionSha256:source.selectionSha256,operationId:evidence.operation.id,followupId:evidence.followupId,runIdentityHash:evidence.runIdentityHash});
+ return candidateCurrent.run(context,()=>{requireOriginalCandidateCoordinatorContext(context,{runId,projectId:evidence.scope.projectId!,runtimeId:evidence.execution.runtimeId,workspaceId:evidence.execution.workspaceId});return work(context);});
+}
+
+/** Reobserve the SAME persisted candidate after an async/manager boundary.
+ * This reads current genuine source/approval/Core owners. It never prepares a
+ * Run, reconstructs an opaque prepare lease or changes selection/deadline.
+ * Manager HTTP authentication remains a separate required boundary.
+ */
+export async function withPersistedOriginalCandidateOperation<T>(runId:string,work:(context:object)=>T|Promise<T>):Promise<T>{
+ if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(runId))return fail();
+ const database=getDb();
+ const saved=database.prepare("SELECT project_id,job_id,runtime_id,workspace_id,purpose,candidate_waiting_protocol,admission_json,candidate_intent_json,candidate_intent_hash,spec_hash,run_identity_hash,deadline_at FROM job_run_managed_execution WHERE run_id=?").get(runId) as {project_id:string;job_id:string;runtime_id:string;workspace_id:string;purpose:string;candidate_waiting_protocol:string|null;admission_json:string;candidate_intent_json:string;candidate_intent_hash:string;spec_hash:string;run_identity_hash:string;deadline_at:string}|undefined;
+ if(!saved||saved.purpose!=="candidate-inert-v1"||saved.candidate_waiting_protocol!=="original-candidate-waiting-v1")return fail();
+ const admission=parseStrictJobJson(Buffer.from(saved.admission_json),65536) as Record<string,unknown>;
+ const intent=parseStrictJobJson(Buffer.from(saved.candidate_intent_json),65536);
+ if(candidateInertIntentHash(intent)!==saved.candidate_intent_hash||admission.purpose!==saved.purpose||admission.candidateIntentHash!==saved.candidate_intent_hash
+  ||admission.specHash!==saved.spec_hash||admission.runId!==runId||admission.jobId!==saved.job_id||admission.projectId!==saved.project_id
+  ||admission.runtimeId!==saved.runtime_id||admission.workspaceId!==saved.workspace_id||admission.deadlineAt!==saved.deadline_at
+  ||typeof admission.selectionSha256!=="string"||!/^[a-f0-9]{64}$/.test(admission.selectionSha256))return fail();
+ const selected=readInstalledCandidateSource();
+ if(selected.selectionSha256!==admission.selectionSha256||selected.definition.selection.runId!==runId)return fail();
+ const approval=await installedDotApprovedScopeReader.resolve(saved.project_id,saved.job_id);
+ if(getDb()!==database)return fail();
+ // The actual Core candidate declaration is immutable; any body replacement,
+ // DB replacement, new protected selection or substituted original refuses.
+ const retained=database.prepare("SELECT admission_json,candidate_intent_json FROM job_run_managed_execution WHERE run_id=?").get(runId) as {admission_json:string;candidate_intent_json:string}|undefined;
+ if(!retained||retained.admission_json!==saved.admission_json||retained.candidate_intent_json!==saved.candidate_intent_json)return fail();
+ return withOriginalCandidateCoordinatorOperation(approval,runId,context=>{
+  const fresh=candidateContexts.get(context);
+  if(!fresh||fresh.database!==database||fresh.selectionSha256!==admission.selectionSha256||fresh.runIdentityHash!==saved.run_identity_hash)return fail();
+  requireOriginalCandidateCoordinatorContext(context,{runId,projectId:saved.project_id,runtimeId:saved.runtime_id,workspaceId:saved.workspace_id});
+  return work(context);
  });
 }

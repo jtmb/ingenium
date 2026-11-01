@@ -1,3 +1,4 @@
+import {runtimeWorkspaceOpenCodeContextV2} from './projects-v2/workspace-v2-opencode.mjs';
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { NextFunction, Request, Response } from "express";
 import { authorization, runtimes } from "ingenium-core";
@@ -27,6 +28,13 @@ export function runtimeOpenCodeContext(req: Request, res: Response, next: NextFu
     return;
   }
   const id = req.get("x-ingenium-runtime-id") ?? (typeof req.query.runtime_id === "string" ? req.query.runtime_id : "");
+  const installationPath=req.path.toLowerCase().replace(/\/$/,'');
+  const installationPreference=req.method==='GET'&&installationPath==='/chat-config'
+    ||req.method==='PUT'&&['/chat-defaults','/chat-selection'].includes(installationPath);
+  // Installation choices need no active workspace. Explicit environment requests
+  // retain their original runtime scope; execution/session routes never skip it.
+  if(!id&&installationPreference){next();return;}
+  if(runtimeWorkspaceOpenCodeContextV2(req,res,next,id))return; // actual v2 row + fresh scope only
   const runtime = runtimes.getRuntimeInstance(id);
   if (!runtime || (runtime.state !== "READY" && runtime.state !== "IDLE") || !req.principal) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });

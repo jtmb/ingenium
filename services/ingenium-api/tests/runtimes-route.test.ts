@@ -555,7 +555,7 @@ describe("AUTH-108 runtime routes", () => {
     });
     expect(replay.status).toBe(401);
 
-    for (const [audience, proof] of [["cli", "q".repeat(43)], ["vscode", "r".repeat(43)]] as const) {
+    for (const [audience, proof] of [["cli", "q".repeat(43)], ["web", "r".repeat(43)]] as const) {
       const audienceLaunch = await fetch(`${apiBase}/api/v1/runtimes/browser/launch`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Origin: "https://dashboard.example.test" },
@@ -684,7 +684,6 @@ describe("AUTH-108 runtime routes", () => {
   it.each([
     ["web", "http://127.0.0.1:4098/api/info"],
     ["cli", "http://127.0.0.1:3000/_ingenium/health"],
-    ["vscode", "http://127.0.0.1:4100/?folder=/workspace"],
   ] as const)("health-checks the exact compatibility %s backend without returning its target", async (audience, target) => {
     const requests: string[] = [];
     const probe = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -789,11 +788,11 @@ describe("AUTH-108 runtime routes", () => {
     await expect(archivedProject.json()).resolves.toEqual({ data: [] });
   });
 
-  it("coalesces concurrent explicit Web, CLI, and VS Code starts into one managed runtime", async () => {
+  it("coalesces concurrent explicit and repeated Web/CLI starts into one managed runtime", async () => {
     const scope = createWorkspace("runtime-route-concurrent");
     browserSession = authentication.createSession(scope.user.id);
 
-    const responses = await Promise.all(["web", "cli", "vscode"].map(() => fetch(
+    const responses = await Promise.all(["web", "cli", "web"].map(() => fetch(
       `${apiBase}/api/v1/runtimes/browser/workspaces/runtime-route-concurrent/start`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
     )));

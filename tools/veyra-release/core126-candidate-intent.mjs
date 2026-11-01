@@ -1,4 +1,4 @@
-import {PROTOCOL_CASES,hash,UUID,hex,imageId,freeze} from '../../packages/veyra-operations/core126-image-contract.mjs';
+import {PROTOCOL_CASES,hash,UUID,SERVICE_PRINCIPAL_ID,hex,imageId,freeze} from '../../packages/veyra-operations/core126-image-contract.mjs';
 /** Pure closed DTO validation ONLY. This module NEVER issues an original lease,
  * accepts a credential, creates an approval, touches Core/manager state or brands authority. */
 export const CANDIDATE_PURPOSE='candidate-inert-v1';
@@ -20,7 +20,7 @@ function shape(v){
  keys(v.parent,['runtimeId','containerId','daemonId','hostId','startIdentity','publicProfileSha256','provisioningRevision']);
  must(uuid(v.parent.runtimeId)&&hex(v.parent.containerId)&&text(v.parent.daemonId)&&typeof v.parent.hostId==='string'&&/^docker-daemon:[a-f0-9]{64}$/.test(v.parent.hostId)&&hex(v.parent.startIdentity)&&hex(v.parent.publicProfileSha256)&&integer(v.parent.provisioningRevision));
  keys(v.scope,['organizationId','projectId','ownerUserId','workspaceId','bindingHash','bindingEpoch','principalId','principalSecurityEpoch','grantRevision']);
- must(['organizationId','projectId','ownerUserId','principalId'].every(k=>uuid(v.scope[k]))&&text(v.scope.workspaceId)&&hex(v.scope.bindingHash)&&['bindingEpoch','principalSecurityEpoch','grantRevision'].every(k=>integer(v.scope[k])));
+ must(['organizationId','projectId','ownerUserId'].every(k=>uuid(v.scope[k]))&&typeof v.scope.principalId==='string'&&SERVICE_PRINCIPAL_ID.test(v.scope.principalId)&&text(v.scope.workspaceId)&&hex(v.scope.bindingHash)&&['bindingEpoch','principalSecurityEpoch','grantRevision'].every(k=>integer(v.scope[k])));
  keys(v.run,['runId','jobId','attemptId','runIdentityHash','jobRevision','scheduleRevision','promptHash','agentHash']);
  must(['runId','jobId','attemptId'].every(k=>uuid(v.run[k]))&&['runIdentityHash','promptHash','agentHash'].every(k=>hex(v.run[k]))&&integer(v.run.jobRevision)&&integer(v.run.scheduleRevision));
  keys(v.resource,['admissionId','runtimeRevision','limits']);must(v.resource.admissionId===v.run.runId&&integer(v.resource.runtimeRevision));

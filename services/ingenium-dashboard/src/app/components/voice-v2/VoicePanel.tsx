@@ -3,9 +3,15 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { VoiceClient } from './voice-client.mjs';
+import type { VoiceSession } from '../../../../../../packages/veyra-voice/session.mjs';
+/** Presentation only: attached-call UI need not inherit an owned-agent session. */
+export type VoicePanelClient=Pick<VoiceClient,'media'|'inputDeviceId'|'outputDeviceId'|'start'|'mute'|'selectDevices'|'reconnect'|'getRetainedCapture'|'hasRetainedCapture'|'discardRetainedCapture'|'end'> & {
+  selectedBackend?:string;attentionText?:string;
+  session:Pick<VoiceSession,'mode'|'subscribe'|'getSnapshot'|'sendText'|'interrupt'|'decideApproval'>;
+};
 import { createDeferredDisposal } from './deferred-disposal.mjs';
 
-export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; mascot: ReactNode; onClose(): void }) {
+export function VoicePanel({ client, mascot, onClose }: { client: VoicePanelClient; mascot: ReactNode; onClose(): void }) {
   const state = useSyncExternalStore(client.session.subscribe, client.session.getSnapshot, client.session.getSnapshot);
   const [text, setText] = useState('');
   const [delivery, setDelivery] = useState<'prompt' | 'steer' | 'queue'>('steer');
@@ -18,14 +24,14 @@ export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; m
   const ended = state.phase === 'ended';
   return <section aria-label={client.session.mode === 'agent-call' ? 'Call with current working agent' : 'Veyra voice'} className="flex min-h-[min(36rem,80dvh)] w-full flex-col rounded-3xl bg-[#0e0e0e] p-4 text-neutral-100 sm:p-6" data-testid="veyra-voice-panel">
     <header className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-400">
-      <span>{client.session.mode === 'dictation' ? 'Dictation · inserts into your draft' : client.session.mode === 'agent-call' ? 'Current working agent' : 'Live conversation'}</span>
+      <span>{client.session.mode === 'dictation' ? 'Dictation · inserts into your draft' : client.session.mode === 'agent-call' ? 'Current working agent' : 'Live conversation'}{client.selectedBackend ? ` · ${client.selectedBackend === 'cpu-onnx' ? 'CPU' : client.selectedBackend}` : ''}</span>
       <button type="button" onClick={() => setShowTranscript(value => !value)} aria-expanded={showTranscript} className="rounded px-2 py-1 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-blue-400">{showTranscript ? 'Hide transcript' : 'Show transcript'}</button>
     </header>
     <div className="flex flex-1 flex-col items-center justify-end gap-4 pb-7 pt-12">
       <div aria-hidden="true" className={`flex size-24 items-center justify-center rounded-full bg-gradient-to-b from-blue-600 via-blue-500 to-blue-100 shadow-lg shadow-blue-500/10 ${state.phase === 'speaking' ? 'motion-safe:animate-pulse' : ''}`}>{mascot}</div>
       <p role="status" aria-live="polite" className="text-sm text-neutral-400">{state.muted && !ended ? 'Microphone off' : state.phase === 'ready' ? 'Listening' : state.phase === 'speaking' ? 'Speaking' : state.phase}</p>
     </div>
-    {(error || state.error) && <p role="alert" className="mb-3 rounded-lg bg-red-950/30 p-3 text-sm text-red-200">{error || state.error}</p>}
+    {(client.attentionText || error || state.error) && <p role="alert" className="mb-3 rounded-lg bg-red-950/30 p-3 text-sm text-red-200">{client.attentionText || error || state.error}</p>}
     {client.hasRetainedCapture() && <div role="alert" className="mb-3 text-sm"><p>The complete unsubmitted capture is retained in this view. Export or discard it before resuming. Closing this view loses this copy.</p><button type="button" onClick={() => {
       const pcm = client.getRetainedCapture(); if (!pcm) return;
       const header = JSON.stringify({ format: 'veyra-pcm16le-v1', sampleRate: 16000, channels: 1, bytes: pcm.length }) + '\n';
@@ -47,6 +53,6 @@ export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; m
     {devices.length > 0 && <div className="mt-3 flex flex-wrap gap-3 text-xs"><label>Microphone <select aria-label="Microphone" value={client.inputDeviceId} onChange={event => run(() => client.selectDevices(event.target.value, client.outputDeviceId))} className="max-w-52 rounded bg-neutral-800 p-2"><option value="">System default</option>{devices.filter(device => device.kind === 'audioinput').map(device => <option key={device.id} value={device.id}>{device.label}</option>)}</select></label><label>Speaker <select aria-label="Speaker" value={client.outputDeviceId} onChange={event => run(() => client.selectDevices(client.inputDeviceId, event.target.value))} className="max-w-52 rounded bg-neutral-800 p-2"><option value="">System default</option>{devices.filter(device => device.kind === 'audiooutput').map(device => <option key={device.id} value={device.id}>{device.label}</option>)}</select></label></div>}
     {state.phase === 'disconnected' && <button type="button" onClick={() => run(() => client.start())} className="mx-auto mt-4 rounded-full bg-blue-600 px-4 py-2 text-sm focus-visible:outline-2 focus-visible:outline-blue-300">Start voice</button>}
     {state.error && !ended && <button type="button" onClick={() => run(() => client.reconnect())} className="mx-auto mt-3 rounded px-3 py-2 text-sm text-blue-300 focus-visible:outline-2 focus-visible:outline-blue-400">Reconnect</button>}
-    <p className="mt-3 text-center text-xs text-neutral-500">Audio is processed only while connected and unmuted. Agent tools retain their existing permissions.</p>
+    <p className="mt-3 text-center text-xs text-neutral-500">Microphone audio is sent only while connected and unmuted. Agent tools retain their existing permissions.</p>
   </section>;
 }

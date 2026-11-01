@@ -1,3 +1,5 @@
+import {readWorkspaceRuntimeOriginalProvision,provisionHash} from './runtime-original-provision.js';
+import {insertWorkspaceRuntimeOriginalProvision,type WorkspaceRuntimeOriginalProvision} from './runtime-original-provision.js';
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { coordinationWorktreeId } from "./coordination.js";
@@ -13,7 +15,7 @@ export const RUNTIME_STATES = [
   "ABSENT", "PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING", "STOPPED", "FAILED", "REVOKED",
 ] as const;
 export type RuntimeState = typeof RUNTIME_STATES[number];
-export type RuntimeLaunchAudience = "web" | "cli" | "vscode";
+export type RuntimeLaunchAudience = "web" | "cli";
 export type RuntimeTransportScheme = "http" | "https";
 
 export interface RuntimeLimits {
@@ -174,7 +176,7 @@ export function runtimeAudienceOrigin(
   scheme: RuntimeTransportScheme,
 ): { origin: string; host: string } {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runtimeId)
-    || !["web", "cli", "vscode"].includes(audience)) throw new Error("Invalid runtime browser scope");
+    || !["web", "cli"].includes(audience)) throw new Error("Invalid runtime browser scope");
   const domain = normalizeRuntimeRootDomain(rootDomain);
   if ((domain.endsWith(".localhost") && scheme !== "http")
     || (!domain.endsWith(".localhost") && scheme !== "https")) throw new Error("Invalid runtime transport");
@@ -230,28 +232,28 @@ export function authorizeWorkspace(input: {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, input.organizationId, input.projectId, input.ownerUserId, storagePath,
         workspaceStorageMappingHash(id, storagePath), timestamp, timestamp);
-    return workspaceDto(db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow);
+    return workspaceDto(db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND id = ?").get(id) as WorkspaceRow);
   });
   checkpointAfterWrite();
   return result;
 }
 
 export function getAuthorizedWorkspace(id: string): AuthorizedWorkspace | undefined {
-  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND id = ?").get(id) as WorkspaceRow | undefined;
   return row ? workspaceDto(row) : undefined;
 }
 
 export function listAuthorizedWorkspaces(ownerUserId?: string): AuthorizedWorkspace[] {
   const rows = ownerUserId
-    ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
-    : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces ORDER BY created_at, id").all();
+    ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
+    : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL ORDER BY created_at, id").all();
   return (rows as WorkspaceRow[]).map(workspaceDto);
 }
 
 export function revokeAuthorizedWorkspace(id: string, now = new Date()): AuthorizedWorkspace | undefined {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND id = ?").get(id) as WorkspaceRow | undefined;
     if (!workspace || workspace.status === "revoked") return workspace ? workspaceDto(workspace) : undefined;
     const runtime = db.prepare("SELECT state FROM runtime_instances WHERE workspace_id = ?").get(id) as { state: RuntimeState } | undefined;
     if (runtime && runtime.state !== "REVOKED") throw new RuntimeConflictError("STATE_CONFLICT");
@@ -263,7 +265,7 @@ export function revokeAuthorizedWorkspace(id: string, now = new Date()): Authori
     db.prepare(`UPDATE authorized_workspaces
       SET status = 'revoked', security_epoch = security_epoch + 1, updated_at = ?
       WHERE id = ? AND status = 'authorized'`).run(timestamp, id);
-    return workspaceDto(db.prepare("SELECT * FROM authorized_workspaces WHERE id = ?").get(id) as WorkspaceRow);
+    return workspaceDto(db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND id = ?").get(id) as WorkspaceRow);
   });
   if (result) checkpointAfterWrite();
   return result;
@@ -283,7 +285,7 @@ export function createRuntimeInstance(workspaceId: string, limits: RuntimeLimits
   assertLimits(limits);
   const runtime = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE id = ? AND status = 'authorized'").get(workspaceId) as WorkspaceRow | undefined;
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NOT NULL AND id = ? AND status = 'authorized'").get(workspaceId) as WorkspaceRow | undefined;
     if (!workspace) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     const id = randomUUID();
     const timestamp = new Date().toISOString();
@@ -296,7 +298,7 @@ export function createRuntimeInstance(workspaceId: string, limits: RuntimeLimits
          `ingenium-runtime-${id.replaceAll("-", "")}`, workspace.security_epoch, timestamp, timestamp);
     db.prepare("INSERT INTO runtime_browser_generations (runtime_id, generation, updated_at) VALUES (?, ?, ?)")
       .run(id, workspace.security_epoch, timestamp);
-    return runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(id) as RuntimeRow);
+    return runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(id) as RuntimeRow);
   });
   checkpointAfterWrite();
   return runtime;
@@ -305,7 +307,7 @@ export function createRuntimeInstance(workspaceId: string, limits: RuntimeLimits
 export function bindRuntimeCapability(runtimeId: string, credentialId: string): void {
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const runtime = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(runtimeId) as RuntimeRow | undefined;
+    const runtime = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(runtimeId) as RuntimeRow | undefined;
     const credential = db.prepare("SELECT expires_at FROM mcp_credentials WHERE id = ?").get(credentialId) as { expires_at: string } | undefined;
     if (!runtime || !credential) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     const timestamp = new Date().toISOString();
@@ -325,12 +327,12 @@ export function bindRuntimeCapability(runtimeId: string, credentialId: string): 
 }
 
 export function getRuntimeInstance(id: string): RuntimeInstance | undefined {
-  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE id = ?").get(id) as RuntimeRow | undefined;
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(id) as RuntimeRow | undefined;
   return row ? runtimeDto(row) : undefined;
 }
 
 export function getRuntimeForWorkspace(workspaceId: string): RuntimeInstance | undefined {
-  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE workspace_id = ?").get(workspaceId) as RuntimeRow | undefined;
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND workspace_id = ?").get(workspaceId) as RuntimeRow | undefined;
   return row ? runtimeDto(row) : undefined;
 }
 
@@ -364,8 +366,8 @@ export function resolveRuntimePreflightScope(input: {
 
 export function listRuntimeInstances(ownerUserId?: string): RuntimeInstance[] {
   const rows = ownerUserId
-    ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
-    : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances ORDER BY created_at, id").all();
+    ? getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND owner_user_id = ? ORDER BY created_at, id").all(ownerUserId)
+    : getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL ORDER BY created_at, id").all();
   return (rows as RuntimeRow[]).map(runtimeDto);
 }
 
@@ -506,7 +508,7 @@ export function transitionRuntime(input: {
 }): RuntimeInstance {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const current = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(input.id) as RuntimeRow | undefined;
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(input.id) as RuntimeRow | undefined;
     if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
     if (!TRANSITIONS[current.state].includes(input.toState)) throw new RuntimeConflictError("STATE_CONFLICT");
@@ -537,7 +539,7 @@ export function transitionRuntime(input: {
         releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, revoked ? 1 : 0,
         input.toState === "STOPPED" || revoked ? 1 : 0, timestamp, timestamp, current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
-    const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(current.id) as RuntimeRow;
     if (revoked) {
       db.prepare("UPDATE runtime_browser_generations SET generation = generation + 1, updated_at = ? WHERE runtime_id = ?")
         .run(timestamp, current.id);
@@ -579,7 +581,7 @@ export function renewLocalRuntimeLifetime(input: {
       WHERE id = ? AND revision = ?`)
       .run(input.idleExpiresAt.toISOString(), input.absoluteExpiresAt.toISOString(), timestamp, current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
-    const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(current.id) as RuntimeRow;
     appendEvent(updated, "state_changed", "system", "compatibility-lifetime-renewal", current.state);
     return runtimeDto(updated);
   });
@@ -592,7 +594,7 @@ export function claimRuntimeLease(input: {
 }): RuntimeInstance {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const current = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(input.id) as RuntimeRow | undefined;
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(input.id) as RuntimeRow | undefined;
     const timestamp = input.now ?? new Date();
     if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
@@ -603,7 +605,7 @@ export function claimRuntimeLease(input: {
       revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
       .run(sha256(input.ownerToken), new Date(timestamp.getTime() + input.ttlMs).toISOString(), timestamp.toISOString(), current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
-    const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(current.id) as RuntimeRow;
     appendEvent(updated, "lease_claimed", "manager", input.actorId);
     return runtimeDto(updated);
   });
@@ -617,7 +619,7 @@ export function recordRuntimeActivity(input: {
 }): RuntimeInstance {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const current = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(input.id) as RuntimeRow | undefined;
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(input.id) as RuntimeRow | undefined;
     if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
     if (current.state !== "READY" && current.state !== "IDLE") throw new RuntimeConflictError("STATE_CONFLICT");
@@ -639,7 +641,7 @@ export function recordRuntimeActivity(input: {
     db.prepare(`UPDATE runtime_instances SET active_connections = ?, active_generations = ?,
       last_authenticated_activity_at = ?, idle_expires_at = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
       .run(connections, generations, timestamp, idleExpiresAt, timestamp, current.id, current.revision);
-    const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(current.id) as RuntimeRow;
     appendEvent(updated, input.kind, "user", input.actorId);
     return runtimeDto(updated);
   });
@@ -722,7 +724,7 @@ export function recordRuntimeCapabilityActivity(input: {
       .run(timestamp, idleExpiresAt, timestamp, runtime.id, runtime.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
     return {
-      runtime: runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(runtime.id) as RuntimeRow),
+      runtime: runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(runtime.id) as RuntimeRow),
       renewed: true,
     };
   });
@@ -734,12 +736,12 @@ export function recordRuntimeHealth(id: string, expectedRevision: number, backen
   if (!/^[0-9a-f]{64}$/.test(backendContainerId)) throw new Error("Invalid backend identity");
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const current = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(id) as RuntimeRow | undefined;
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(id) as RuntimeRow | undefined;
     if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     if (current.revision !== expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
     db.prepare(`UPDATE runtime_instances SET backend_container_id = ?, last_backend_health_at = ?, revision = revision + 1,
       updated_at = ? WHERE id = ? AND revision = ?`).run(backendContainerId, now.toISOString(), now.toISOString(), id, expectedRevision);
-    return runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(id) as RuntimeRow);
+    return runtimeDto(db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(id) as RuntimeRow);
   });
   checkpointAfterWrite();
   return result;
@@ -749,13 +751,14 @@ export function markExpiredRuntimeOrphans(now = new Date()): RuntimeInstance[] {
   const changed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
     const rows = db.prepare(`SELECT * FROM runtime_instances
-      WHERE state IN ('PROVISIONING','STARTING','STOPPING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`)
+      WHERE project_id IS NOT NULL AND state IN ('PROVISIONING','STARTING','STOPPING')
+        AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`)
       .all(now.toISOString()) as RuntimeRow[];
     const results: RuntimeInstance[] = [];
     for (const row of rows) {
       db.prepare(`UPDATE runtime_instances SET state = 'FAILED', revision = revision + 1, lease_owner_hash = NULL,
         lease_expires_at = NULL, updated_at = ? WHERE id = ? AND revision = ?`).run(now.toISOString(), row.id, row.revision);
-      const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(row.id) as RuntimeRow;
+      const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(row.id) as RuntimeRow;
       appendEvent(updated, "orphaned", "system", "runtime-reconciler", row.state);
       results.push(runtimeDto(updated));
     }
@@ -797,12 +800,12 @@ export function issueRuntimeLaunchTicket(input: {
 }): RuntimeLaunchTicket & { token: string } {
   const ttlMs = input.ttlMs ?? 60_000;
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 1_000 || ttlMs > 60_000
-    || !["web", "cli", "vscode"].includes(input.audience)) throw new Error("Invalid runtime launch ticket");
+    || !["web", "cli"].includes(input.audience)) throw new Error("Invalid runtime launch ticket");
   const nonce = randomBytes(16).toString("base64url");
   const token = `rt_${nonce}_${randomBytes(32).toString("base64url")}`;
   const issued = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-    const runtime = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(input.runtimeId) as RuntimeRow | undefined;
+    const runtime = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NOT NULL AND id = ?").get(input.runtimeId) as RuntimeRow | undefined;
     if (!runtime || runtime.owner_user_id !== input.ownerUserId || (runtime.state !== "READY" && runtime.state !== "IDLE")) {
       throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     }
@@ -828,7 +831,7 @@ export function consumeRuntimeLaunchTicket(input: {
   now?: Date;
 }): RuntimeLaunchTicket | undefined {
   const match = /^rt_([A-Za-z0-9_-]{22})_[A-Za-z0-9_-]{43}$/.exec(input.token);
-  if (!match || !["web", "cli", "vscode"].includes(input.audience)) return undefined;
+  if (!match || !["web", "cli"].includes(input.audience)) return undefined;
   const now = input.now ?? new Date();
   const consumed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
@@ -926,7 +929,7 @@ export function consumeRuntimeBrowserLaunchTicket(input: {
   launcherOrigin: string;
   now?: Date;
 }): { session: RuntimeBrowserSession; token: string } | undefined {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof) || !["web", "cli", "vscode"].includes(input.audience)) return undefined;
+  if (!/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof) || !["web", "cli"].includes(input.audience)) return undefined;
   const now = input.now ?? new Date();
   const browserToken = `rbs_${randomBytes(32).toString("base64url")}`;
   const result = execTransaction(() => {
@@ -978,7 +981,7 @@ export function resolveRuntimeBrowserSession(input: {
   now?: Date;
   touch?: boolean;
 }): { session: RuntimeBrowserSession; backendName: string } | undefined {
-  if (!/^rbs_[A-Za-z0-9_-]{43}$/.test(input.token) || !["web", "cli", "vscode"].includes(input.audience)) return undefined;
+  if (!/^rbs_[A-Za-z0-9_-]{43}$/.test(input.token) || !["web", "cli"].includes(input.audience)) return undefined;
   const now = input.now ?? new Date();
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
   const row = db.prepare(`SELECT s.*, r.backend_name FROM runtime_browser_sessions s
@@ -1024,4 +1027,429 @@ export function revokeRuntimeBrowserSessionsForUser(userId: string, now = new Da
   });
   checkpointAfterWrite();
   return changed;
+}
+
+
+export type AuthorizedWorkspaceV2=Omit<AuthorizedWorkspace,'projectId'>&{schemaVersion:2;scopeKind:'workspace';projectId:null};
+export type WorkspaceRuntimeInstanceV2=Omit<RuntimeInstance,'projectId'>&{schemaVersion:2;scopeKind:'workspace';projectId:null};
+type AuthorizedWorkspaceRowV2=Omit<WorkspaceRow,'project_id'>&{schema_version:2;project_id:null};
+type WorkspaceRuntimeRowV2=Omit<RuntimeRow,'project_id'>&{schema_version:2;project_id:null};
+function workspaceV2Dto(row: AuthorizedWorkspaceRowV2): AuthorizedWorkspaceV2 {
+  return {schemaVersion:2,scopeKind:"workspace",
+    id: row.id, organizationId: row.organization_id, projectId: row.project_id, ownerUserId: row.owner_user_id,
+    storagePath: row.storage_path, storageMappingHash: row.storage_mapping_hash, status: row.status,
+    securityEpoch: row.security_epoch, createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
+function runtimeV2Dto(row: WorkspaceRuntimeRowV2): WorkspaceRuntimeInstanceV2 {
+  return {schemaVersion:2,scopeKind:"workspace",
+    id: row.id, workspaceId: row.workspace_id, organizationId: row.organization_id, projectId: row.project_id,
+    ownerUserId: row.owner_user_id, state: row.state, revision: row.revision, leaseExpiresAt: row.lease_expires_at,
+    idleExpiresAt: row.idle_expires_at, absoluteExpiresAt: row.absolute_expires_at, cpuMillis: row.cpu_millis,
+    memoryBytes: row.memory_bytes, pidsLimit: row.pids_limit, diskBytes: row.disk_bytes, processLimit: row.process_limit,
+    backendName: row.backend_name, backendContainerId: row.backend_container_id, securityEpoch: row.security_epoch,
+    activeConnections: row.active_connections, activeGenerations: row.active_generations,
+    lastAuthenticatedActivityAt: row.last_authenticated_activity_at, lastBackendHealthAt: row.last_backend_health_at,
+    createdAt: row.created_at, updatedAt: row.updated_at, stoppedAt: row.stopped_at,
+  };
+}
+
+
+export function authorizeWorkspaceV2(input: {
+  id: string; organizationId: string; projectId:null;schemaVersion:2;scopeKind:"workspace"; ownerUserId: string; storagePath: string;
+}): AuthorizedWorkspaceV2 {
+  if(input.projectId!==null||input.schemaVersion!==2||input.scopeKind!=="workspace"||input.id!==input.id.trim()||input.storagePath!==normalizeStoragePath(input.storagePath))throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+  const id = normalizeText(input.id, 256, "workspace ID");
+  const storagePath = normalizeStoragePath(input.storagePath);
+  const timestamp = new Date().toISOString();
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    db.prepare(`INSERT INTO authorized_workspaces
+      (id, organization_id, project_id, owner_user_id, storage_path, storage_mapping_hash, created_at, updated_at, schema_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2)`)
+      .run(id, input.organizationId, input.projectId, input.ownerUserId, storagePath,
+        workspaceStorageMappingHash(id, storagePath), timestamp, timestamp);
+    return workspaceV2Dto(db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as AuthorizedWorkspaceRowV2);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+
+export function getAuthorizedWorkspaceV2(id: string): AuthorizedWorkspaceV2 | undefined {
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as AuthorizedWorkspaceRowV2 | undefined;
+  return row ? workspaceV2Dto(row) : undefined;
+}
+
+
+export function revokeAuthorizedWorkspaceV2(id: string, now = new Date()): AuthorizedWorkspaceV2 | undefined {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as AuthorizedWorkspaceRowV2 | undefined;
+    if (!workspace || workspace.status === "revoked") return workspace ? workspaceV2Dto(workspace) : undefined;
+    const runtime = db.prepare("SELECT state FROM runtime_instances WHERE workspace_id = ? AND state <> 'REVOKED' LIMIT 1").get(id) as { state: RuntimeState } | undefined;
+    if (runtime && runtime.state !== "REVOKED") throw new RuntimeConflictError("STATE_CONFLICT");
+    const timestamp = now.toISOString();
+    db.prepare("UPDATE mcp_credentials SET revoked_at = ? WHERE workspace_id = ? AND revoked_at IS NULL")
+      .run(timestamp, id);
+    db.prepare("UPDATE runtime_capability_bindings SET revoked_at = ? WHERE workspace_id = ? AND revoked_at IS NULL")
+      .run(timestamp, id);
+    db.prepare(`UPDATE authorized_workspaces
+      SET status = 'revoked', security_epoch = security_epoch + 1, updated_at = ?
+      WHERE id = ? AND status = 'authorized'`).run(timestamp, id);
+    return workspaceV2Dto(db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as AuthorizedWorkspaceRowV2);
+  });
+  if (result) checkpointAfterWrite();
+  return result;
+}
+
+
+export function createWorkspaceRuntimeV2(workspaceId: string, limits: RuntimeLimits): WorkspaceRuntimeInstanceV2 {
+  assertLimits(limits);
+  const runtime = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const workspace = db.prepare("SELECT * FROM authorized_workspaces WHERE project_id IS NULL AND schema_version=2 AND id = ? AND status = 'authorized'").get(workspaceId) as AuthorizedWorkspaceRowV2 | undefined;
+    if (!workspace) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const id = randomUUID();
+    const timestamp = new Date().toISOString();
+    db.prepare(`INSERT INTO runtime_instances
+      (id, workspace_id, organization_id, project_id, owner_user_id, cpu_millis, memory_bytes, pids_limit,
+       disk_bytes, process_limit, backend_name, security_epoch, created_at, updated_at, schema_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`)
+      .run(id, workspace.id, workspace.organization_id, workspace.project_id, workspace.owner_user_id,
+        limits.cpuMillis, limits.memoryBytes, limits.pidsLimit, limits.diskBytes, limits.processLimit,
+         `ingenium-runtime-${id.replaceAll("-", "")}`, workspace.security_epoch, timestamp, timestamp);
+    db.prepare("INSERT INTO runtime_browser_generations (runtime_id, generation, updated_at) VALUES (?, ?, ?)")
+      .run(id, workspace.security_epoch, timestamp);
+    return runtimeV2Dto(db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as WorkspaceRuntimeRowV2);
+  });
+  checkpointAfterWrite();
+  return runtime;
+}
+
+
+export function bindWorkspaceRuntimeCapabilityV2(runtimeId: string, credentialId: string): void {
+  execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const runtime = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(runtimeId) as WorkspaceRuntimeRowV2 | undefined;
+    const credential = db.prepare("SELECT expires_at FROM mcp_credentials WHERE id = ? AND project_id IS NULL AND schema_version=2").get(credentialId) as { expires_at: string } | undefined;
+    if (!runtime || !credential) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const timestamp = new Date().toISOString();
+    const prior = db.prepare("SELECT id, mcp_credential_id FROM runtime_capability_bindings WHERE runtime_id = ? AND revoked_at IS NULL")
+      .get(runtime.id) as { id: string; mcp_credential_id: string } | undefined;
+    if (prior) {
+      db.prepare("UPDATE mcp_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(timestamp, prior.mcp_credential_id);
+      db.prepare("UPDATE runtime_capability_bindings SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(timestamp, prior.id);
+    }
+    db.prepare(`INSERT INTO runtime_capability_bindings
+      (id, runtime_id, mcp_credential_id, organization_id, project_id, owner_user_id, workspace_id, security_epoch, expires_at, created_at, schema_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`)
+      .run(randomUUID(), runtime.id, credentialId, runtime.organization_id, runtime.project_id, runtime.owner_user_id,
+        runtime.workspace_id, runtime.security_epoch, credential.expires_at, timestamp);
+  });
+  checkpointAfterWrite();
+}
+
+
+export function getWorkspaceRuntimeV2(id: string): WorkspaceRuntimeInstanceV2 | undefined {
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as WorkspaceRuntimeRowV2 | undefined;
+  return row ? runtimeV2Dto(row) : undefined;
+}
+
+
+function appendWorkspaceEventV2(runtime: WorkspaceRuntimeRowV2, eventType: string, actorType: "user" | "manager" | "system", actorId: string, fromState?: RuntimeState): void {
+  getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`INSERT INTO runtime_activity_events
+    (id, runtime_id, event_type, from_state, to_state, revision, actor_type, actor_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), runtime.id, eventType, fromState ?? null, runtime.state, runtime.revision, actorType,
+      normalizeText(actorId, 128, "runtime actor"), new Date().toISOString());
+}
+
+
+export function transitionWorkspaceRuntimeV2(input: {
+  id: string; expectedRevision: number; toState: RuntimeState; actorType: "user" | "manager" | "system"; actorId: string;
+  backendContainerId?: string | null; idleExpiresAt?: Date | null; absoluteExpiresAt?: Date | null; maxActiveRuntimes?: number;
+  originalProvision?: WorkspaceRuntimeOriginalProvision;
+}): WorkspaceRuntimeInstanceV2 {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(input.id) as WorkspaceRuntimeRowV2 | undefined;
+    if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
+    if (!TRANSITIONS[current.state].includes(input.toState)) throw new RuntimeConflictError("STATE_CONFLICT");
+    if (input.toState === "PROVISIONING" && input.maxActiveRuntimes !== undefined) {
+      if (!Number.isSafeInteger(input.maxActiveRuntimes) || input.maxActiveRuntimes < 1) throw new Error("Invalid runtime quota");
+      const active = (db.prepare(
+        `SELECT count(*) AS count FROM runtime_instances WHERE owner_user_id = ? AND id <> ? AND state IN (${ACTIVE_STATES.map(() => "?").join(",")})`,
+      ).get(current.owner_user_id, current.id, ...ACTIVE_STATES) as { count: number }).count;
+      if (active >= input.maxActiveRuntimes) throw new RuntimeConflictError("QUOTA_EXCEEDED");
+    }
+    const timestamp = new Date().toISOString();
+    const backend = input.backendContainerId === undefined ? current.backend_container_id : input.backendContainerId;
+    if (backend !== null && !/^[0-9a-f]{64}$/.test(backend)) throw new Error("Invalid backend identity");
+    insertWorkspaceRuntimeOriginalProvision(db,current,input,timestamp); // same original STARTING transaction
+    const revoked = input.toState === "REVOKED";
+    const releaseLease = input.toState === "STOPPED" || input.toState === "FAILED" || revoked;
+    const changed = db.prepare(`UPDATE runtime_instances SET state = ?, revision = revision + 1,
+      backend_container_id = ?, idle_expires_at = ?, absolute_expires_at = ?,
+       active_connections = CASE WHEN ? THEN 0 ELSE active_connections END,
+       active_generations = CASE WHEN ? THEN 0 ELSE active_generations END,
+      lease_owner_hash = CASE WHEN ? THEN NULL ELSE lease_owner_hash END,
+      lease_expires_at = CASE WHEN ? THEN NULL ELSE lease_expires_at END,
+      security_epoch = security_epoch + CASE WHEN ? THEN 1 ELSE 0 END,
+      stopped_at = CASE WHEN ? THEN ? ELSE stopped_at END, updated_at = ?
+      WHERE id = ? AND revision = ?`)
+      .run(input.toState, backend, input.idleExpiresAt?.toISOString() ?? current.idle_expires_at,
+        input.absoluteExpiresAt?.toISOString() ?? current.absolute_expires_at,
+        releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, revoked ? 1 : 0,
+        input.toState === "STOPPED" || revoked ? 1 : 0, timestamp, timestamp, current.id, current.revision);
+    if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(current.id) as WorkspaceRuntimeRowV2;
+    if (revoked) {
+      db.prepare("UPDATE runtime_browser_generations SET generation = generation + 1, updated_at = ? WHERE runtime_id = ?")
+        .run(timestamp, current.id);
+      db.prepare("UPDATE runtime_browser_sessions SET revoked_at = ? WHERE runtime_id = ? AND revoked_at IS NULL")
+        .run(timestamp, current.id);
+    }
+    appendWorkspaceEventV2(updated, revoked ? "revoked" : "state_changed", input.actorType, input.actorId, current.state);
+    return runtimeV2Dto(updated);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+
+export function claimWorkspaceRuntimeLeaseV2(input: {
+  id: string; expectedRevision: number; ownerToken: string; ttlMs: number; actorId: string; now?: Date;
+}): WorkspaceRuntimeInstanceV2 {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(input.id) as WorkspaceRuntimeRowV2 | undefined;
+    const timestamp = input.now ?? new Date();
+    if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
+    if (!Number.isSafeInteger(input.ttlMs) || input.ttlMs < 1_000 || input.ttlMs > 300_000
+      || !/^[A-Za-z0-9_-]{32,512}$/.test(input.ownerToken)) throw new Error("Invalid runtime lease");
+    if (current.lease_expires_at && current.lease_expires_at > timestamp.toISOString()) throw new RuntimeConflictError("LEASE_CONFLICT");
+    const changed = db.prepare(`UPDATE runtime_instances SET lease_owner_hash = ?, lease_expires_at = ?,
+      revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
+      .run(sha256(input.ownerToken), new Date(timestamp.getTime() + input.ttlMs).toISOString(), timestamp.toISOString(), current.id, current.revision);
+    if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(current.id) as WorkspaceRuntimeRowV2;
+    appendWorkspaceEventV2(updated, "lease_claimed", "manager", input.actorId);
+    return runtimeV2Dto(updated);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+
+export function recordWorkspaceRuntimeActivityV2(input: {
+  id: string; expectedRevision: number; kind: "connection_opened" | "connection_closed" | "generation_started" | "generation_finished";
+  actorId: string; now?: Date; idleLeaseMs?: number;
+}): WorkspaceRuntimeInstanceV2 {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(input.id) as WorkspaceRuntimeRowV2 | undefined;
+    if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
+    if (current.state !== "READY" && current.state !== "IDLE") throw new RuntimeConflictError("STATE_CONFLICT");
+    const connections = input.kind === "connection_opened" ? current.active_connections + 1
+      : input.kind === "connection_closed" ? current.active_connections - 1 : current.active_connections;
+    const generations = input.kind === "generation_started" ? current.active_generations + 1
+      : input.kind === "generation_finished" ? current.active_generations - 1 : current.active_generations;
+    if (connections < 0 || generations < 0) throw new RuntimeConflictError("STATE_CONFLICT");
+    const timestamp = (input.now ?? new Date()).toISOString();
+    if (input.idleLeaseMs !== undefined && (!Number.isSafeInteger(input.idleLeaseMs) || input.idleLeaseMs < 1_000)) {
+      throw new Error("Invalid idle runtime lease");
+    }
+    const requestedIdleExpiry = input.idleLeaseMs === undefined
+      ? current.idle_expires_at
+      : new Date(new Date(timestamp).getTime() + input.idleLeaseMs).toISOString();
+    const idleExpiresAt = requestedIdleExpiry && current.absolute_expires_at
+      ? [requestedIdleExpiry, current.absolute_expires_at].sort()[0]!
+      : requestedIdleExpiry;
+    db.prepare(`UPDATE runtime_instances SET active_connections = ?, active_generations = ?,
+      last_authenticated_activity_at = ?, idle_expires_at = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
+      .run(connections, generations, timestamp, idleExpiresAt, timestamp, current.id, current.revision);
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(current.id) as WorkspaceRuntimeRowV2;
+    appendWorkspaceEventV2(updated, input.kind, "user", input.actorId);
+    return runtimeV2Dto(updated);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+
+export function recordWorkspaceRuntimeHealthV2(id: string, expectedRevision: number, backendContainerId: string, now = new Date()): WorkspaceRuntimeInstanceV2 {
+  if (!/^[0-9a-f]{64}$/.test(backendContainerId)) throw new Error("Invalid backend identity");
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const current = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as WorkspaceRuntimeRowV2 | undefined;
+    if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (current.revision !== expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
+    db.prepare(`UPDATE runtime_instances SET backend_container_id = ?, last_backend_health_at = ?, revision = revision + 1,
+      updated_at = ? WHERE id = ? AND revision = ?`).run(backendContainerId, now.toISOString(), now.toISOString(), id, expectedRevision);
+    return runtimeV2Dto(db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(id) as WorkspaceRuntimeRowV2);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+/** Schema2 browser launch remains on the existing canonical writer. The API
+ * must enter its original manager placement owner before issuance. This Core
+ * transaction also rechecks session, membership, original generation and leases;
+ * browser labels or a null Project alone never grant a ticket. */
+export interface WorkspaceRuntimeBrowserSessionV2 extends Omit<RuntimeBrowserSession, 'projectId'> {
+  schemaVersion: 2; scopeKind: 'workspace'; projectId: null;
+}
+type WorkspaceBrowserTicketRowV2 = Omit<RuntimeBrowserTicketRow, 'project_id'> & {
+  schema_version: 2; project_id: null; auth_absolute: string; auth_idle: string;
+  runtime_absolute: string; runtime_idle: string;
+};
+const workspaceBrowserCurrentJoinsV2 = `
+ JOIN authorized_workspaces w ON w.id=r.workspace_id
+ JOIN users u ON u.id=a.user_id
+ JOIN organizations organization ON organization.id=r.organization_id
+ JOIN organization_memberships membership ON membership.organization_id=r.organization_id AND membership.user_id=r.owner_user_id
+ JOIN runtime_browser_generations g ON g.runtime_id=r.id
+ JOIN runtime_original_provisions original ON original.runtime_id=r.id`;
+const workspaceBrowserCurrentWhereV2 = `
+ r.schema_version=2 AND r.project_id IS NULL AND r.state IN ('READY','IDLE')
+ AND w.schema_version=2 AND w.project_id IS NULL AND w.status='authorized'
+ AND w.organization_id=r.organization_id AND w.owner_user_id=r.owner_user_id AND w.security_epoch=r.security_epoch
+ AND a.user_id=r.owner_user_id AND a.revoked_at IS NULL AND a.security_epoch=u.security_epoch AND u.status='active'
+ AND organization.status='active' AND membership.status='active'
+ AND original.schema_version=2 AND original.project_id IS NULL AND original.workspace_id=w.id
+ AND original.organization_id=r.organization_id AND original.owner_user_id=r.owner_user_id
+ AND original.binding_hash=w.storage_mapping_hash AND original.binding_epoch=w.security_epoch
+ AND original.parent_container_id=r.backend_container_id
+ AND a.idle_expires_at>? AND a.absolute_expires_at>? AND r.idle_expires_at>? AND r.absolute_expires_at>?
+ AND (r.lease_expires_at IS NULL OR r.lease_expires_at>?)`;
+export function issueWorkspaceBrowserLaunchTicketV2(input: {
+ runtimeId:string;workspaceId:string;organizationId:string;ownerUserId:string;authSessionId:string;
+ bindingHash:string;bindingEpoch:number;audience:RuntimeLaunchAudience;rootDomain:string;scheme:RuntimeTransportScheme;
+ launcherOrigin:string;exchangeProof:string;ttlMs?:number;now?:Date;
+}): {schemaVersion:2;scopeKind:'workspace';projectId:null;runtimeId:string;workspaceId:string;audience:RuntimeLaunchAudience;origin:string;host:string;launcherOrigin:string;expiresAt:string} {
+ const ttl=input.ttlMs??60000,now=input.now??new Date();
+ if(!Number.isSafeInteger(ttl)||ttl<1000||ttl>60000||!Number.isFinite(now.getTime())||!/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof)||!/^[a-f0-9]{64}$/.test(input.bindingHash)||!Number.isSafeInteger(input.bindingEpoch)||input.bindingEpoch<0)throw new Error('Invalid workspace browser launch request');
+ const scope=runtimeAudienceOrigin(input.runtimeId,input.audience,input.rootDomain,input.scheme),launcher=new URL(input.launcherOrigin);
+ if(launcher.origin!==input.launcherOrigin||launcher.username||launcher.password||(launcher.protocol!=='https:'&&!(launcher.protocol==='http:'&&['localhost','127.0.0.1'].includes(launcher.hostname))))throw new Error('Invalid workspace launcher origin');
+ const at=now.toISOString();
+ const issued=execTransaction(()=>{
+  const db=getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const row=db.prepare(`SELECT r.*,g.generation,a.absolute_expires_at auth_absolute,a.idle_expires_at auth_idle
+   FROM runtime_instances r JOIN auth_sessions a ON a.id=? ${workspaceBrowserCurrentJoinsV2}
+   WHERE ${workspaceBrowserCurrentWhereV2} AND r.id=? AND w.id=? AND r.organization_id=? AND r.owner_user_id=? AND w.storage_mapping_hash=? AND w.security_epoch=?`)
+   .get(input.authSessionId,at,at,at,at,at,input.runtimeId,input.workspaceId,input.organizationId,input.ownerUserId,input.bindingHash,input.bindingEpoch) as (WorkspaceRuntimeRowV2&{generation:number;auth_absolute:string;auth_idle:string})|undefined;
+  if(!row)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const expiresAt=[new Date(now.getTime()+ttl).toISOString(),row.auth_absolute,row.auth_idle,row.absolute_expires_at!,row.idle_expires_at!].sort()[0]!;
+  db.prepare(`INSERT INTO runtime_browser_launch_tickets(schema_version,id,runtime_id,workspace_id,organization_id,project_id,owner_user_id,auth_session_id,launcher_origin,audience,origin,host,token_hash,nonce_hash,generation,expires_at,created_at)
+   VALUES(2,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?)`).run(randomUUID(),row.id,row.workspace_id,row.organization_id,row.owner_user_id,input.authSessionId,input.launcherOrigin,input.audience,scope.origin,scope.host,sha256(randomBytes(32).toString('base64url')),sha256(input.exchangeProof),row.generation,expiresAt,at);
+  return {expiresAt};
+ });checkpointAfterWrite();
+ return {schemaVersion:2,scopeKind:'workspace',projectId:null,runtimeId:input.runtimeId,workspaceId:input.workspaceId,audience:input.audience,...scope,launcherOrigin:input.launcherOrigin,expiresAt:issued.expiresAt};
+}
+/** Only the existing gateway service audience may expose this token through its
+ * original exchange route. Consumption is atomic and checks current authority;
+ * successful exchange does not replace the gateway's fresh manager validation. */
+export function consumeWorkspaceBrowserLaunchTicketV2(input:{exchangeProof:string;audience:RuntimeLaunchAudience;origin:string;host:string;launcherOrigin:string;now?:Date}):{session:WorkspaceRuntimeBrowserSessionV2;token:string}|undefined {
+ if(!/^[A-Za-z0-9_-]{43}$/.test(input.exchangeProof)||!['web','cli'].includes(input.audience))return undefined;
+ const now=input.now??new Date();if(!Number.isFinite(now.getTime()))return undefined;const at=now.toISOString(),token='rbs_'+randomBytes(32).toString('base64url');
+ const result=execTransaction(()=>{
+  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),row=db.prepare(`SELECT t.*,a.absolute_expires_at auth_absolute,a.idle_expires_at auth_idle,r.absolute_expires_at runtime_absolute,r.idle_expires_at runtime_idle
+   FROM runtime_browser_launch_tickets t JOIN runtime_instances r ON r.id=t.runtime_id JOIN auth_sessions a ON a.id=t.auth_session_id ${workspaceBrowserCurrentJoinsV2}
+   WHERE t.schema_version=2 AND t.project_id IS NULL AND t.nonce_hash=? AND t.audience=? AND t.origin=? AND t.host=? AND t.launcher_origin=?
+   AND t.consumed_at IS NULL AND t.expires_at>? AND t.generation=g.generation AND t.workspace_id=w.id AND t.organization_id=r.organization_id AND t.owner_user_id=r.owner_user_id
+   AND ${workspaceBrowserCurrentWhereV2}`)
+   .get(sha256(input.exchangeProof),input.audience,input.origin,input.host,input.launcherOrigin,at,at,at,at,at,at) as WorkspaceBrowserTicketRowV2|undefined;
+  if(!row)return undefined;
+  if(db.prepare('UPDATE runtime_browser_launch_tickets SET consumed_at=? WHERE id=? AND consumed_at IS NULL').run(at,row.id).changes!==1)return undefined;
+  const id=randomUUID(),expiresAt=[row.auth_absolute,row.auth_idle,row.runtime_absolute,row.runtime_idle].sort()[0]!;
+  db.prepare(`INSERT INTO runtime_browser_sessions(schema_version,id,runtime_id,workspace_id,organization_id,project_id,owner_user_id,auth_session_id,audience,origin,host,launcher_origin,token_hash,generation,expires_at,last_seen_at,created_at)
+   VALUES(2,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?)`).run(id,row.runtime_id,row.workspace_id,row.organization_id,row.owner_user_id,row.auth_session_id,row.audience,row.origin,row.host,row.launcher_origin,sha256(token),row.generation,expiresAt,at,at);
+  const session:WorkspaceRuntimeBrowserSessionV2={schemaVersion:2,scopeKind:'workspace',projectId:null,id,runtimeId:row.runtime_id,workspaceId:row.workspace_id,organizationId:row.organization_id,ownerUserId:row.owner_user_id,authSessionId:row.auth_session_id,audience:row.audience,origin:row.origin,host:row.host,launcherOrigin:row.launcher_origin,generation:row.generation,expiresAt,lastSeenAt:at,revokedAt:null,createdAt:at};return session;
+ });if(!result)return undefined;checkpointAfterWrite();return {session:result,token};
+}
+
+
+/** Expired workspace control leases invalidate metadata access, not proof that a
+ * backend has stopped. Preserve backend identity and original provision history;
+ * only the private manager can subsequently reconcile physical retirement. */
+export function markExpiredWorkspaceRuntimeOrphansV2(now = new Date()): WorkspaceRuntimeInstanceV2[] {
+  const timestamp = now.toISOString();
+  const changed = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const rows = db.prepare(`SELECT * FROM runtime_instances
+      WHERE project_id IS NULL AND schema_version = 2
+        AND state IN ('PROVISIONING','STARTING','STOPPING')
+        AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`)
+      .all(timestamp) as WorkspaceRuntimeRowV2[];
+    const results: WorkspaceRuntimeInstanceV2[] = [];
+    for (const row of rows) {
+      const written = db.prepare(`UPDATE runtime_instances SET state = 'FAILED', revision = revision + 1,
+        lease_owner_hash = NULL, lease_expires_at = NULL, active_connections = 0, active_generations = 0,
+        updated_at = ? WHERE id = ? AND revision = ? AND project_id IS NULL AND schema_version = 2
+          AND state IN ('PROVISIONING','STARTING','STOPPING') AND lease_expires_at <= ?`)
+        .run(timestamp, row.id, row.revision, timestamp);
+      if (written.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
+      const updated = db.prepare(`SELECT * FROM runtime_instances
+        WHERE id = ? AND project_id IS NULL AND schema_version = 2`).get(row.id) as WorkspaceRuntimeRowV2;
+      appendWorkspaceEventV2(updated, "orphaned", "system", "runtime-reconciler", row.state);
+      results.push(runtimeV2Dto(updated));
+    }
+    return results;
+  });
+  if (changed.length > 0) checkpointAfterWrite();
+  return changed;
+}
+
+/** Private original-manager retirement DTO. API transport custody is verified by
+ * the fixed manager client before this original Core writer is called. */
+export interface WorkspaceRuntimeRetirementV2 {
+ schemaVersion:2;kind:'original-workspace-runtime-v2-retirement';runtimeId:string;workspaceId:string;
+ parentContainerId:string;daemonId:string;startIdentity:string;publicProfileSha256:string;requestSha256:string;
+ state:'stopped';finishedAt:string;observedAt:number;expiresAt:number;
+}
+function workspaceRetirementHead(db:ReturnType<typeof getDb>,runtimeId:string,expectedRevision:number) {
+ const row=db.prepare("SELECT * FROM runtime_instances WHERE id=? AND schema_version=2 AND project_id IS NULL").get(runtimeId) as WorkspaceRuntimeRowV2|undefined;
+ if(!row||row.revision!==expectedRevision)throw new RuntimeConflictError(row?'REVISION_CONFLICT':'SCOPE_UNAVAILABLE');
+ const head=db.prepare('SELECT runtime_id FROM workspace_execution_generations WHERE workspace_id=? ORDER BY generation DESC LIMIT 1').get(row.workspace_id) as {runtime_id:string}|undefined;
+ if(head?.runtime_id!==runtimeId)throw new RuntimeConflictError('STATE_CONFLICT');
+ return row;
+}
+export function beginWorkspaceRuntimeRetirementV2(runtimeId:string,expectedRevision:number,actorId:string):WorkspaceRuntimeInstanceV2 {
+ const result=execTransaction(()=>{
+  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),r=workspaceRetirementHead(db,runtimeId,expectedRevision);
+  if(!['STARTING','READY','IDLE','STOPPING','STOPPED','FAILED'].includes(r.state))throw new RuntimeConflictError('STATE_CONFLICT');
+  const original=readWorkspaceRuntimeOriginalProvision(db,runtimeId);if(!original||original.parentContainerId!==r.backend_container_id)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const now=new Date().toISOString();
+  // Withdraw access before any external stop. These rows and original history remain.
+  db.prepare('UPDATE mcp_credentials SET revoked_at=? WHERE schema_version=2 AND workspace_id=? AND revoked_at IS NULL').run(now,r.workspace_id);
+  db.prepare('UPDATE runtime_capability_bindings SET revoked_at=? WHERE runtime_id=? AND revoked_at IS NULL').run(now,r.id);
+  db.prepare('UPDATE runtime_browser_sessions SET revoked_at=? WHERE runtime_id=? AND revoked_at IS NULL').run(now,r.id);
+  db.prepare('UPDATE runtime_browser_launch_tickets SET consumed_at=? WHERE runtime_id=? AND consumed_at IS NULL').run(now,r.id);
+  db.prepare('UPDATE runtime_browser_generations SET generation=generation+1,updated_at=? WHERE runtime_id=?').run(now,r.id);
+  const changed=db.prepare("UPDATE runtime_instances SET state='STOPPING',revision=revision+1,active_connections=0,active_generations=0,lease_owner_hash=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND revision=?").run(now,r.id,r.revision);
+  if(changed.changes!==1)throw new RuntimeConflictError('REVISION_CONFLICT');
+  const next=db.prepare('SELECT * FROM runtime_instances WHERE id=?').get(r.id) as WorkspaceRuntimeRowV2;
+  appendWorkspaceEventV2(next,'state_changed','user',actorId,r.state);return runtimeV2Dto(next);
+ });checkpointAfterWrite();return result;
+}
+export function recordWorkspaceRuntimeRetirementV2(runtimeId:string,expectedRevision:number,proof:WorkspaceRuntimeRetirementV2,actorId:string):WorkspaceRuntimeInstanceV2 {
+ const result=execTransaction(()=>{
+  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),r=workspaceRetirementHead(db,runtimeId,expectedRevision),o=readWorkspaceRuntimeOriginalProvision(db,runtimeId),now=Date.now();
+  if(!o||r.state!=='STOPPING'||proof?.schemaVersion!==2||proof.kind!=='original-workspace-runtime-v2-retirement'||proof.state!=='stopped'
+   ||proof.runtimeId!==r.id||proof.workspaceId!==r.workspace_id||proof.parentContainerId!==r.backend_container_id||proof.parentContainerId!==o.parentContainerId
+   ||proof.daemonId!==o.daemonId||proof.startIdentity!==o.startIdentity||proof.publicProfileSha256!==o.publicProfileSha256||proof.requestSha256!==o.requestSha256
+   ||!Number.isSafeInteger(proof.observedAt)||!Number.isSafeInteger(proof.expiresAt)||proof.observedAt>now||now>=proof.expiresAt||proof.expiresAt-proof.observedAt>5000
+   ||!Number.isFinite(Date.parse(proof.finishedAt))||Date.parse(proof.finishedAt)>now)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const timestamp=new Date(now).toISOString(),changed=db.prepare("UPDATE runtime_instances SET state='STOPPED',revision=revision+1,stopped_at=?,updated_at=? WHERE id=? AND revision=?").run(timestamp,timestamp,r.id,r.revision);
+  if(changed.changes!==1)throw new RuntimeConflictError('REVISION_CONFLICT');
+  const prior=db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(r.id) as {parent_container_id:string;daemon_id:string;start_identity:string;public_profile_sha256:string;original_request_sha256:string}|undefined;
+  if(prior){if(prior.parent_container_id!==o.parentContainerId||prior.daemon_id!==o.daemonId||prior.start_identity!==o.startIdentity||prior.public_profile_sha256!==o.publicProfileSha256||prior.original_request_sha256!==o.requestSha256)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');}
+  else db.prepare(`INSERT INTO workspace_execution_retirements(runtime_id,workspace_id,parent_container_id,daemon_id,start_identity,public_profile_sha256,original_request_sha256,observed_at,finished_at,proof_sha256)VALUES(?,?,?,?,?,?,?,?,?,?)`).run(r.id,r.workspace_id,o.parentContainerId,o.daemonId,o.startIdentity,o.publicProfileSha256,o.requestSha256,proof.observedAt,proof.finishedAt,provisionHash(proof));
+  const next=db.prepare('SELECT * FROM runtime_instances WHERE id=?').get(r.id) as WorkspaceRuntimeRowV2;appendWorkspaceEventV2(next,'state_changed','manager',actorId,r.state);return runtimeV2Dto(next);
+ });checkpointAfterWrite();return result;
 }

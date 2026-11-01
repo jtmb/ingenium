@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import { runtimes } from "ingenium-core";
+import { runtimes, workspaceRuntimeCredentialsV2 } from "ingenium-core";
 import { withManagedRequestPlacement } from "./runtime-placement.js";
 import { resolveRequestExecution, type RequestExecutionSelection } from "./projects-v2/request-execution.js";
 import { createRequestMemorySession } from "./memory-v2/request-session.js";
@@ -30,7 +30,7 @@ export async function resolveManagedMemoryEngineOwner(
     const scope = session.resolveScope("read-source", engineSessionId);
     if (scopeKey(scope) !== scopeKey(expectedScope)
       || executionAxes.some(axis => execution[axis] !== expectedExecution[axis])) throw new MemoryError("FORBIDDEN");
-    const runtime = runtimes.getRuntimeInstance(execution.runtimeId);
+    const runtime = scope.projectId === null ? runtimes.getWorkspaceRuntimeV2(execution.runtimeId) : runtimes.getRuntimeInstance(execution.runtimeId);
     if (!runtime || execution.mode !== "runtime" || !runtime.backendContainerId
       || !/^[a-f0-9]{64}$/u.test(runtime.backendContainerId)
       || runtime.backendName !== `ingenium-runtime-${runtime.id.replaceAll("-", "")}`
@@ -44,7 +44,9 @@ export async function resolveManagedMemoryEngineOwner(
       // Actual container identity, not a fabricated native engine boot UUID.
       ownerInstanceId: `managed-container:${runtime.backendContainerId}`,
       directory,
-      target: Object.freeze({ baseUrl: `http://${runtime.backendName}:4098`, directory }),
+      target: Object.freeze({ baseUrl: `http://${runtime.backendName}:4098`, directory,
+        ...(scope.projectId === null ? {authHeader: workspaceRuntimeCredentialsV2.workspaceRuntimeOpenCodeAuthV2(runtime.id)} : {}),
+      }),
     });
   });
 }

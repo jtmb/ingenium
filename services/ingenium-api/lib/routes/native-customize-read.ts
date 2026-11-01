@@ -1,3 +1,4 @@
+import {isInstallationStorageProject} from "ingenium-core";
 import { authorization, skills, skillGovernance, synthesis, observations, pipelineEvents, getDb, HostedRefusal, proposalReviewHash, type HostedGovernanceRow as Row } from "ingenium-core";
 import type { RequestPrincipal } from "../middleware/auth.js";
 import { toAuthorizationPrincipal } from "../authorization-policy.js";
@@ -36,7 +37,7 @@ export async function readHostedGovernance(command:Row,binding:Row,current:()=>R
     case "catalog": {
       if(!["skill","plugin"].includes(command.kind)||!Number.isSafeInteger(command.offset)||command.offset<0
         ||!Number.isSafeInteger(command.limit)||command.limit<1||command.limit>100)reject("INVALID_PAGE");
-      const isSystem=()=>!!getDb().prepare("SELECT 1 FROM projects WHERE id=? AND is_global=1 AND archived_at IS NULL").get(projectId);
+      const isSystem=()=>isInstallationStorageProject(projectId)&&!!getDb().prepare("SELECT 1 FROM projects WHERE id=? AND archived_at IS NULL").get(projectId);
       const canRead:CustomizeAuthority["authorize"]=(context,action,kind,visibility,resourceId)=>{
         const p=current();
         if(p.id!==context.actorId||context.projectId!==projectId||action!=="read"||!["skill","plugin"].includes(kind)

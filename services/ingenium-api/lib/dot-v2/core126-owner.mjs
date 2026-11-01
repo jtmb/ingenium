@@ -1,3 +1,7 @@
+import {requireOriginalCandidateControlContext} from './candidate-control-context.mjs';
+import {createCandidateLifecycleExtension} from "./candidate-lifecycle-owner.mjs";
+import {withOriginalCandidateSourceObservation,spendOriginalCandidateSourceObservation} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
+import {candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
 import {describeStoredManagedPurpose,requireProductionManagedPurpose} from './core126-purpose.mjs';
 import {projectCore126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
 import {createHash,randomUUID} from "node:crypto";
@@ -10,11 +14,16 @@ export const originalJobRunIdentity=run=>sha([run.id,run.job_id,run.project_id,r
 export function createCore126Owner(ports){
  const {getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials,profiles,requireManager,verifierFactory}=ports;
  const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb(),fenceIssuer=randomUUID();
+ const candidateLeases=new WeakMap();
+ // Server-owned handoff of the ORIGINAL prepare key. HTTP metadata can never
+ // recreate this membership; after process restart create-intent stays closed.
+ const retainedCandidateLeases=new Map();
+ const candidateRpcPreparations=new WeakMap(),candidateRpcByRun=new Map();
  const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
  const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
  const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
  const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");requireProductionManagedPurpose(r);return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,effectFence:r.effect_fence??"untracked",retirementProof:r.retirement_proof?JSON.parse(r.retirement_proof):null,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
- function base(selection,ctx){
+ function base(selection,ctx,purpose="production"){
   same();const run=jobs.getJobRun(selection.projectId,selection.runId),job=run&&jobs.getJob(selection.projectId,run.job_id);
   if(!run||!job||run.project_id!==selection.projectId||run.organization_id!==job.organization_id||run.job_id!==job.id||run.job_revision!==job.revision||run.schedule_revision!==job.schedule_revision||run.effective_service_principal_id!==job.service_principal_id||!jobs.isJobRunAuthorizationCurrent(run.project_id,run.id))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
   const workspace=runtimes.getAuthorizedWorkspace(selection.workspaceId),runtime=runtimes.resolveRuntimePreflightScope({runtimeId:selection.runtimeId,organizationId:job.organization_id,projectId:job.project_id,workspaceId:selection.workspaceId,storageMappingHash:workspace?.storageMappingHash});
@@ -30,7 +39,8 @@ export function createCore126Owner(ports){
   const principalEpoch=db.prepare("SELECT security_epoch FROM service_principals WHERE id=? AND status='active'").get(run.effective_service_principal_id)?.security_epoch;
   if(!Number.isSafeInteger(principalEpoch))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
   const facts={run,job,runtime,workspace,principalEpoch,agentConfig:agents.getJobAgentConfig(job.project_id,job.agent)};
-  if(ctx&&!ports.approvedDot?.authorize(ctx,selection,"execute")){const p=ctx.revalidate?.();if(!p||!["browser-user","user-token","service-principal"].includes(p.type)||!authorization.requireProjectPermission(p,job.project_id,"jobs","execute").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");if(job.visibility==="private"&&(!["browser-user","user-token"].includes(p.type)||p.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");}
+  if(purpose==="candidate-inert-v1"){if(!ctx||typeof ports.originalCandidate?.require!=="function"||ports.originalCandidate.require(ctx,selection)!==undefined)fail("MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE");}
+  else if(ctx&&!ports.approvedDot?.authorize(ctx,selection,"execute")){const p=ctx.revalidate?.();if(!p||!["browser-user","user-token","service-principal"].includes(p.type)||!authorization.requireProjectPermission(p,job.project_id,"jobs","execute").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");if(job.visibility==="private"&&(!["browser-user","user-token"].includes(p.type)||p.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");}
   return facts;
  }
  const hasCancelIntent=runId=>!!db.prepare("SELECT 1 FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.state')='cancel_requested' LIMIT 1").get(runId);
@@ -59,15 +69,103 @@ export function createCore126Owner(ports){
   return p;
  };
  const manager=ctx=>{requireManager(ctx);same();};
+ const candidateLifecycle=createCandidateLifecycleExtension({db,getDb,write,clock,readManagedRow:row,baseCurrent:base,originalRunIdentity:originalJobRunIdentity,jobs,candidateLeases});
  return Object.freeze({
   /** Private original-owner lookup only: data discrimination is never a grant. */
   admissionPurpose(runId){const r=row(runId);if(!r)fail('MANAGED_JOB_NOT_FOUND');return describeStoredManagedPurpose(r);},
   async prepareCandidateInert(selection,ctx){
+   candidateLifecycle.requireSchema();
    if(Object.keys(selection).sort().join('|')!=='projectId|runId|runtimeId|workspaceId')fail('MANAGED_JOB_INVALID_SELECTION');
-   base(selection,ctx); // Reuse original permission, source, run, epochs and quota checks; no second claim.
-   // Root's real observation/source/canary constructor is not installed. A DTO or injected port cannot supply it.
-   fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+   const before=base(selection,ctx,"candidate-inert-v1");if(row(selection.runId)||before.run.status!=='running')fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
+   return withOriginalCandidateSourceObservation(ports.imageOwner,before,()=>write(()=>{
+    if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');const facts=base(selection,ctx,"candidate-inert-v1");
+    if(row(selection.runId)||originalJobRunIdentity(facts.run)!==originalJobRunIdentity(before.run)||facts.runtime.revision!==before.runtime.revision||facts.principalEpoch!==before.principalEpoch)fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
+    const {intent,selectionSha256}=spendOriginalCandidateSourceObservation(ports.imageOwner,facts,id(),originalJobRunIdentity(facts.run)),candidateIntentHash=candidateInertIntentHash(intent);
+    const project=db.prepare('SELECT name FROM projects WHERE id=? AND archived_at IS NULL').get(facts.job.project_id);if(project?.name!==intent.canary.projectName)fail('MANAGED_JOB_PUBLIC_CANARY_UNAVAILABLE');
+    const a={purpose:'candidate-inert-v1',candidateIntentHash,selectionSha256,runId:intent.run.runId,jobId:intent.run.jobId,projectId:intent.scope.projectId,organizationId:intent.scope.organizationId,ownerUserId:intent.scope.ownerUserId,attemptId:intent.run.attemptId,runtimeId:intent.parent.runtimeId,runtimeRevision:intent.resource.runtimeRevision,provisioningRevision:intent.parent.provisioningRevision,parentContainerId:intent.parent.containerId,workspaceId:intent.scope.workspaceId,bindingHash:intent.scope.bindingHash,bindingEpoch:intent.scope.bindingEpoch,jobRevision:intent.run.jobRevision,scheduleRevision:intent.run.scheduleRevision,effectFenceIssuer:fenceIssuer,grantRevision:intent.scope.grantRevision,principalSecurityEpoch:intent.scope.principalSecurityEpoch,promptHash:intent.run.promptHash,daemonId:intent.parent.daemonId,imageId:intent.imageId,resourceAdmissionId:intent.resource.admissionId,agentHash:intent.run.agentHash,model:intent.canary.model,limits:intent.resource.limits,projectName:intent.canary.projectName,deadlineAt:intent.expiresAt};a.specHash=sha(a);
+    const columns={candidate_waiting_protocol:'original-candidate-waiting-v1',run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
+    db.prepare('INSERT INTO job_run_managed_execution ('+Object.keys(columns).join(',')+') VALUES ('+Object.keys(columns).map(()=>'?').join(',')+')').run(...Object.values(columns));
+    const lease=Object.freeze({});candidateLeases.set(lease,{db,admission:Object.freeze(structuredClone(a)),intent,selectionSha256});retainedCandidateLeases.set(a.runId,lease);return lease;
+   }));
   },
+  /** Metadata receipt, NOT child material. Opaque key is private to this Core instance. */
+  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');candidateLifecycle.requirePrepared(r.run_id);return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
+  candidateOriginalAdmission(runId,context){
+   manager(context);const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
+   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   const original=row(runId),purpose=original&&describeStoredManagedPurpose(original);
+   if(!original||purpose.purpose!=='candidate-inert-v1'||purpose.candidateIntentHash!==candidateInertIntentHash(saved.intent)
+    ||original.admission_json!==JSON.stringify(saved.admission)||original.spec_hash!==saved.admission.specHash)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   const lifecycle=candidateLifecycle.requirePrepared(runId);
+   return Object.freeze({intent:structuredClone(saved.intent),intentHash:purpose.candidateIntentHash,specHash:original.spec_hash,selectionSha256:saved.selectionSha256,phase:lifecycle.phase,revision:lifecycle.revision});
+  },
+  candidateOriginalManagerState(runId,managerContext,originalContext){
+   manager(managerContext);const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
+   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(originalContext,{runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+   const data=candidateLifecycle.describeOriginalManagerLease(key);if(data.binding.runId!==runId)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return data;
+  },
+  candidateOriginalManagerControlState(runId,managerContext,controlContext){
+   manager(managerContext);const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
+   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   const data=candidateLifecycle.describeOriginalManagerLease(key);
+   if(data.binding.runId!==runId)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   requireOriginalCandidateControlContext(controlContext,data.binding);return data;
+  },
+  candidateOriginalRpcPreparation(runId,context){
+   same();if(candidateRpcByRun.has(runId))fail('MANAGED_CANDIDATE_RPC_ALREADY_SEEN');
+   const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
+   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+   candidateLifecycle.requirePrepared(runId);
+   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');
+   const handle=Object.freeze({});candidateRpcPreparations.set(handle,{db,key,runId});candidateRpcByRun.set(runId,handle);return handle;
+  },
+  requireOriginalCandidateRpcPreparation(handle,context){
+   same();const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
+   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
+   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId:selected.runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');return candidateLifecycle.describeOriginalManagerLease(selected.key);
+  },
+  requireOriginalCandidateRpcControlPreparation(handle,context){
+   same();const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
+   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
+   const data=candidateLifecycle.describeOriginalManagerLease(selected.key);
+   requireOriginalCandidateControlContext(context,data.binding);return data;
+  },
+  requireOriginalCandidateRpcFinalWrite(handle,context){
+   same();if(!db.inTransaction)fail('MANAGED_CANDIDATE_RPC_FINAL_TRANSACTION_REQUIRED');const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
+   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
+   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId:selected.runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');return candidateLifecycle.describeOriginalManagerLease(selected.key);
+  },
+  requireOriginalCandidateRpcFinalControlWrite(handle,context){
+   same();if(!db.inTransaction)fail('MANAGED_CANDIDATE_RPC_FINAL_TRANSACTION_REQUIRED');
+   const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
+   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
+   const data=candidateLifecycle.describeOriginalManagerLease(selected.key);
+   requireOriginalCandidateControlContext(context,data.binding);return data;
+  },
+  candidateCreateIntentForOriginalRun(runId,context,handle){
+   same();const key=retainedCandidateLeases.get(runId);
+   if(!key)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+   return candidateLifecycle.createIntent(key,context,handle);
+  },
+  candidateLaunchMaterial(){fail('MANAGED_JOB_ORIGINAL_CANDIDATE_READINESS_UNAVAILABLE');},
+  // Private same-writer lifecycle; actual original constructors stay unavailable.
+  candidateCreateIntent:(lease,context,handle)=>candidateLifecycle.createIntent(lease,context,handle),
+  candidateBindOriginalChild:(runId,context,handle)=>candidateLifecycle.bindChild(runId,context,handle),
+  candidateStartIntent:(runId,context,handle)=>candidateLifecycle.startIntent(runId,context,handle),
+  candidateObserveWaiting:(runId,context,handle)=>candidateLifecycle.observeWaiting(runId,context,handle),
+  candidateObserveReady:(runId,context,handle)=>candidateLifecycle.observeReady(runId,context,handle),
+  candidateCommitOriginalMaterial:(runId,context,handle)=>candidateLifecycle.commitOriginalMaterial(runId,context,handle),
+  candidateObserveRunning:(runId,context,handle)=>candidateLifecycle.observeRunning(runId,context,handle),
+  candidateRecordOriginalResult:(runId,context,handle)=>candidateLifecycle.recordResult(runId,context,handle),
+  candidateRequestCancellation:(runId,context)=>candidateLifecycle.cancel(runId,context),
+  candidateRetainUnknown:(runId,context,handle)=>candidateLifecycle.unknown(runId,context,handle),
+  candidateRecordOriginalRetirement:(runId,context,handle)=>{const result=candidateLifecycle.retire(runId,context,handle);retainedCandidateLeases.delete(runId);return result;},
+  candidateLifecycleReceipt:(runId,context)=>candidateLifecycle.inspect(runId,context),
   factsForImagePreparation(selection,ctx){
    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
    return base(selection,ctx);

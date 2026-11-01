@@ -1,61 +1,29 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import React from "react";
-
-const { getSetting, setSetting } = vi.hoisted(() => ({
-  getSetting: vi.fn(),
-  setSetting: vi.fn(),
-}));
-
-vi.mock("../src/lib/api", () => ({
-  api: {
-    settings: { get: getSetting, set: setSetting },
-  },
-}));
-
-vi.mock("../src/lib/ProjectContext", () => ({
-  useGlobalProject: () => ({ project: "server-shared", loading: false, error: null }),
-}));
-
-vi.mock("../src/app/components/ThemeProvider", () => ({
-  useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
-}));
-
-vi.mock("../src/app/components/settings/panels/ChatDefaults", () => ({ default: () => <section aria-label="Chat defaults" /> }));
-
-import GeneralPanel from "../src/app/components/settings/panels/GeneralPanel";
-
-beforeEach(() => {
-  getSetting.mockResolvedValue({ data: { key: "archive_retention_days", value: "7" } });
-  setSetting.mockResolvedValue({ data: { key: "archive_retention_days", value: "14" } });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-});
-
-describe("General settings panel", () => {
-  it("loads and saves archive retention through the resolved global project", async () => {
-    render(<GeneralPanel />);
-    const input = await screen.findByDisplayValue("7");
-
-    fireEvent.change(input, { target: { value: "14" } });
-
-    await waitFor(() => expect(setSetting).toHaveBeenCalledWith(
-      "archive_retention_days",
-      "14",
-      "server-shared",
-    ));
-  });
-
-  it("shows validation feedback and does not write an out-of-range value", async () => {
-    render(<GeneralPanel />);
-    const input = await screen.findByDisplayValue("7");
-
-    fireEvent.change(input, { target: { value: "400" } });
-
-    expect(screen.getByRole("alert").textContent).toContain("1 to 365");
-    expect(setSetting).not.toHaveBeenCalled();
-  });
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import React from 'react';
+const m=vi.hoisted(()=>({get:vi.fn(),set:vi.fn(),auth:{user:{id:'alice',status:'active'},session:{id:'session-a'},installationAdmin:true}}));
+vi.mock('../src/lib/api',()=>({api:{installationPreferences:{getArchiveRetention:m.get,setArchiveRetention:m.set}}}));
+vi.mock('../src/lib/AuthContext',()=>({useOptionalAuth:()=>m.auth}));
+vi.mock('../src/lib/ProjectContext',()=>({useGlobalProject:()=>{throw Error('Installation preferences must not discover a project')}}));
+vi.mock('../src/app/components/ThemeProvider',()=>({useTheme:()=>({theme:'system',setTheme:vi.fn()})}));
+vi.mock('../src/app/components/settings/panels/ChatDefaults',()=>({default:()=> <section aria-label="Chat defaults"/>}));
+import GeneralPanel from '../src/app/components/settings/panels/GeneralPanel';
+const pref=(value:string|null='7',revision=1)=>({key:'archive_retention_days',value,revision,valueHash:(revision===1?'a':'b').repeat(64)});
+const saved=(value='14',revision=2)=>({data:pref(value,revision),receipt:{operationId:'opaque-server-receipt',replayed:false,appliedRevision:revision}});
+function deferred<T>(){let resolve!:(value:T)=>void;let reject!:(reason:Error)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}}
+beforeEach(()=>{m.get.mockReset().mockResolvedValue({data:pref()});m.set.mockReset().mockResolvedValue(saved());m.auth={user:{id:'alice',status:'active'},session:{id:'session-a'},installationAdmin:true}});
+afterEach(()=>cleanup());
+describe('installation-owned General settings',()=>{
+ it('loads and saves archive retention using the exact installation version without a project',async()=>{
+  render(<GeneralPanel/>);const input=await screen.findByRole('spinbutton',{name:'Archive retention'});await waitFor(()=>expect(input).toHaveValue(7));fireEvent.change(input,{target:{value:'14'}});
+  await waitFor(()=>expect(m.set).toHaveBeenCalledExactlyOnceWith({operationId:expect.any(String),expectedRevision:1,expectedValueHash:'a'.repeat(64),value:'14'}));await screen.findByText('Saved ✓');expect(input).toHaveValue(14);expect(m.get).toHaveBeenCalledExactlyOnceWith();
+ });
+ it('shows validation feedback and refuses an out-of-range write',async()=>{render(<GeneralPanel/>);const input=await screen.findByDisplayValue('7');fireEvent.change(input,{target:{value:'400'}});expect(screen.getByRole('alert').textContent).toContain('1 to 365');expect(m.set).not.toHaveBeenCalled()});
+ it('disables the current input while the exact write is pending',async()=>{const write=deferred<ReturnType<typeof saved>>();m.set.mockReturnValue(write.promise);render(<GeneralPanel/>);const input=await screen.findByDisplayValue('7');fireEvent.change(input,{target:{value:'14'}});expect(input).toBeDisabled();fireEvent.change(input,{target:{value:'21'}});expect(m.set).toHaveBeenCalledTimes(1);await act(async()=>write.resolve(saved()));expect(input).toBeEnabled();expect(input).toHaveValue(14)});
+ it('reloads the actual installation after an unknown write result without resending it',async()=>{m.set.mockRejectedValue(Error('Response unavailable'));m.get.mockResolvedValueOnce({data:pref()}).mockResolvedValueOnce({data:pref('14',2)});render(<GeneralPanel/>);fireEvent.change(await screen.findByDisplayValue('7'),{target:{value:'14'}});await screen.findByText('Response unavailable');expect(screen.getByRole('spinbutton')).toHaveValue(7);fireEvent.click(screen.getByRole('button',{name:'Reload archive retention'}));await screen.findByDisplayValue('14');expect(m.set).toHaveBeenCalledTimes(1)});
+ it('displays the current value from a replay receipt after a later edit',async()=>{m.set.mockResolvedValue({...saved('21',3),receipt:{operationId:'original',replayed:true,appliedRevision:2}});render(<GeneralPanel/>);fireEvent.change(await screen.findByDisplayValue('7'),{target:{value:'14'}});await screen.findByText('Current installation value loaded');expect(screen.getByRole('spinbutton')).toHaveValue(21);expect(screen.queryByText('Saved ✓')).toBeNull()});
+ it('ignores an earlier account read after a new account has loaded',async()=>{const old=deferred<{data:ReturnType<typeof pref>}>();m.get.mockReturnValueOnce(old.promise).mockResolvedValueOnce({data:pref('28',2)});const v=render(<GeneralPanel/>);m.auth={...m.auth,user:{id:'bob',status:'active'},session:{id:'session-b'}};v.rerender(<GeneralPanel/>);await screen.findByDisplayValue('28');await act(async()=>old.resolve({data:pref('7')}));expect(screen.getByRole('spinbutton')).toHaveValue(28);expect(m.get).toHaveBeenCalledTimes(2)});
+ it('withdraws old settings on session replacement and ignores a late save response',async()=>{const old=deferred<ReturnType<typeof saved>>();m.set.mockReturnValueOnce(old.promise);m.get.mockResolvedValueOnce({data:pref()}).mockResolvedValueOnce({data:pref('28',3)});const v=render(<GeneralPanel/>);fireEvent.change(await screen.findByDisplayValue('7'),{target:{value:'14'}});m.auth={...m.auth,session:{id:'session-a2'}};v.rerender(<GeneralPanel/>);expect(screen.queryByDisplayValue('14')).toBeNull();await screen.findByDisplayValue('28');await act(async()=>old.resolve(saved()));expect(screen.getByRole('spinbutton')).toHaveValue(28);expect(screen.queryByText('Saved ✓')).toBeNull()});
+ it('preserves theme and Chat defaults when installation access is unavailable',async()=>{m.get.mockRejectedValue(Error('Installation administrator required'));render(<GeneralPanel/>);await screen.findByText('Installation administrator required');expect(screen.getByRole('combobox',{name:'Theme'})).toBeTruthy();expect(screen.getByRole('region',{name:'Chat defaults'})).toBeTruthy();expect(screen.queryByRole('spinbutton')).toBeNull();expect(m.set).not.toHaveBeenCalled()});
+ it('does not invent a stored default or silently normalize an invalid legacy value',async()=>{m.get.mockResolvedValue({data:pref('7bad')});render(<GeneralPanel/>);await waitFor(()=>expect(screen.getByRole('spinbutton')).toHaveValue(null));expect(m.set).not.toHaveBeenCalled();fireEvent.change(screen.getByRole('spinbutton'),{target:{value:'14'}});await waitFor(()=>expect(m.set).toHaveBeenCalledWith(expect.objectContaining({expectedValueHash:'a'.repeat(64),value:'14'})))});
 });

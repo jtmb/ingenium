@@ -761,9 +761,18 @@ export function startJobRun(
  * Mark a job run as finished with a terminal status and optional exit code.
  * Returns undefined if the run ID doesn't exist.
  */
-function managedExecutionForRun(db:ReturnType<typeof getDb>,projectId:string,runId:string):{phase:string;result_json:string|null;retirement_proof:string|null}|undefined {
+type ManagedRunLifecycle={phase:string;result_json:string|null;retirement_proof:string|null;candidate:boolean};
+function managedExecutionForRun(db:ReturnType<typeof getDb>,projectId:string,runId:string):ManagedRunLifecycle|undefined {
   if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_run_managed_execution'").get())return undefined;
-  return db.prepare("SELECT phase,result_json,retirement_proof FROM job_run_managed_execution WHERE run_id=? AND project_id=?").get(runId,projectId) as {phase:string;result_json:string|null;retirement_proof:string|null}|undefined;
+  const base=db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=? AND project_id=?").get(runId,projectId) as {phase:string;result_json:string|null;retirement_proof:string|null;candidate_waiting_protocol?:string|null;purpose?:string;attempt_id:string;spec_hash:string;candidate_intent_hash?:string|null}|undefined;
+  if(!base)return undefined;
+  if(base.candidate_waiting_protocol!=="original-candidate-waiting-v1")return {...base,candidate:false};
+  if(base.purpose!=="candidate-inert-v1")throw Error("Original candidate lifecycle discriminator is invalid");
+  const extension=db.prepare("SELECT phase,result_json,retirement_json AS retirement_proof FROM job_run_candidate_lifecycle WHERE run_id=? AND attempt_id=? AND spec_hash=? AND candidate_intent_hash=?").get(runId,base.attempt_id,base.spec_hash,base.candidate_intent_hash) as Omit<ManagedRunLifecycle,"candidate">|undefined;
+  if(!extension)throw Error("Original candidate lifecycle is unavailable");
+  // The base remains immutable/prepared. Only its exact same-run extension
+  // records candidate physical retirement; this read mints no dispatch proof.
+  return {...extension,candidate:true};
 }
 export function isManagedJobRun(projectId:string,runId:string):boolean {return !!managedExecutionForRun(getDb(dbPath()),projectId,runId);}
 
@@ -783,7 +792,7 @@ export function finishJobRun(projectId: string, runId: string, status: "success"
     if(managed){
       if(managed.phase!=="retired"||!managed.retirement_proof)throw Error("Managed JobRun requires positive original-container retirement");
       const prior=getJobRunFromDb(db,projectId,runId);if(prior&&!["running","queued"].includes(prior.status))return prior;
-      if(status==="success"){const result=managed.result_json?JSON.parse(managed.result_json):null,proof=JSON.parse(managed.retirement_proof);if(!result?.verified||result.exitCode!==0||proof.exitCode!==0)throw Error("Managed JobRun response verification unavailable");}
+      if(status==="success"){const result=managed.result_json?JSON.parse(managed.result_json):null,proof=JSON.parse(managed.retirement_proof);if((managed.candidate?result?.verification!=="response-verified"||exitCode!==0:!result?.verified)||result.exitCode!==0||proof.exitCode!==0)throw Error("Managed JobRun response verification unavailable");}
     }
 
     db.prepare(
@@ -819,7 +828,13 @@ export function cancelJobRun(projectId: string, runId: string): JobRunWithEventM
 
     const managed=managedExecutionForRun(db,projectId,runId);
     if(managed&&managed.phase!=="retired"){
-      db.prepare("UPDATE job_run_managed_execution SET phase='cancel_requested',revision=revision+1,updated_at=? WHERE run_id=? AND project_id=? AND phase!='retired'").run(now,runId,projectId);
+      if(managed.candidate){
+        // Existing authorized Job cancellation records only a reduction in
+        // the exact retained candidate. It grants no control/retirement token,
+        // effect replay or terminal Run status, including after its deadline.
+        const requestedAt=Date.parse(now);
+        db.prepare("UPDATE job_run_candidate_lifecycle SET cancel_requested_ms=max(updated_ms,?),revision=revision+1,updated_ms=max(updated_ms,?) WHERE run_id=? AND project_id=? AND phase!='retired' AND cancel_requested_ms IS NULL").run(requestedAt,requestedAt,runId,projectId);
+      }else db.prepare("UPDATE job_run_managed_execution SET phase='cancel_requested',revision=revision+1,updated_at=? WHERE run_id=? AND project_id=? AND phase!='retired'").run(now,runId,projectId);
       db.prepare("UPDATE veyra_dot_records SET revision=revision+1,body=json_set(body,'$.state','cancel_requested','$.revision',revision+1,'$.updatedAt',?) WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.state') NOT IN ('success','failed','cancelled','skipped')").run(now,runId,projectId);
       return getJobRunFromDb(db,projectId,runId)!;
     }

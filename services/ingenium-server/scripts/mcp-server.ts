@@ -275,6 +275,10 @@ function launcherAuthorizationBinding(value: unknown): LauncherAuthorizationBind
   };
 }
 
+// Canonical workspace-only tool is a negative, normally hidden legacy facet.
+server.registerTool("workspace_runtime_scope", {description:"Requires the original workspace-runtime-v2 transport.",inputSchema:{}},
+ wrapHandler(C("workspace_runtime_scope"),async()=>({isError:true,content:[{type:"text" as const,text:JSON.stringify({code:"WORKSPACE_RUNTIME_V2_REQUIRED"})}]})));
+
 server.registerTool(
   "setting_get",
   { description: "Get a setting value by key", inputSchema: { project: projectParam, key: z.string() } },

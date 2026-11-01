@@ -36,26 +36,26 @@ function sendProtectedOAuthSecretError(
 
 /**
  * OAuth client secrets are mail-service credentials, not dashboard-project
- * settings. Resolve them through the canonical global project on the server and
+ * settings. Resolve them through the mapped installation storage owner and
  * deliberately ignore the selected dashboard project.
  */
 function requireCanonicalOAuthProject(res: import("express").Response): string | null {
   try {
-    const globalProject = projects.getCanonicalGlobalProject();
+    const globalProject = projects.getInstallationStorageProject();
     if (globalProject) return globalProject.id;
   } catch {
     // Do not disclose database integrity details through a credential route.
-    logger.warn("settings", "OAuth client-secret request rejected because canonical global project resolution failed");
-    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage is unavailable until the canonical global project is repaired" } });
+    logger.warn("settings", "OAuth client-secret request rejected because installation storage resolution failed");
+    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage is unavailable until installation storage is repaired" } });
     return null;
   }
-  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage requires the canonical global project" } });
+  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage requires its installation owner" } });
   return null;
 }
 
 function requireCanonicalProviderProject(res: import("express").Response): string | null {
   try {
-    const globalProject = projects.getCanonicalGlobalProject();
+    const globalProject = projects.getInstallationStorageProject();
     if (globalProject) return globalProject.id;
   } catch {
     // Keep provider storage unavailable rather than inheriting an arbitrary
@@ -64,7 +64,7 @@ function requireCanonicalProviderProject(res: import("express").Response): strin
   res.status(503).json({
     error: {
       code: "GLOBAL_PROJECT_UNAVAILABLE",
-      message: "Provider storage requires the canonical global project.",
+      message: "Provider storage requires its installation owner.",
     },
   });
   return null;

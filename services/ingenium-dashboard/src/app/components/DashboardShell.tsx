@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname,useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AuthProvider } from "@/lib/AuthContext";
 import { OrganizationProvider } from "@/lib/OrganizationContext";
@@ -20,11 +20,14 @@ const PUBLIC_ROUTES = ["/login", "/bootstrap", "/forgot-password", "/reset-passw
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const params = useSearchParams();
   if (PUBLIC_ROUTES.includes(pathname)) return children;
   const isChatRoute = pathname === "/chat" || Boolean(pathname?.startsWith("/chat/"));
-  const work = pathname === "/work";
+  const savedHistory = pathname === "/work/history";
+  const work = pathname === "/work" || savedHistory;
+  const projectlessWork = savedHistory || work && !params.has("project");
   const customize = pathname === "/customize" || pathname.startsWith("/customize/");
-  return <AuthProvider><OrganizationProvider><ProjectProvider><RuntimeProvider><NavigationProvider>
+  return <AuthProvider><OrganizationProvider><ProjectProvider projectless={projectlessWork}><RuntimeProvider projectless={projectlessWork}><NavigationProvider>
     {work || customize ? <div data-nav-background="workspace" className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
       {customize && <ApplicationRail />}
       <div className="flex-1 min-h-0 min-w-0"><MainContainer><Suspense>{children}</Suspense></MainContainer></div>

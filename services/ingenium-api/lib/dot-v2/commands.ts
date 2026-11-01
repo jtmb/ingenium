@@ -28,5 +28,5 @@ export function executeDotCommand(service: DotService, actor: Actor, scope: DotS
 export function dotErrorResponse(error: unknown): { status:number; body:{error:{code:string;message:string}} } {
   const code = error instanceof DotConflict ? error.code : error instanceof DotError ? error.code : error instanceof RangeError ? "DOT_VALIDATION" : "DOT_INTERNAL_ERROR";
   const status = code === "DOT_REQUEST_UNAUTHENTICATED" ? 401 : ["DOT_EXECUTION_UNAVAILABLE","DOT_CAPABILITIES_UNAVAILABLE"].includes(code) ? 503 : code === "DOT_REQUEST_BINDING_CHANGED" ? 409 : code === "DOT_REVISION_CONFLICT" ? 409 : code === "DOT_NOT_FOUND" ? 404 : ["DOT_FORBIDDEN","DOT_MEMORY_DISABLED","DOT_SOURCE_REVOKED"].includes(code) ? 403 : code === "DOT_INTERNAL_ERROR" ? 500 : ["DOT_JOB_BINDING_CHANGED","DOT_SOURCE_CONFLICT"].includes(code) ? 409 : 422;
-  return {status,body:{error:{code,message:status===500 ? "Dot could not complete this operation. Inspect operation status before retrying." : code.replaceAll("_"," ")}}};
+  return {status,body:{error:{code,message:status===500 ? "veyra-bot could not complete this operation. Inspect operation status before retrying." : code.replace(/^DOT_/,"veyra-bot ").replaceAll("_"," ").toLowerCase()}}};
 }

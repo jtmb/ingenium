@@ -1,6 +1,7 @@
+import {createOriginalCandidateManagerHttp} from "./candidate-manager-http.mjs";
 import {agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault} from "ingenium-core";
 import {createHash} from "node:crypto";
-import {originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
+import {requireOriginalCandidateCoordinatorContext,originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
 import {createOriginalManagedProviderResolution} from "./core126-provider-resolution.js";
 import type {Core126ImageOwner} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
 import type {Core126Facts,Core126Handlers} from "./managed-job-contracts.mjs";
@@ -55,7 +56,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    try{if(binding(provider)!==admission.modelBindingHash)throw Error("Managed JobRun provider changed");}finally{provider.release();}
   },
  };
- const owner=createCore126Owner({approvedDot:originalDotContextAuthority,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
+ const owner=createCore126Owner({imageOwner,originalCandidate:{require:requireOriginalCandidateCoordinatorContext},approvedDot:originalDotContextAuthority,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
  const authorizeTool=createCore126ToolAuthorizer({credentials:mcpCredentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog});
  const broker=createActualCore126Broker(owner,authorizeTool);
  dispatchExistingTool=broker.dispatch;
@@ -67,8 +68,10 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
   if(original.purpose!=='production')throw Object.assign(Error('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE'),{status:503});};
  const rawHandlers=createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list});
  const withdrawOriginal=createCore126WithdrawalHandler({credentials:mcpCredentials});
+ const candidateManagerHttp=createOriginalCandidateManagerHttp(owner);
  const handlers:Core126Handlers={
   async internal(request){
+   const candidate=await candidateManagerHttp(request);if(candidate)return candidate;
    const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/([^/]+)$/.exec(request.path),runId=match?.[1],operation=match?.[2];
    if(!runId)return rawHandlers.internal(request);
    managerGuard.context(request); // Authenticate BEFORE original Core lookup or manager observations.

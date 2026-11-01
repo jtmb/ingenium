@@ -7,7 +7,8 @@ export interface Core126ManifestProducerPorts {
  imageConfig(imageId:string):Promise<Buffer>;
  imageFile(imageId:string,path:string):Promise<{bytes:Buffer;uid:number;gid:number;kind:'file';mode:number}>;
  harnessIdentity():Promise<string>;
+ inertWorkspaceProtocolCase?(input:{imageId:string;artifactSetSha256:string;sourceFilesSha256:string;harnessSha256:string;caseId:string}):Promise<{imageId:string;artifactSetSha256:string;sourceFilesSha256:string;harnessSha256:string;caseId:string;exitCode:number;trace:unknown;evidenceClass:'actual-image-inert-workspace-v2-harness'}>;
  /** Actual approved inert image harness, never a bool or expected-trace echo adapter. */
  inertProtocolCase(input:{imageId:string;filesSha256:string;harnessSha256:string;caseId:string}):Promise<{imageId:string;filesSha256:string;harnessSha256:string;caseId:string;exitCode:number;trace:unknown;evidenceClass:'actual-image-inert-protocol-harness'}>;
 }
-export function produceCore126ImageManifest(ports:Core126ManifestProducerPorts,input:{imageId:string;approvedScopes:readonly string[]}):Promise<{manifest:Core126Manifest;bytes:Buffer;sha256:string;approvalGranted:false;evidenceClass:string}>;
+export function produceCore126ImageManifest(ports:Core126ManifestProducerPorts,input:{imageId:string;approvedScopes:readonly string[];workspaceRuntimeV2?:boolean}):Promise<{manifest:Core126Manifest;bytes:Buffer;sha256:string;approvalGranted:false;evidenceClass:string}>;

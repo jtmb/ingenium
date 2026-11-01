@@ -695,7 +695,7 @@ if(!$VerifyOnly){
  AddSource "$ui/controller.mjs" 'apps/web/src/features/workbench/memoryController.mjs' $null
  AddSource "$ui/native/adapter.mjs" 'apps/web/src/features/workbench/native-memory/adapter.mjs' @{find='../controller.mjs';replacement='../memoryController.mjs'}
  AddSource "$ui/native/adapter.d.mts" 'apps/web/src/features/workbench/native-memory/adapter.d.mts' $null
- AddSource "$ui/native/LearnedMemoryControls.tsx" 'apps/web/src/features/workbench/native-memory/LearnedMemoryControls.tsx' $null
+ AddSource 'docs/workstreams/memory/native/LearnedMemoryControls.tsx' 'apps/web/src/features/workbench/native-memory/LearnedMemoryControls.tsx' $null
  [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'sources.json'),($rows|ConvertTo-Json -Depth 6).Replace([string][char]13,''),$utf8)
 }
 "Verified $($ops.Count) exact preimages against $revision; no Native writes."

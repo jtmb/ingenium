@@ -5,6 +5,9 @@ import { accessSync, closeSync, constants, existsSync, fchmodSync, fstatSync, fs
 import { basename, resolve, sep } from "node:path";
 import { logger } from "../logger.js";
 import { getConfigPath } from "./paths.js";
+import {managedPluginConfigPathIfPresent} from "./plugin-projection-transition.js";
+import {readConfigProjection} from "./configs.js";
+import {parsePluginConfiguration} from "./plugin-config-text.js";
 
 export const AGENT_CATEGORIES = ["primary", "execution", "research", "security", "chat"] as const;
 export type AgentCategory = typeof AGENT_CATEGORIES[number];
@@ -609,6 +612,7 @@ function parseConfig(content: string): Record<string, unknown> {
 }
 
 function readProjectConfig(projectId: string): Record<string, unknown> {
+  if(managedPluginConfigPathIfPresent(projectId)){const actual=readConfigProjection(projectId,"project");if(!actual)throw new Error("Managed project runtime config is missing");return parsePluginConfiguration(actual.content);}
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const stored = (db.prepare("SELECT content FROM configs WHERE project_id = ? AND type = 'project'").get(projectId) as { content?: string } | undefined)?.content;
   if (stored) {

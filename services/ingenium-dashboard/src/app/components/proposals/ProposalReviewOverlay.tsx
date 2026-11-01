@@ -65,6 +65,8 @@ type ProposalReviewOverlayProps = {
   currentSkillContent: string | null;
   enrichedObservations: EnrichedObservation[];
   project: string;
+  onSubmit?: () => void;
+  onRefresh?: () => void;
   onApprove: (reviewer: string, reason: string) => void;
   onReject: (reviewer: string, reason: string) => void;
   onRollback: (reviewer: string, reason: string) => void;
@@ -145,6 +147,8 @@ export default function ProposalReviewOverlay({
   currentSkillContent,
   enrichedObservations,
   project,
+  onSubmit,
+  onRefresh,
   onApprove,
   onReject,
   onRollback,
@@ -343,6 +347,16 @@ export default function ProposalReviewOverlay({
 
           {/* Review actions — unified form (replace duplicated Approve/Reject) */}
           <div className="border-t border-[var(--color-border)] pt-4 space-y-3">
+            {detail.status === "draft" && onSubmit && <div className="space-y-2">
+              <p className="text-sm text-[var(--color-text-muted)]">Submit this draft for review. Installation still requires a separate approval.</p>
+              <button type="button" onClick={onSubmit} disabled={actionLoading || detailLoading}
+                className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50">
+                {actionLoading ? "Submitting…" : "Submit for review"}
+              </button>
+              {actionError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{actionError}</p>}
+            </div>}
+            {onRefresh && <button type="button" onClick={onRefresh} disabled={actionLoading || detailLoading}
+              className="rounded border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Refresh proposal status</button>}
             {canApprove && (
               <ReviewActionForm
                 action="approve"

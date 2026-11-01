@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmodSync, closeSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMcpTransportParity } from "./verify-mcp-transport-parity.mjs";
 
@@ -10,7 +10,7 @@ const EXTENSION_EXECUTABLES = [
   "repository-command", "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner",
 ].map((name) => `scripts/${name}.js`);
 const EXTENSION_REQUIRED = [
-  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
+  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/job-run-mcp-client.js", "scripts/job-run-mcp-transport.js", "scripts/workspace-runtime-mcp-client.js", "scripts/workspace-runtime-mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
   ...[
     "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
   ].flatMap((name) => [
@@ -66,6 +66,7 @@ function compileTypeScript(repositoryRoot, packageRoot, output) {
 export function buildDistributions({
   repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
   serverOnly = false,
+  outputRoot,
   compile = compileTypeScript,
   parity = assertMcpTransportParity,
   rename = renameSync,
@@ -73,7 +74,28 @@ export function buildDistributions({
   const root = realpathSync(repositoryRoot);
   const extension = join(root, "packages/ingenium-extension");
   const server = join(root, "services/ingenium-server");
-  const buildRoot = join(extension, "build");
+  // An explicit artifact root reuses the original source/compiler/parity flow
+  // while keeping both installed distributions and their rollback sources intact.
+  // The caller owns storage admission and process/mount lifetime checks.
+  const isolated = outputRoot === undefined ? null : resolve(outputRoot);
+  if (isolated) {
+    if ([root, extension, server].some(source => relative(isolated, source) === "" || (relative(isolated, source) !== ".." && !relative(isolated, source).startsWith(".." + sep) && !isAbsolute(relative(isolated, source))))) {
+      throw new Error("Isolated distribution output overlaps original source");
+    }
+    ownedDirectory(isolated);
+    const marker = join(isolated, ".ingenium-distribution-output.json");
+    const identity = JSON.stringify({ schemaVersion: 1, repositoryRoot: root, ownerUid: process.getuid?.() ?? null });
+    if (existsSync(marker)) {
+      const stat = lstatSync(marker);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || realpathSync(marker) !== marker
+        || (process.getuid && stat.uid !== process.getuid()) || (stat.mode & 0o022) !== 0
+        || readFileSync(marker, "utf8") !== identity) throw new Error("Isolated distribution identity changed");
+    } else {
+      if (readdirSync(isolated).length !== 0) throw new Error("Isolated distribution output must be empty or previously owned");
+      writeFileSync(marker, identity, { flag: "wx", mode: 0o600 });
+    }
+  }
+  const buildRoot = isolated ? join(isolated, "build") : join(extension, "build");
   mkdirSync(buildRoot, { recursive: true, mode: 0o700 });
   ownedDirectory(buildRoot);
   const lock = join(buildRoot, "distribution-build.lock");
@@ -108,11 +130,24 @@ export function buildDistributions({
   try {
     for (const packageRoot of serverOnly ? [server] : [server, extension]) {
       ownedDirectory(packageRoot);
-      const parent = join(packageRoot, "build");
+      const artifactRoot = isolated ? join(isolated, packageRoot === server ? "server" : "extension") : packageRoot;
+      if (isolated) {
+        mkdirSync(artifactRoot, { mode: 0o700, recursive: true });
+        ownedDirectory(artifactRoot);
+        const originalManifest = readFileSync(join(packageRoot, "package.json"));
+        const targetManifest = join(artifactRoot, "package.json");
+        if (existsSync(targetManifest)) {
+          const stat = lstatSync(targetManifest);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || realpathSync(targetManifest) !== targetManifest
+            || (process.getuid && stat.uid !== process.getuid()) || (stat.mode & 0o022) !== 0
+            || !readFileSync(targetManifest).equals(originalManifest)) throw new Error("Isolated package manifest changed");
+        } else writeFileSync(targetManifest, originalManifest, { flag: "wx", mode: 0o444 });
+      }
+      const parent = join(artifactRoot, "build");
       mkdirSync(parent, { mode: 0o700, recursive: true });
       ownedDirectory(parent);
       const directory = mkdtempSync(join(parent, "distribution-"));
-      const active = join(packageRoot, "dist");
+      const active = join(artifactRoot, "dist");
       if (existsSync(active)) ownedDirectory(active);
       stages.push({ packageRoot, directory, active, candidate: join(directory, "candidate"),
         previous: join(directory, "previous"), hadPrevious: existsSync(active), movedPrevious: false, adopted: false });

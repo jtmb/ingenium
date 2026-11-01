@@ -7,7 +7,7 @@ import { getDashboardAllowedOrigins } from "../config/index.js";
 import { loadRuntimeGatewayToken } from "../lib/runtime-gateway-auth.js";
 import { cloudflareIngressForHost, cloudflareLauncherOriginAllowed } from "../lib/cloudflare-trusted-ingress.js";
 
-type Audience = "web" | "cli" | "vscode";
+type Audience = "web" | "cli";
 type ActivityKind = "connection_opened" | "connection_closed" | "generation_started" | "generation_finished";
 type RuntimeScope = { audience: Audience; runtimeId: string; host: string; origin: string };
 type RuntimeScheme = "http" | "https";
@@ -19,6 +19,7 @@ export type RuntimeGatewayTransportConfig = {
   containerPort: 8080 | 8443;
 };
 type ValidatedSession = {
+  workspaceV2AuthHeader?: string; // private Core response only; never browser headers
   backendName: string;
   session: { expiresAt: string; launcherOrigin: string };
 };
@@ -27,14 +28,12 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const COOKIE_NAMES: Record<Audience, string> = {
   web: "__Host-ingenium_runtime_web",
   cli: "__Host-ingenium_runtime_cli",
-  vscode: "__Host-ingenium_runtime_vscode",
 };
 const PARTITIONED_COOKIE_NAMES: Record<Audience, string> = {
   web: "__Host-ingenium_runtime_web_partitioned",
   cli: "__Host-ingenium_runtime_cli_partitioned",
-  vscode: "__Host-ingenium_runtime_vscode_partitioned",
 };
-const BACKEND_PORTS: Record<Audience, number> = { web: 4098, cli: 4099, vscode: 4100 };
+const BACKEND_PORTS: Record<Audience, number> = { web: 4098, cli: 4099 };
 const MAX_COOKIE_HEADER_LENGTH = 4_096;
 const MAX_COOKIE_COUNT = 64;
 const MAX_ENCODED_RUNTIME_TOKEN_LENGTH = 128;
@@ -119,7 +118,7 @@ export function runtimeScope(request: Pick<IncomingMessage, "headers">): Runtime
   const domain = rootDomain();
   const scheme = runtimeScheme();
   assertRuntimeScheme(domain, scheme);
-  const match = new RegExp(`^(web|cli|vscode)--(${UUID})\\.${domain.replaceAll(".", "\\.")}$`).exec(host);
+  const match = new RegExp(`^(web|cli)--(${UUID})\\.${domain.replaceAll(".", "\\.")}$`).exec(host);
   if (!match) return undefined;
   return { audience: match[1] as Audience, runtimeId: match[2]!, host, origin: `${scheme}://${host}` };
 }
@@ -236,13 +235,14 @@ function reject(response: ServerResponse, status = 401, message = "Authenticatio
   }).end(message);
 }
 
-export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeScope, websocket = false): IncomingHttpHeaders {
+export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeScope, websocket = false, workspaceV2AuthHeader?:string): IncomingHttpHeaders {
   const result: IncomingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
     if (PRIVATE_HEADERS.has(lower) || (!websocket && HOP_HEADERS.has(lower)) || lower === "host" || lower === "origin" || lower === "referer") continue;
     result[lower] = value;
   }
+  if(workspaceV2AuthHeader!==undefined){if(!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(workspaceV2AuthHeader))throw Error("WORKSPACE_V2_AUTH_HEADER");if(scope.audience==="web")result.authorization=workspaceV2AuthHeader;}
   result.host = scope.host;
   if (scope.audience === "cli") result["x-ingenium-authenticated-user"] = "runtime";
   if (websocket) {
@@ -342,18 +342,18 @@ export function runtimeCookies(audience: Audience, token: string, maxAge: number
   return [unpartitioned, partitioned];
 }
 
-export function runtimeBackendHealthPath(audience: Audience): string {
-  return audience === "vscode" ? "/?folder=/workspace" : "/";
+export function runtimeBackendHealthPath(_audience: Audience): string {
+  return "/";
 }
 
-async function backendReady(scope: RuntimeScope, backendName: string): Promise<boolean> {
+async function backendReady(scope: RuntimeScope, backendName: string,workspaceV2AuthHeader?:string): Promise<boolean> {
   return new Promise((resolve) => {
     const upstream = httpRequest({
       hostname: backendName,
       port: BACKEND_PORTS[scope.audience],
       method: "GET",
       path: runtimeBackendHealthPath(scope.audience),
-      headers: sanitizedHeaders({}, scope),
+      headers: sanitizedHeaders({}, scope,false,workspaceV2AuthHeader),
       timeout: 5_000,
     }, (response) => {
       response.resume();
@@ -397,7 +397,7 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
   }
   const token = runtimeAudienceSessionCookie(request, scope.audience);
   const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
-  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName)) {
+  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName,resolved.workspaceV2AuthHeader)) {
     reject(response, 503, "Runtime audience is unavailable", origin, scope.audience);
     return;
   }
@@ -439,7 +439,7 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
     port: BACKEND_PORTS[scope.audience],
     method: request.method,
     path: request.url,
-    headers: sanitizedHeaders(request.headers, scope),
+    headers: sanitizedHeaders(request.headers, scope,false,resolved.workspaceV2AuthHeader),
     timeout: 30_000,
   }, (upstreamResponse) => {
     response.writeHead(
@@ -476,7 +476,7 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
     port: BACKEND_PORTS[scope.audience],
     method: request.method,
     path: request.url,
-    headers: sanitizedHeaders(request.headers, scope, true),
+    headers: sanitizedHeaders(request.headers, scope,true,resolved.workspaceV2AuthHeader),
   });
   upstream.on("upgrade", async (upstreamResponse, upstreamSocket, upstreamHead) => {
     if (!await recordActivity(scope, token, "connection_opened").catch(() => false)) {

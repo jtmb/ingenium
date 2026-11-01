@@ -7,7 +7,7 @@ export type CloudflareTrustedIngressRead =
   | { status: "ready"; inventory: cloudflareTunnel.CloudflareTrustedIngressInventory }
   | { status: "missing" | "invalid"; error: string };
 
-const RUNTIME_AUDIENCES = { opencode: "web", cli: "cli", vscode: "vscode" } as const;
+const RUNTIME_AUDIENCES = { opencode: "web", cli: "cli" } as const;
 export type CloudflareRuntimeAudience = (typeof RUNTIME_AUDIENCES)[keyof typeof RUNTIME_AUDIENCES];
 
 export function cloudflareIngressForHost(

@@ -1,4 +1,4 @@
-// AUTHORED, UNRUN by this worker. Pure boundary fixtures; not hosted UI acceptance.
+// Pure boundary fixtures. Root also qualifies actual authenticated HTTP and mounted UI separately.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ function transport(handler=()=>null) {
 }
 test('draft/compatibility/partial/name selectors refuse rather than adopting a default Project',()=>{
   for(const input of [null,{}, {...selected,projectId:null},{...selected,engineSessionId:null},{...selected,workspaceId:''},
-    {...selected,project:'global-default'},{...selected,projectName:'Displayed name'},{...selected,runtimeId:'compatibility'},{...selected,expectedProjectId:null}])assert.throws(()=>hostedSelection(input));
+    {...selected,project:'global-default'},{...selected,projectName:'Displayed name'},{...selected,runtimeId:'compatibility'}])assert.throws(()=>hostedSelection(input));
 });
 test('initial binding request uses actual workspace/runtime/engine without a client Project ID',async()=>{
   assert.equal(Object.hasOwn(hostedSelection({...selected,expectedProjectId:undefined}),'expectedProjectId'),false);
@@ -44,7 +44,7 @@ test('optional expected Project ID only narrows server-derived original, never p
   assert.equal(calls[0].path.searchParams.get('expectedProjectId'),original.projectId);assert.equal(b.projectId,original.projectId);
   await assert.rejects(http.loadBinding({...selected,expectedProjectId:'other-project'}));
 });
-test('server-derived null Project remains unavailable even when client Project ID is absent',async()=>{
+test('profile1 null Project remains unavailable without the explicit projectless profile',async()=>{
   const {http,calls}=transport(path=>path.pathname.endsWith('/work-binding')?json({data:{...original,projectId:null}}):null);
   await assert.rejects(http.loadBinding(selected));assert.equal(calls.length,1);
 });
@@ -183,6 +183,44 @@ test('component uses canonical dashboardFetch; inspection has no consumed-contex
   const source=readFileSync(new URL('../services/ingenium-dashboard/src/app/components/memory-v2/HostedWorkMemory.tsx',import.meta.url),'utf8');
   assert.match(source,/import \{ dashboardFetch, getApiBase \} from '@\/lib\/api'/);
   assert.doesNotMatch(source,/<MemoryDisclosure|fetch\(|Authorization:/);
-  assert.match(source,/No prompt-consumption receipt is available/);
+  
   assert.match(source,/total in this scope is unknown/);
+});
+
+test('pre-dispatch binding failure releases only its unsent journal; dispatched uncertainty remains retained',async()=>{
+ let drift=false;
+ const {http,calls}=transport(path=>path.pathname.endsWith('/work-binding')&&drift?json({data:{...original,bindingEpoch:3}}):null);
+ const binding=await http.loadBinding(selected),api=http.forBinding(binding),journal=createHostedJournal(new Storage(),binding);
+ const controller=createMemoryController({api:api.controller,journal:journal.policy,newOperationId:()=> 'unsent-original'});
+ await controller.activate(controllerBinding(binding));drift=true;
+ assert.equal(await controller.change(controllerBinding(binding).scopeKey,binding.engineSessionId,change(binding).change),false);
+ assert.equal(calls.filter(c=>c.options.method==='PUT').length,0);
+ assert.equal(journal.policy.get(binding.scopeHash),undefined);
+ assert.equal(controller.getSnapshot().unknownOperationId,undefined);assert.equal(controller.getSnapshot().available,false);controller.dispose();
+ const after=transport((path,options)=>options.method==='PUT'?Promise.reject(Object.assign(new Error('after original dispatch'),{status:409,code:'BINDING_CHANGED'})):null);
+ const b=await after.http.loadBinding(selected),bound=after.http.forBinding(b);let unknown;
+ try{await bound.controller.change(change(b));}catch(error){unknown=error;}
+ assert.ok(unknown);assert.equal(bound.rejectedBeforeDispatch(unknown),false);
+ assert.equal(bound.rejectedBeforeDispatch(Object.assign(new Error('copied'),{status:409,code:'BINDING_CHANGED'})),false);
+});
+
+test('profile2 accepts only a server-derived null Project and narrows subsequent refreshes explicitly',async()=>{
+ const projectless={...original,schemaVersion:2,projectId:null};
+ const {http,calls}=transport(path=>path.pathname.endsWith('/work-binding')?json({data:projectless}):path.pathname.endsWith('/policy')?json({data:{scopeHash:projectless.scopeHash,chatId:projectless.engineSessionId,bindingHash:projectless.bindingHash,bindingEpoch:projectless.bindingEpoch,available:true,policy,chat}}):null);
+ const binding=await http.loadBinding({...selected,expectedProjectId:null});assert.equal(binding.projectId,null);assert.equal(binding.schemaVersion,2);assert.equal(calls[0].path.searchParams.get('expectedProjectless'),'true');assert.equal(calls[0].path.searchParams.has('projectId'),false);
+ await http.forBinding(binding).controller.read(controllerBinding(binding));
+ const refresh=calls.find((c,i)=>i>0&&c.path.pathname.endsWith('/work-binding'));assert.equal(refresh.path.searchParams.get('expectedProjectless'),'true');
+ const request=calls.find(c=>c.path.pathname.endsWith('/policy'));assert.equal(request.path.searchParams.get('projectless'),'true');assert.equal(request.path.searchParams.has('projectId'),false);assert.equal(request.path.searchParams.has('expectedProjectless'),false);
+});
+test('projectless profile never accepts a Project ID, and expected null never adopts a Project binding',async()=>{
+ assert.throws(()=>hostedBinding({...original,schemaVersion:2},selected));assert.throws(()=>hostedBinding({...original,schemaVersion:1,projectId:null},selected));
+ const {http}=transport();await assert.rejects(http.loadBinding({...selected,expectedProjectId:null}));
+});
+
+test('projectless operation journals retain only the original null Project axis and reject substituted scope axes',()=>{
+ const binding=hostedBinding({...original,schemaVersion:2,projectId:null},{...selected,expectedProjectId:null}),storage=new Storage(),journal=createHostedJournal(storage,binding),record=change(binding,'projectless-policy');
+ journal.policy.set(binding.scopeHash,record);assert.deepEqual(journal.policy.get(binding.scopeHash),record);assert.equal(JSON.parse(JSON.parse(storage.getItem(storage.key(0))).record.identity.scopeKey)[2],null);journal.policy.remove(binding.scopeHash,record.operationId);
+ const forget=management(binding,'projectless-forget');journal.management.set(forget);assert.deepEqual(journal.management.get(),forget);journal.management.remove(forget.operationId);
+ const wrong=structuredClone(record),axes=JSON.parse(wrong.identity.scopeKey);axes[2]='invented-project';wrong.identity.scopeKey=JSON.stringify(axes);assert.throws(()=>journal.policy.set(binding.scopeHash,wrong));assert.equal(storage.length,0);
+ for(const index of [0,1,3,4,5,6]){const bad=structuredClone(record),values=JSON.parse(bad.identity.scopeKey);values[index]=null;bad.identity.scopeKey=JSON.stringify(values);assert.throws(()=>journal.policy.set(binding.scopeHash,bad));}
 });

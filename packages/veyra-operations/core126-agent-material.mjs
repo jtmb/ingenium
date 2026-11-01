@@ -53,3 +53,5 @@ export function assertCore126EffectiveJobProfile({material,admission,agentName,e
  if(effective.reservedBroker?.id!=='ingenium-llm-broker'||effective.reservedBroker?.hidden!==true||effective.reservedBroker?.mode!=='subagent'||effective.reservedBroker?.profileSha256!==staticProfile.brokerProfileSha256||effective.reservedBroker?.enforcementPluginSha256!==staticProfile.brokerPluginSha256)unavailable('actual protected reserved broker');
  return true;
 }
+/** Pure ordered configuration validation shared by distinct production/candidate formats. */
+export {configuration as validateCore126AgentConfiguration};

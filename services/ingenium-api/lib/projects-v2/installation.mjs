@@ -1,6 +1,6 @@
 import {requireValue,scopeKey} from "../../../../packages/veyra-projects/domain.mjs";
 
-const preferenceKeys=new Set(["chat_defaults","chat_selection"]);
+const preferenceKeys=new Set(["chat_defaults","chat_selection","archive_retention_days"]);
 export class InstallationPreferencesBridge {
   constructor({db,authorize,readPreference,writePreference}) {
     Object.assign(this,{db,authorize,readPreference,writePreference});

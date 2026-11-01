@@ -287,7 +287,6 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Chat", href: "/chat", icon: <IconMessageSquare /> },
       { label: "Work", href: "/work", icon: <IconCode /> },
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
-      { label: "VS Code", href: "/vscode", icon: <IconCode /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
       { label: "Tasks", href: "/tasks", icon: <IconCheckSquare /> },
       { label: "Docs", href: "/docs", icon: <IconFile /> },

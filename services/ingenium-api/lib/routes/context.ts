@@ -1,3 +1,5 @@
+import {findWorkspaceEngineContext,persistOriginalWorkspaceEngineTurn} from '../projects-v2/projectless-context.mjs';
+import {withManagedWorkspaceV2Placement} from '../projects-v2/workspace-v2-placement.mjs';
 import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
 import { authorization, context, contextConversations, contextRag, getDb, runtimes } from "ingenium-core";
@@ -494,7 +496,28 @@ contextRouter.post("/conversations", (req, res) => {
   }
 });
 
-contextRouter.post("/chat-sessions/link", (req, res) => {
+contextRouter.post("/chat-sessions/link", async (req, res) => {
+  const workspaceRuntime = typeof req.body?.runtimeId === "string"
+    ? runtimes.getWorkspaceRuntimeV2(req.body.runtimeId) : undefined;
+  if (workspaceRuntime) {
+    // Preserve the outer browser/CSRF/privacy policy. The original placement
+    // owner rechecks the actual null-Project workspace. This branch can only
+    // READ the source mapping retained by original engine creation; it cannot
+    // mint a mapping from this browser DTO or fall back to a global Project.
+    const selection = { projectId: null, workspaceId: workspaceRuntime.workspaceId, runtimeId: workspaceRuntime.id } as const;
+    try {
+      const linked = await withManagedWorkspaceV2Placement(req, selection, () =>
+        findWorkspaceEngineContext(req, selection, req.body?.sessionId));
+      res.setHeader("Cache-Control", "no-store");
+      res.status(201).json({ data: linked.conversation });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : "";
+      const status = code === "INVALID_WORKSPACE_CONTEXT_INPUT" ? 422
+        : code === "WORKSPACE_ENGINE_MAPPING_UNAVAILABLE" ? 404 : 503;
+      res.status(status).json({ error: { code: "WORKSPACE_CHAT_LINK_UNAVAILABLE", message: "The original agent conversation could not be resolved in this workspace." } });
+    }
+    return;
+  }
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const actor = requestContentActor(req, projectId);
@@ -531,6 +554,31 @@ contextRouter.post("/chat-sessions/link", (req, res) => {
     res.status(201).json({ data: conversation });
   } catch (error) {
     sendConversationError(res, error);
+  }
+});
+
+// Register the v2 branch before the legacy Project parameter guard. A distinct
+// local parameter name keeps that guard on the unchanged Project route only.
+contextRouter.post("/conversations/:workspaceConversationId/chat-turns", async (req, res, next) => {
+  const workspaceRuntime = typeof req.body?.runtimeId === "string"
+    ? runtimes.getWorkspaceRuntimeV2(req.body.runtimeId) : undefined;
+  if (!workspaceRuntime) { next(); return; }
+  try {
+    const selection = { projectId: null, workspaceId: workspaceRuntime.workspaceId, runtimeId: workspaceRuntime.id } as const;
+    const result = await persistOriginalWorkspaceEngineTurn(req, selection, req.params.workspaceConversationId!, {
+      sessionId: req.body?.sessionId, userMessageId: req.body?.userMessageId,
+      assistantMessageId: req.body?.assistantMessageId, expectedRevision: req.body?.expectedRevision,
+    });
+    // Browser userContent/assistantContent fields are deliberately not consumed.
+    res.setHeader("Cache-Control", "no-store");
+    res.status(201).json({ data: result });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : "";
+    const conflict = code === "WORKSPACE_CONTEXT_REVISION_CONFLICT";
+    res.status(conflict ? 409 : code === "INVALID_WORKSPACE_CONTEXT_INPUT" ? 422 : 503).json({ error: {
+      code: conflict ? "REVISION_CONFLICT" : "WORKSPACE_CHAT_TURN_UNAVAILABLE",
+      message: conflict ? "Saved conversation changed; refresh its revision before retrying." : "The completed response could not be verified and saved from the original agent history.",
+    } });
   }
 });
 

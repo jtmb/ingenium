@@ -1,9 +1,11 @@
+import {workspaceV2ImageDefinition} from '../projects-v2/workspace-v2-image.mjs';
+import {readInstalledCandidateSource} from '../../../../packages/veyra-operations/core126-candidate-observation.mjs';
 import {constants,openSync,closeSync,fstatSync,lstatSync,realpathSync,readFileSync} from "node:fs";
 import {dirname} from "node:path";
 import {createHash} from "node:crypto";
 import {getDb,runtimes} from "ingenium-core";
 import {createCore126ObservationClient,createCore126ImageRegistry,createCore126ImageOwner,type Core126ImageOwner,type Core126ImageApproval} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
-import {inspectManagedRuntimeJobRole} from "../runtime-manager-client.js";
+import {inspectManagedRuntimeCandidateClosure,inspectManagedRuntimeJobRole} from "../runtime-manager-client.js";
 import {parseStrictJobJson} from "./job-bootstrap-frame.mjs";
 
 const POLICY_DIRECTORY="/run/ingenium-core126",POLICY_FILE=POLICY_DIRECTORY+"/approval.json";
@@ -48,4 +50,27 @@ export function loadInstalledCore126ImageOwner():Core126ImageOwner {
  return createCore126ImageOwner({client,registry,inTransaction:()=>getDb().inTransaction,originalProvisionProfile:facts=>{
   assertPolicyCurrent();return runtimes.getRuntimeOriginalProvision(facts.runtime.id);
  }});
+}
+/** Explicit PRIVATE coordinator construction only. Never a missing-approval fallback. */
+export function loadInstalledCore126UnapprovedCandidateImageOwner():Core126ImageOwner {
+ readInstalledCandidateSource();
+ const client=createCore126ObservationClient({requestOriginalManager:async path=>{
+  readInstalledCandidateSource();
+  const match=/^\/v1\/runtimes\/([a-f0-9-]+)\/(job-role-proof|candidate-closure)$/.exec(path);
+  if(!match?.[1])return deny();return match[2]==='candidate-closure'?inspectManagedRuntimeCandidateClosure(match[1]):inspectManagedRuntimeJobRole(match[1]);
+ }});
+ const registry=createCore126ImageRegistry({loadManifestBytes:async()=>deny()},[]);
+ return createCore126ImageOwner({client,registry,inTransaction:()=>getDb().inTransaction,originalProvisionProfile:facts=>runtimes.getRuntimeOriginalProvision(facts.runtime.id)});
+}
+
+/** Additive export in the EXISTING root-owned Core126 policy loader. No new approval source. */
+export function loadInstalledWorkspaceRuntimeV2ImageDefinition(imageId:string):unknown {
+ const policy=readProtected(POLICY_FILE,64*1024),raw=parseStrictJobJson(policy,64*1024) as {schemaVersion?:unknown;approvedImages?:Array<Core126ImageApproval>};
+ if(raw.schemaVersion!==1||!Array.isArray(raw.approvedImages)||raw.approvedImages.length<1||raw.approvedImages.length>32)return deny();
+ const rows=raw.approvedImages.filter(row=>row.imageId===imageId);if(rows.length!==1)return deny();const approval=rows[0]!;
+ if(!/^sha256:[a-f0-9]{64}$/.test(imageId)||!/^[a-f0-9]{64}$/.test(approval.manifestSha256)||approval.validUntil<=Date.now())return deny();
+ const bytes=readProtected(POLICY_DIRECTORY+'/'+approval.manifestSha256+'.json',2*1024*1024);
+ if(digest(bytes)!==approval.manifestSha256)return deny();
+ const definition=workspaceV2ImageDefinition(parseStrictJobJson(bytes,2*1024*1024),approval);
+ if(digest(readProtected(POLICY_FILE,64*1024))!==digest(policy))return deny();return definition;
 }

@@ -315,7 +315,7 @@
     "transform": null
   },
   {
-    "source": "services/ingenium-dashboard/src/app/components/memory-v2/native/LearnedMemoryControls.tsx",
+    "source": "docs/workstreams/memory/native/LearnedMemoryControls.tsx",
     "target": "apps/web/src/features/workbench/native-memory/LearnedMemoryControls.tsx",
     "required_preimage": "absent",
     "sha256": "720bdcf8d72d11cc1291607e51c20141fb81b777a1afe981606d7928c4d59fec",

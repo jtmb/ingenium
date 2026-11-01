@@ -56,7 +56,6 @@ const PORT_MAP: Record<string, number> = {
   "ingenium-gateway": 3000,
   "opencode-web": 4098,
   "ttyd-opencode": 4099,
-  vscode: 4100,
 };
 
 const DESCRIPTION_MAP: Record<string, string> = {
@@ -69,13 +68,11 @@ const DESCRIPTION_MAP: Record<string, string> = {
   "opencode-web": "OpenCode Web Server",
   "opencode-internal-proxy": "OpenCode internal auth proxy",
   "ttyd-opencode": "OpenCode CLI Terminal (ttyd)",
-  vscode: "VS Code Server (code-server)",
 };
 
 const DISPLAY_NAME_MAP: Record<string, string> = {
   "opencode-web": "OpenCode Web",
   "ttyd-opencode": "OpenCode CLI",
-  vscode: "VS Code",
 };
 
 const STATE_MAP: Record<string, ServiceInfo["state"]> = {
@@ -100,7 +97,6 @@ const COMPATIBILITY_REQUIRED_PROCESSES = [
   "opencode-web",
   "opencode-internal-proxy",
   "ttyd-opencode",
-  "vscode",
 ] as const;
 
 function requiredSupervisorProcesses(): readonly string[] {
@@ -117,7 +113,7 @@ function sendServiceError(
 }
 
 const INSTALLATION_SCOPE = { kind: "installation" } as const;
-type ActivityProject = NonNullable<ReturnType<typeof projects.getGlobalProject>>;
+type ActivityProject = NonNullable<ReturnType<typeof projects.getInstallationStorageProject>>;
 
 // Resolve before entering async Express4 handlers so failures reach middleware.
 const resolveActivityProject: RequestHandler = (req, res, next) => {
@@ -126,13 +122,13 @@ const resolveActivityProject: RequestHandler = (req, res, next) => {
       if (!requireProject(req, res)) return;
       res.locals.serviceActivityProject = projects.getProject(req.query.project as string);
     } else {
-      res.locals.serviceActivityProject = projects.getGlobalProject();
+      res.locals.serviceActivityProject = projects.getInstallationStorageProject();
     }
     next();
   } catch (error) { next(error); }
 };
-function activityScope(project?: ActivityProject): ApplicationHealth["scope"] {
-  return project ? { kind: "project", projectId: project.id, projectName: project.name } : INSTALLATION_SCOPE;
+function activityScope(project?: ActivityProject, explicitProject = false): ApplicationHealth["scope"] {
+  return project && explicitProject ? { kind: "project", projectId: project.id, projectName: project.name } : INSTALLATION_SCOPE;
 }
 
 async function resolveSupervisorProcessName(name: string): Promise<string | undefined> {
@@ -198,7 +194,7 @@ async function getDocsStatus(): Promise<AppInfo> {
  */
 async function getTasksStatus(projectId?: string): Promise<AppInfo> {
   try {
-    const id = projectId ?? projects.getGlobalProject()?.id;
+    const id = projectId ?? projects.getInstallationStorageProject()?.id;
     const allTasks = id ? tasks.listTasks(id) : [];
     const byColumn: Record<string, number> = {};
     for (const t of allTasks) {
@@ -250,7 +246,7 @@ servicesRouter.get("/status", resolveActivityProject, async (_req, res): Promise
       getTasksStatus(activityProject?.id),
       ...(isControlPlaneMode() ? [getRuntimeFleetStatus()] : []),
     ])).map((application) => ({ ...application, scope: ["synthesis-engine", "tasks-board"].includes(application.name)
-      ? activityScope(activityProject) : INSTALLATION_SCOPE }));
+      ? activityScope(activityProject, _req.query.project !== undefined) : INSTALLATION_SCOPE }));
   } catch {
     // Individual errors are caught inside each function; this is defense-in-depth
   }
@@ -381,7 +377,7 @@ servicesRouter.get("/applications/:name", resolveActivityProject, async (req, re
 
       case "synthesis-engine": {
         const { application, ...metrics } = getSynthesisHealthSnapshot(activityProject?.id);
-        res.json({ data: { ...application, scope: activityScope(activityProject), ...metrics } });
+        res.json({ data: { ...application, scope: activityScope(activityProject, req.query.project !== undefined), ...metrics } });
         return;
       }
 
@@ -396,7 +392,7 @@ servicesRouter.get("/applications/:name", resolveActivityProject, async (req, re
         const allTasks = activityProject ? tasks.listTasks(activityProject.id) : [];
         const byColumn: Record<string, number> = {};
         for (const t of allTasks) { byColumn[t.column_id] = (byColumn[t.column_id] || 0) + 1; }
-        res.json({ data: { ...app, scope: activityScope(activityProject), stats: { total: allTasks.length, byColumn } } });
+        res.json({ data: { ...app, scope: activityScope(activityProject, req.query.project !== undefined), stats: { total: allTasks.length, byColumn } } });
         return;
       }
       default:

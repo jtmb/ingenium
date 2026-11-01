@@ -11,7 +11,7 @@
   },
   "files": ["dist/", "README.md"],
   "scripts": {
-    "build": "rm -rf dist && tsc && cp -r data dist/data",
+    "build": "rm -rf dist && tsc && cp -r data dist/data && node scripts/copy-core-runtime.mjs",
     "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

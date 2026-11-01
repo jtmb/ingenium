@@ -164,6 +164,68 @@ class CpuTranscriber:
         return " ".join(result)
 
 
+def _retained_espeak_api(base, expected_data):
+    """Keep Linux eSpeak's path below its native buffer without copying assets.
+
+    The pinned library truncates long data paths. Phonemizer canonicalizes its
+    path before calling EspeakAPI, so supply a short original directory fd at
+    that final constructor boundary. The fd stays live through library cleanup;
+    its kernel reference never reopens the long pathname or changes a mount.
+    """
+    import os
+    import stat
+    import weakref
+
+    expected = Path(expected_data).resolve(strict=True)
+
+    class RetainedDataApi(base):
+        def __init__(self, library, data_path):
+            if data_path is None or Path(data_path).resolve(strict=True) != expected:
+                raise WorkerError("CPU_ESPEAK_DATA_CHANGED", 503)
+            named = expected.lstat()
+            if (not stat.S_ISDIR(named.st_mode) or named.st_uid not in (0, os.geteuid())
+                    or named.st_mode & 0o022):
+                raise WorkerError("CPU_ESPEAK_DATA_CUSTODY", 503)
+            descriptor = os.open(expected, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            close = weakref.finalize(self, os.close, descriptor)
+            try:
+                held = os.fstat(descriptor)
+                if (held.st_dev, held.st_ino, held.st_uid, held.st_mode) != (
+                        named.st_dev, named.st_ino, named.st_uid, named.st_mode):
+                    raise WorkerError("CPU_ESPEAK_DATA_CHANGED", 503)
+                short = f"/proc/self/fd/{descriptor}"
+                actual = os.stat(short)
+                if (actual.st_dev, actual.st_ino) != (held.st_dev, held.st_ino):
+                    raise WorkerError("CPU_ESPEAK_DATA_CHANGED", 503)
+                # Registered before base's library finalizer, so fd closure is
+                # last in weakref.finalize's reverse-registration exit order.
+                self._veyra_data_close = close
+                super().__init__(library, short)
+            except BaseException:
+                close()
+                raise
+
+    return RetainedDataApi
+
+
+_espeak_api_adapter = None
+
+
+def _bind_cpu_espeak_data():
+    """One fixed adapter in this dedicated CPU process, never a system fallback."""
+    import sys
+    if sys.platform != "linux":
+        return
+    global _espeak_api_adapter
+    import espeakng_loader
+    from phonemizer.backend.espeak import wrapper
+    if _espeak_api_adapter is None:
+        _espeak_api_adapter = _retained_espeak_api(wrapper.EspeakAPI, espeakng_loader.get_data_path())
+        wrapper.EspeakAPI = _espeak_api_adapter
+    elif wrapper.EspeakAPI is not _espeak_api_adapter:
+        raise WorkerError("CPU_ESPEAK_ADAPTER_CHANGED", 503)
+
+
 class CpuKokoro:
     """Bind ONNX to CPUExecutionProvider without automatic provider selection."""
 
@@ -180,6 +242,7 @@ class CpuKokoro:
 
             ort = ort_module
         if engine_factory is None:
+            _bind_cpu_espeak_data()
             from kokoro_onnx import Kokoro
 
             engine_factory = Kokoro.from_session

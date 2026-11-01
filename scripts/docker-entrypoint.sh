@@ -230,101 +230,7 @@ fs.closeSync(parent);
 NODE
 }
 
-remove_verified_stale_socket() {
-  node - "$@" <<'NODE'
-const fs = require("node:fs");
-const net = require("node:net");
-const path = require("node:path");
-
-const [target, uidText, gidText] = process.argv.slice(2);
-const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
-const uid = Number.parseInt(uidText, 10);
-const gid = Number.parseInt(gidText, 10);
-
-function fail() {
-  process.stderr.write(`ERROR: stale runtime socket validation failed: ${target}\n`);
-  process.exit(1);
-}
-
-function sameObject(left, right) {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function openDirectory(parentDescriptor, name) {
-  const childPath = `/proc/self/fd/${parentDescriptor}/${name}`;
-  const metadata = fs.lstatSync(childPath);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) fail();
-  const descriptor = fs.openSync(childPath, directoryFlags);
-  if (!sameObject(metadata, fs.fstatSync(descriptor))) fail();
-  return descriptor;
-}
-
-function acceptsConnections(socketPath) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ path: socketPath });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error("socket connection timed out"));
-    }, 500);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      socket.destroy();
-      if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve(false);
-      else reject(error);
-    });
-  });
-}
-
-function hasKernelOwner(socketPath) {
-  const entries = fs.readFileSync("/proc/net/unix", "utf8").split("\n");
-  return entries.some((entry) => {
-    const fields = entry.trim().split(/\s+/);
-    return fields.length >= 8 && fields.slice(7).join(" ") === socketPath;
-  });
-}
-
-async function main() {
-  if (process.platform !== "linux" || !fs.constants.O_NOFOLLOW || !fs.constants.O_DIRECTORY
-    || !path.isAbsolute(target) || path.resolve(target) !== target || path.basename(target) !== "code-server-ipc.sock"
-    || !Number.isInteger(uid) || !Number.isInteger(gid)) fail();
-
-  const components = target.split("/").filter(Boolean);
-  const finalName = components.pop();
-  let parent = fs.openSync("/", directoryFlags);
-  try {
-    for (const component of components) {
-      const child = openDirectory(parent, component);
-      fs.closeSync(parent);
-      parent = child;
-    }
-
-    const childPath = `/proc/self/fd/${parent}/${finalName}`;
-    let metadata;
-    try {
-      metadata = fs.lstatSync(childPath);
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
-    if (metadata.isSymbolicLink() || !metadata.isSocket() || metadata.uid !== uid || metadata.gid !== gid) fail();
-    if (await acceptsConnections(target) || hasKernelOwner(target)) fail();
-
-    const current = fs.lstatSync(childPath);
-    if (!sameObject(metadata, current) || !current.isSocket() || current.uid !== uid || current.gid !== gid) fail();
-    fs.unlinkSync(childPath);
-  } finally {
-    fs.closeSync(parent);
-  }
-}
-
-main().catch(fail);
-NODE
-}
+# The bundled editor was retired; preserve legacy data outside the new package.
 
 DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}"
 case "$DEPLOYMENT_MODE" in
@@ -372,11 +278,9 @@ RESTORE_UID="$(cat /usr/local/share/ingenium/restore-uid)"
 RESTORE_GID="$(cat /usr/local/share/ingenium/restore-gid)"
 RESTORE_DATA_GID="$(cat /usr/local/share/ingenium/restore-data-gid)"
 OPENCODE_CONFIG_GID="$(getent group ingenium-opencode-config | cut -d: -f3)"
-VSCODE_UID="$(id -u ingenium-vscode)"
-VSCODE_GID="$(id -g ingenium-vscode)"
 TTYD_UID="$(id -u ingenium-ttyd)"
 TTYD_GID="$(id -g ingenium-ttyd)"
-for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$VSCODE_UID:$VSCODE_GID" "$TTYD_UID:$TTYD_GID"; do
+for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$TTYD_UID:$TTYD_GID"; do
   case "$identity" in *[!0-9:]*|:*|*:) echo "ERROR: immutable service identity is invalid"; exit 1 ;; esac
 done
 
@@ -716,11 +620,6 @@ secure_persistent_path tree /home/ingenium-opencode/.local "$OPENCODE_UID" "$OPE
 setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share
 setfacl -R -m u:ingenium-api:r-X,u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
 setfacl -m d:u:ingenium-api:r-X,d:u:ingenium-restore:rwX /home/ingenium-opencode/.local/share/opencode
-secure_persistent_path directory /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700
-secure_persistent_path directory /home/ingenium-vscode/vscode-data/user-data "$VSCODE_UID" "$VSCODE_GID" 0700
-remove_verified_stale_socket /home/ingenium-vscode/vscode-data/user-data/code-server-ipc.sock "$VSCODE_UID" "$VSCODE_GID"
-secure_persistent_path directory /home/ingenium-vscode/vscode-data/extensions "$VSCODE_UID" "$VSCODE_GID" 0700
-secure_persistent_path tree /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700 user-only
 
 # Compatibility mode retains the historical single-user OpenCode/VS Code state.
 if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
@@ -741,9 +640,9 @@ if [ "$workspace_identity" != "$alias_identity" ]; then
   exit 1
 fi
 # Only search access belongs on the repositories root; never inherit grants into siblings.
-setfacl -m 'u:ingenium-opencode:--x,u:ingenium-ttyd:--x,u:ingenium-vscode:--x' /workspace
+setfacl -m 'u:ingenium-opencode:--x,u:ingenium-ttyd:--x' /workspace
 root_acls=$(getfacl -cp /workspace)
-for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
+for identity in ingenium-opencode ingenium-ttyd; do
   if printf '%s\n' "$root_acls" | grep -q "^default:user:$identity:"; then
     setfacl -x "d:u:$identity" /workspace
   fi
@@ -756,10 +655,10 @@ find -P "$workspace_root" \
     -o -path "$workspace_root/.opencode/.ingenium-learning-credential" \
     -o -path "$workspace_root/.opencode/.ingenium-repository-sync-credential" \) -prune -o \
   \( -type d -exec setfacl -P \
-    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' \
-    -m 'd:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX' {} + \) -o \
+    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX' \
+    -m 'd:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX' {} + \) -o \
   \( -type f -exec setfacl -P \
-    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' {} + \)
+    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX' {} + \)
 # Collaboration ACLs must not expose private runtime state or scoped credentials.
 # The recursive ACL grant also changes existing owner-only env file masks.
 if [ -e "$workspace_root/.env" ]; then

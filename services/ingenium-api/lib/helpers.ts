@@ -99,7 +99,7 @@ export function requireContentAccess(
 }
 
 /**
- * Resolve the sole active global project for server-owned resources.
+ * Resolve installation storage for server-owned resources.
  *
  * The caller's project query parameter is intentionally ignored. This keeps
  * shared resources such as backups in the canonical server namespace even
@@ -108,12 +108,12 @@ export function requireContentAccess(
  */
 export function requireActiveGlobalProject(_req: Request, res: Response): { id: string; name: string } | null {
   try {
-    const global = projects.getGlobalProject();
+    const global = projects.getInstallationStorageProject();
     if (!global) {
       res.status(503).json({
         error: {
           code: "GLOBAL_PROJECT_UNAVAILABLE",
-          message: "The canonical active global project is not configured.",
+          message: "Installation storage is not configured.",
         },
       });
       return null;
@@ -123,7 +123,7 @@ export function requireActiveGlobalProject(_req: Request, res: Response): { id: 
     res.status(503).json({
       error: {
         code: "GLOBAL_PROJECT_UNAVAILABLE",
-        message: "The canonical active global project is unavailable.",
+        message: "Installation storage is unavailable.",
       },
     });
     return null;

@@ -68,9 +68,17 @@ export function createRecallSourceReader({scope,execution,getOwner,transport,get
     const page=await read(chatId,'getMessages',32);
     if(!Array.isArray(page)||page.length>32)fail('MEMORY_SOURCE_READ_BUDGET');page.forEach(accept);pages.set(chatId,page);
    }
-   const page=pages.get(chatId),at=page.findIndex(item=>item.info?.id===pair.user.id);
-   const u=at>=0?normalizedMemoryMessage(page[at],chatId):null,a=at>=0&&at+1<page.length?normalizedMemoryMessage(page[at+1],chatId):null;
-   if(!u||!a||u.revision!==normalized[0].revision||a.revision!==normalized[1].revision||a.id!==pair.assistant.id)fail('MEMORY_ENGINE_PAIR_RELATION_UNAVAILABLE');
+   const page=pages.get(chatId);
+   let userAt=page.findIndex(item=>item.info?.id===pair.user.id),assistantAt=userAt+1;
+   if(scope.projectId===null){
+    // The original workspace writer retains the preceding actual user when an
+    // assistant continues a turn. Recheck that same relation in the actual
+    // bounded engine page; this does not assert causal execution retirement.
+    assistantAt=page.findIndex(item=>item.info?.id===pair.assistant.id);userAt=-1;
+    for(let i=assistantAt-1;i>=0;i--)if(page[i].info?.role==='user'){userAt=i;break;}
+   }
+   const u=userAt>=0?normalizedMemoryMessage(page[userAt],chatId):null,a=assistantAt>=0&&assistantAt<page.length?normalizedMemoryMessage(page[assistantAt],chatId):null;
+   if(!u||!a||u.id!==pair.user.id||u.revision!==normalized[0].revision||a.revision!==normalized[1].revision||a.id!==pair.assistant.id)fail('MEMORY_ENGINE_PAIR_RELATION_UNAVAILABLE');
   }
   try {
    for(const ref of sourceRefs) {

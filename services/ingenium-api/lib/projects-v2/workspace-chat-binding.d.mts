@@ -1,0 +1,4 @@
+import type {Request} from 'express';
+import type {RequestExecutionFacts,RequestExecutionSelection,RequestChatPurpose,RequestChatBinding} from './request-execution-owner.mjs';
+import type {WorkspaceExecutionFacts,WorkspaceExecutionSelection,findWorkspaceEngineContext,getWorkspaceContext,resolveWorkspaceEngineMapping} from './projectless-context.mjs';
+export function createWorkspaceRequestChatResolver(ports:{resolveExecution(request:Request,selection:WorkspaceExecutionSelection):Readonly<WorkspaceExecutionFacts>;findEngineContext:typeof findWorkspaceEngineContext;getConversation:typeof getWorkspaceContext;resolveMapping:typeof resolveWorkspaceEngineMapping}):(request:Request,execution:RequestExecutionFacts,id:string,purpose?:RequestChatPurpose,representation?:'engine'|'context')=>Readonly<RequestChatBinding>;

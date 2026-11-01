@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
-import { getCanonicalGlobalProject } from "./projects.js";
+import { getInstallationStorageProject } from "./projects.js";
 import * as settings from "./settings.js";
 import * as vault from "./vault.js";
 
@@ -9,14 +9,13 @@ export const CLOUDFLARE_TUNNEL_TOKEN_SETTING_KEY = "cloudflare_tunnel_token";
 const TOKEN_ITEM_NAME = "Cloudflare Tunnel Token";
 const DELETED_VAULT_POLICY = '{"mode":"deleted"}';
 
-export const CLOUDFLARE_SERVICE_IDS = ["dashboard", "opencode", "cli", "vscode", "api", "info"] as const;
+export const CLOUDFLARE_SERVICE_IDS = ["dashboard", "opencode", "cli", "api", "info"] as const;
 export type CloudflareServiceId = (typeof CLOUDFLARE_SERVICE_IDS)[number];
 
 export const CLOUDFLARE_SERVICE_TARGETS: Readonly<Record<CloudflareServiceId, string>> = Object.freeze({
   dashboard: "authenticated-production-dashboard-gateway",
   opencode: "authenticated-production-opencode-audience-gateway",
   cli: "authenticated-production-cli-audience-gateway",
-  vscode: "authenticated-production-vscode-audience-gateway",
   api: "authenticated-https-api-boundary",
   info: "public-application-information-site",
 });
@@ -108,12 +107,24 @@ export function validateCloudflareTrustedIngressInventory(value: unknown):
   if (tunnelNameError) return { ok: false, error: tunnelNameError };
   // The information site is optional in older operator inventories.
   const routeInput: Record<string, unknown> = { info: [], ...value.routes };
+  // Older operator inventories may retain an editor route. Validate it as
+  // historical data, then omit it from every current trust/launcher projection.
+  if (Object.hasOwn(routeInput, "vscode")) {
+    const retired = routeInput.vscode;
+    if (!Array.isArray(retired) || retired.length > 16 || retired.some(route =>
+      !isRecord(route) || !hasOnlyKeys(route, ["publicUrl", "target"]) ||
+      typeof route.publicUrl !== "string" || validatePublicOrigin(route.publicUrl.trim()) !== null ||
+      route.target !== "authenticated-production-vscode-audience-gateway")) {
+      return { ok: false, error: "retired editor ingress metadata is invalid" };
+    }
+    delete routeInput.vscode;
+  }
   if (!hasOnlyKeys(routeInput, CLOUDFLARE_SERVICE_IDS)) {
-    return { ok: false, error: "trusted ingress routes must contain dashboard, opencode, cli, vscode, api, and optional info" };
+    return { ok: false, error: "trusted ingress routes must contain dashboard, opencode, cli, api, and optional info" };
   }
 
   const routes: Record<CloudflareServiceId, CloudflareTrustedIngressRoute[]> = {
-    dashboard: [], opencode: [], cli: [], vscode: [], api: [], info: [],
+    dashboard: [], opencode: [], cli: [], api: [], info: [],
   };
   const assignedOrigins = new Set<string>();
   for (const service of CLOUDFLARE_SERVICE_IDS) {
@@ -157,7 +168,7 @@ export function validateCloudflareTunnelConfig(value: unknown, inventory?: Cloud
   if (value.enabled && !tunnelName) return { ok: false, error: "tunnelName is required when the connector is enabled" };
   const serviceInput: Record<string, unknown> = { info: { enabled: false, publicUrl: "" }, ...value.services };
   if (!hasOnlyKeys(serviceInput, CLOUDFLARE_SERVICE_IDS)) {
-    return { ok: false, error: "services must contain dashboard, opencode, cli, vscode, api, and optional info" };
+    return { ok: false, error: "services must contain dashboard, opencode, cli, api, and optional info" };
   }
 
   const services = emptyServices();
@@ -192,7 +203,7 @@ export function validateCloudflareTunnelConfig(value: unknown, inventory?: Cloud
 }
 
 function canonicalProjectId(): string {
-  const project = getCanonicalGlobalProject();
+  const project = getInstallationStorageProject();
   if (!project) throw new Error("Canonical global project is unavailable");
   return project.id;
 }
@@ -201,7 +212,20 @@ export function getCloudflareTunnelConfig(inventory?: CloudflareTrustedIngressIn
   const raw = settings.getSetting(canonicalProjectId(), CLOUDFLARE_TUNNEL_SETTING_KEY);
   if (!raw) return { status: "ok", config: defaultCloudflareTunnelConfig() };
   try {
-    const result = validateCloudflareTunnelConfig(JSON.parse(raw), inventory);
+    let saved: unknown = JSON.parse(raw);
+    if (isRecord(saved) && isRecord(saved.services) && Object.hasOwn(saved.services, "vscode")) {
+      const retired = saved.services.vscode;
+      if (!isRecord(retired) || !hasOnlyKeys(retired, ["enabled", "publicUrl"]) ||
+        typeof retired.enabled !== "boolean" || typeof retired.publicUrl !== "string" ||
+        (retired.publicUrl.trim() && validatePublicOrigin(retired.publicUrl.trim()) !== null)) {
+        return { status: "invalid", config: defaultCloudflareTunnelConfig(), error: "saved retired editor metadata is invalid" };
+      }
+      const services = { ...saved.services }; delete services.vscode;
+      saved = { ...saved, services };
+    }
+    // Reading never rewrites historical settings or credentials. New writes
+    // pass the current closed schema and cannot enable the retired audience.
+    const result = validateCloudflareTunnelConfig(saved, inventory);
     return result.ok ? { status: "ok", config: result.config } : { status: "invalid", config: defaultCloudflareTunnelConfig(), error: result.error };
   } catch {
     return { status: "invalid", config: defaultCloudflareTunnelConfig(), error: "saved Cloudflare configuration is malformed" };

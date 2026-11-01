@@ -273,3 +273,22 @@ test("execution snapshots scope and request before asynchronous admission",async
     assert.equal(dispatched.binding.directory,originalBinding.directory);
   } finally {release?.();f.db.close();}
 });
+
+test("new project rejects an already attached folder atomically, including an archived original",()=>{
+ const f=fixture();try{
+  const original=f.catalog.create(scope,{label:'Original folder',roots:[root]},'original-folder');
+  const before=()=>({projects:f.db.prepare('SELECT count(*) n FROM veyra_workspace_projects').get().n,roots:f.db.prepare('SELECT count(*) n FROM veyra_workspace_roots').get().n,checkpoints:f.checkpoints});
+  const initial=before();
+  assert.throws(()=>f.catalog.create(scope,{label:'Duplicate folder',roots:[{...root,id:'different-display-id'}]},'duplicate-folder'),error=>error.code==='PROJECT_ROOT_ALREADY_ATTACHED'&&error.status===409);
+  assert.deepEqual(before(),initial);assert.equal(f.catalog.get(scope,original.id).revision,1);
+  const archived=f.catalog.update(scope,original.id,1,{archived:true}),afterArchive=before();
+  assert.throws(()=>f.catalog.create(scope,{label:'Duplicate archived folder',roots:[root]},'duplicate-archived'),error=>error.code==='PROJECT_ROOT_ALREADY_ATTACHED');assert.deepEqual(before(),afterArchive);assert.equal(f.catalog.get(scope,original.id).revision,archived.revision);
+  const distinct=f.catalog.create(scope,{label:'Same display label on another host',roots:[{...root,id:'other-host-root',hostId:'other-host'}]},'other-host-folder');assert.equal(distinct.roots[0].hostId,'other-host');assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
+ }finally{f.db.close()}
+});
+test("multi-root duplicate refusal leaves no partial project or root insertion",()=>{
+ const f=fixture();try{f.catalog.create(scope,{label:'Original',roots:[root]},'original');const n=f.checkpoints;
+ assert.throws(()=>f.catalog.create(scope,{label:'Mixed',roots:[{...root,id:'free-root',canonicalRootId:'free-folder'}, {...root,id:'duplicate-root',isPrimary:false}]},'mixed'),error=>error.code==='PROJECT_ROOT_ALREADY_ATTACHED');
+ assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_workspace_projects WHERE id=?').get('mixed').n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM veyra_workspace_roots WHERE project_id=?').get('mixed').n,0);assert.equal(f.checkpoints,n);assert.equal(f.db.isTransaction,false);
+ }finally{f.db.close()}
+});

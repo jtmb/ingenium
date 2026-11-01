@@ -1,3 +1,4 @@
+export {ProjectError,requireValue} from '../../../../packages/veyra-projects/domain.mjs';
 import type {OwnerScope,ProjectRef,WorkspaceRoot} from "../../../../packages/veyra-projects/contracts.js";
 export interface DatabasePort {
   prepare(sql:string):{

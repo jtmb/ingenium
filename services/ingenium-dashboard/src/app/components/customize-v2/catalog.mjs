@@ -23,6 +23,8 @@ export function visibleEntries(entries, kind, query = "") {
 }
 
 export function installationLabel(entry) {
+  if(entry.connectionState==="proposal-review-required")return "Proposal review required";
+  if(entry.connectionState==="unavailable")return "Connection needs review";
   if (!entry.installed) return "Available";
   if (entry.archived) return "Archived";
   return entry.enabled ? "Installed" : "Installed · disabled";

@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, request } from "./api";
 import { compatibilityGatewayUrl } from "./runtime-urls";
 
-export type RuntimeAudience = "web" | "cli" | "vscode";
+export type RuntimeAudience = "web" | "cli";
 export type RuntimeLaunchStatus = "loading" | "starting" | "ready" | "expired" | "unavailable";
-export type RuntimeWorkspaceStatus = "loading" | "empty" | "selecting" | "starting" | "ready" | "error" | "unavailable";
+export type RuntimeWorkspaceStatus = "loading" | "empty" | "selecting" | "starting" | "stopping" | "ready" | "error" | "unavailable";
 
 export interface RuntimeWorkspaceOption {
   id: string;
@@ -28,7 +28,7 @@ type RuntimeDescriptor = {
   workspace?: RuntimeWorkspaceOption | null;
 };
 
-type RuntimeLaunch = { launchUrl: string; status: "ready" };
+type RuntimeLaunch = { launchUrl: string; status: "ready"; schemaVersion?:2;instanceId?:string;organizationId?:string;scopeKind?:'workspace';projectId?:null;workspaceId?:string;runtimeId?:string };
 type RuntimeStart = { status: "ready" | "starting"; runtimeId: string | null };
 type RuntimeHealth = { status: "ready" | "unavailable" };
 
@@ -272,13 +272,15 @@ export function useRuntimeWorkspace(scope: RuntimeWorkspaceScope, enabled = true
   return { mode, status, workspaces, selectedWorkspaceId, confirmedWorkspaceId, confirmedRuntimeId, confirmedProjectName, error, selectWorkspace, start, retry };
 }
 
-export type RuntimeWorkspaceController = ReturnType<typeof useRuntimeWorkspace>;
+export type RuntimeWorkspaceController = ReturnType<typeof useRuntimeWorkspace> & {stop?:()=>Promise<void>;restart?:()=>Promise<void>;canStop?:boolean;canRestart?:boolean;executionScope?:{schemaVersion:2;instanceId:string;organizationId:string;workspaceId:string;runtimeId:string;bindingHash:string;bindingEpoch:number}};
 
 export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWorkspaceController, enabled = true) {
   const [status, setStatus] = useState<RuntimeLaunchStatus>("loading");
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [confirmedLaunchScope,setConfirmedLaunchScope]=useState<string|null>(null);
+  const launchScope=JSON.stringify([audience,enabled,workspace.mode,workspace.status,workspace.confirmedWorkspaceId,workspace.confirmedRuntimeId,workspace.executionScope?.instanceId,workspace.executionScope?.organizationId,workspace.executionScope?.bindingHash,workspace.executionScope?.bindingEpoch]);
 
   const retry = useCallback(() => {
     setStatus("loading");
@@ -290,6 +292,7 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
   useEffect(() => {
     if (!enabled || workspace.status !== "ready" || workspace.mode === null) return;
     let active = true;
+    setStatus('loading');setUrl(null);setConfirmedLaunchScope(null);
     const launch = async () => {
       if (workspace.mode === "compatibility") {
         try {
@@ -325,17 +328,24 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
             return;
           }
         }
-        setUrl(target);
+        setConfirmedLaunchScope(launchScope);setUrl(target);
         setStatus("ready");
         return;
       }
       if (!workspace.confirmedWorkspaceId) return;
       try {
         const exchangeProof = createExchangeProof();
-        const launched = await request<{ data: RuntimeLaunch }>("/runtimes/browser/launch", {
+        const scope=workspace.executionScope;
+        if(scope && (scope.schemaVersion!==2||scope.workspaceId!==workspace.confirmedWorkspaceId||scope.runtimeId!==workspace.confirmedRuntimeId))throw Error('Execution binding changed');
+        const endpoint=scope?'/workspace-execution/launch?'+new URLSearchParams({organizationId:scope.organizationId}):'/runtimes/browser/launch';
+        const launched = await request<{ data: RuntimeLaunch }>(endpoint, {
           method: "POST",
-          body: JSON.stringify({ audience, exchangeProof, workspaceId: workspace.confirmedWorkspaceId }),
+          body: JSON.stringify({ audience, exchangeProof, workspaceId: workspace.confirmedWorkspaceId,...(scope?{runtimeId:scope.runtimeId}:{}) }),
         });
+        if(!active)return;
+        if(scope && (launched.data.schemaVersion!==2||launched.data.instanceId!==scope.instanceId||launched.data.organizationId!==scope.organizationId||launched.data.scopeKind!=='workspace'||launched.data.projectId!==null||launched.data.workspaceId!==scope.workspaceId||launched.data.runtimeId!==scope.runtimeId||launched.data.status!=='ready'))throw Error('Workspace launch response changed');
+        const target=new URL(launched.data.launchUrl);
+        if(!['http:','https:'].includes(target.protocol)||target.username||target.password||target.pathname!=='/__ingenium/exchange'||target.search||target.hash)throw Error('Invalid runtime exchange URL');
         const exchange = await fetch(launched.data.launchUrl, {
           method: "POST",
           credentials: "include",
@@ -360,7 +370,7 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
           setError("The runtime audience did not become ready. Check the runtime service and retry.");
           return;
         }
-        setUrl(`${origin}/`);
+        setConfirmedLaunchScope(launchScope);setUrl(`${origin}/`);
         setStatus("ready");
       } catch (failure) {
         if (!active) return;
@@ -372,7 +382,8 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
     };
     void launch();
     return () => { active = false; };
-  }, [audience, enabled, nonce, workspace.confirmedWorkspaceId, workspace.mode, workspace.status]);
+  }, [audience, enabled, nonce, launchScope]);
 
-  return { status, url, error, retry };
+  const current=confirmedLaunchScope===launchScope;
+  return { status:status==='ready'&&!current?'loading' as const:status, url:current?url:null, error, retry };
 }

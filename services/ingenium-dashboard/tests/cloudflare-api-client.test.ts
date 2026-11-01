@@ -13,7 +13,6 @@ describe("Cloudflare dashboard API contract", () => {
         dashboard: { enabled: true, publicUrl: "https://dashboard.example.com/" },
         opencode: { enabled: false, publicUrl: "" },
         cli: { enabled: false, publicUrl: "" },
-        vscode: { enabled: false, publicUrl: "" },
         api: { enabled: false, publicUrl: "" },
         info: { enabled: false, publicUrl: "" },
       },

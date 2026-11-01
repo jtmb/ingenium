@@ -134,7 +134,7 @@ function resolveEmailProject(): string {
 
 function currentOrganizationId(req: Request): string | undefined {
   if (req.principal && "organizationId" in req.principal && req.principal.organizationId) return req.principal.organizationId;
-  return projects.getCanonicalGlobalProject()?.organization_id;
+  return projects.getInstallationStorageProject()?.organization_id;
 }
 
 function emailOwner(req: Request, res: Response) {

@@ -3,14 +3,29 @@
   "qualified": false,
   "files": [
     {
+      "path": "README.md",
+      "bytes": 25291,
+      "sha256": "fad47f14117a71298f8c1703ab11e7830eab1328a7780f8a4801a84233f2ba95"
+    },
+    {
+      "path": "capture-projection.mjs",
+      "bytes": 10294,
+      "sha256": "809da1ef013da05094eb24ffa01051d905cc61afbf16fed043d22dd423c59af1"
+    },
+    {
+      "path": "capture-projection.test.mjs",
+      "bytes": 9300,
+      "sha256": "b1cc16a7c5ad25cd01155e3ae0fc0331093dd1eaa0b25a8ac0ee6d2184abc877"
+    },
+    {
       "path": "cleanup.json",
       "bytes": 1728,
       "sha256": "2d2cd4d037c7d9f2a5a6eccd1760f5e6c31f1aebd4ae4ff7f64bfd937ee75b8c"
     },
     {
       "path": "evidence-to-approval.mjs",
-      "bytes": 11325,
-      "sha256": "148251806cf9333209822b17ddd93941b5f17d84d4c65622fa1fb9d62550a86f"
+      "bytes": 12250,
+      "sha256": "f9b7227621ed19c8ee5232e34bd5e9bfbeaf8e41389b84177ede7cbee450d9cf"
     },
     {
       "path": "kernel-owner.c",
@@ -54,13 +69,8 @@
     },
     {
       "path": "qualify_cpu.py",
-      "bytes": 7164,
-      "sha256": "b90fd7f0b6852612f8e239fe5210d524be1257efb5919cc7f3dcbdc761b511b3"
-    },
-    {
-      "path": "README.md",
-      "bytes": 23000,
-      "sha256": "feb797217c9fee4b6afe1c67c4c3b26b78ee33f30e644540e3eafb7cb747164d"
+      "bytes": 7465,
+      "sha256": "f2d362d3b735dab9164515a07456cdc60b36a87db2bb69e867c4d4e09f9cab89"
     },
     {
       "path": "retained-kernel-owner.mjs",
@@ -99,8 +109,8 @@
     },
     {
       "path": "verify-environment.mjs",
-      "bytes": 4396,
-      "sha256": "82f6bc3355c08afbeb78859eff9d076786192beeae5f4d332889308480fdd758"
+      "bytes": 4575,
+      "sha256": "6fda2f19c17812b04ab4562f75191c38e510c9f1d65a8ae0315d19bab8f18ce2"
     },
     {
       "path": "wheel-layout.mjs",
@@ -108,6 +118,6 @@
       "sha256": "cdb839c3270b5658bda70e0a22eb0cc9015010dd59a58a33b4ad21deeb629beb"
     }
   ],
-  "totalContentBytes": 162088.0,
-  "validationScope": "Source metadata and syntax bodies only; coordinator compilation and all execution gates remain open"
+  "totalContentBytes": 185550,
+  "validationScope": "Exact source after Root Core compile/133migration and actual Linux model/resourceprobe stages; strict capture identity compatibility supports known model/probe producers only; helper/witness/Corewire/platform/productionapproval remain open"
 }

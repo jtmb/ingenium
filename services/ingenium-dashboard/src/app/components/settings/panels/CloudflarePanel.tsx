@@ -15,7 +15,6 @@ const SERVICES: Array<{ id: CloudflareServiceId; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "opencode", label: "OpenCode" },
   { id: "cli", label: "CLI" },
-  { id: "vscode", label: "VS Code" },
   { id: "api", label: "API" },
   { id: "info", label: "Public information pages" },
 ];

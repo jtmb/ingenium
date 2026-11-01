@@ -6,8 +6,8 @@ import {createRequire} from 'node:module';
 const staging = process.argv[2];
 if (!staging || process.getuid() !== 0) throw new Error('Build-only root staging required');
 const manifest = JSON.parse(fs.readFileSync(path.join(staging, 'manifest.json'), 'utf8'));
-const roots = ['/usr/local/lib/code-server/node_modules/', '/usr/local/lib/code-server/lib/vscode/node_modules/', '/usr/local/lib/node_modules/npm/node_modules/'];
-const semver = createRequire('/usr/local/lib/code-server/package.json')('semver');
+const roots = ['/usr/local/lib/node_modules/npm/node_modules/'];
+const semver = createRequire('/usr/local/lib/node_modules/npm/package.json')('semver');
 const seen = new Set();
 for (const [index, item] of manifest.packages.entries()) {
   const target = path.resolve(item.target);
@@ -18,7 +18,7 @@ for (const [index, item] of manifest.packages.entries()) {
   const replacement = JSON.parse(fs.readFileSync(path.join(staging, String(index), 'package/package.json'), 'utf8'));
   if (original.name !== item.name || original.version !== item.from || replacement.name !== item.name || replacement.version !== item.version || semver.major(item.from) !== semver.major(item.version)) throw new Error(`Unexpected vendor identity or major API change at ${target}`);
 }
-// Validate every old identity first: body-parser contains the nested content-type target.
+// Validate every original identity before changing the image-only npm overlay.
 for (const [index, item] of manifest.packages.entries()) {
   if (fs.existsSync(item.target)) fs.rmSync(item.target, {recursive: true});
   fs.mkdirSync(path.dirname(item.target), {recursive: true});

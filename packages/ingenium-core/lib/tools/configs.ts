@@ -3,7 +3,10 @@ import { logger } from "../logger.js";
 import { Config } from "../schema.js";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import {createHash} from "node:crypto";
+import {readProjectionBytes,exactUtf8} from "./plugin-projection-materialize.js";
 import { resolveProjectBase, getConfigPath } from "./paths.js";
+import {managedPluginConfigPathIfPresent,PluginProjectionTransitionRequired} from "./plugin-projection-transition.js";
 
 /**
  * Get configuration content from the DB.
@@ -21,16 +24,11 @@ export function getConfig(projectId: string, type: "project" | "global"): Config
  * even if the filesystem is read-only or the path is invalid.
  */
 export function saveConfig(projectId: string, type: "project" | "global", content: string): Config {
+  managedPluginConfigPathIfPresent(projectId);
+  if(type==="project")getConfigPath(projectId);
   const config = execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const now = new Date().toISOString();
-    const existing = db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config | undefined;
-    if (existing) {
-      db.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?").run(content, now, existing.id);
-    } else {
-      const id = "config_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-      db.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, projectId, type, content, now, now);
-    }
+    saveConfigInCurrentTransaction(projectId,type,content);
+    const db=getDb(process.env.INGENIUM_CORE_DB_PATH??"./data");
     // Also write to disk at the correct config path
     try {
       const configPath = type === "global"
@@ -52,6 +50,28 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
   return config;
 }
 
+/** Same original DB owner, for a caller already retaining the actual outer Core transaction. */
+export function saveConfigInCurrentTransaction(projectId:string,type:"project"|"global",content:string):Config{
+ if(!getDb().inTransaction)throw new Error("Core config transaction required");
+ managedPluginConfigPathIfPresent(projectId);
+const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const now = new Date().toISOString();
+    const existing = db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config | undefined;
+    if (existing) {
+      db.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?").run(content, now, existing.id);
+    } else {
+      const id = "config_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+      db.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, projectId, type, content, now, now);
+    }
+ return getDb().prepare("SELECT * FROM configs WHERE project_id=? AND type=?").get(projectId,type) as Config;
+}
+/** Actual resolved config reader shared by migration readback and the normal agent-config consumer. */
+export function readConfigProjection(projectId:string,type:"project"|"global"):{path:string;content:string;sha256:string}|undefined{
+ managedPluginConfigPathIfPresent(projectId);
+ const path=type==="global"?resolve(resolveProjectBase(projectId),"opencode.jsonc"):getConfigPath(projectId);
+ const bytes=readProjectionBytes(path);if(!bytes)return undefined;
+ try{return {path,content:exactUtf8(bytes),sha256:createHash("sha256").update(bytes).digest("hex")};}finally{bytes.fill(0);}
+}
 /**
  * Read config from the filesystem and save it to the DB.
  * Returns undefined if the file does not exist or is unreadable
@@ -59,6 +79,7 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
  * This is the "pull from disk" direction of the sync.
  */
 export function syncConfigFromDisk(projectId: string, type: "project" | "global"): Config | undefined {
+  managedPluginConfigPathIfPresent(projectId);
   try {
     const configPath = type === "global"
       ? resolve(resolveProjectBase(projectId), "opencode.jsonc")
@@ -66,7 +87,8 @@ export function syncConfigFromDisk(projectId: string, type: "project" | "global"
     if (!existsSync(configPath)) return undefined;
     const content = readFileSync(configPath, "utf-8");
     return saveConfig(projectId, type, content);
-  } catch {
+  } catch (error) {
+    if(error instanceof PluginProjectionTransitionRequired)throw error;
     return undefined;
   }
 }

@@ -623,7 +623,7 @@ export function resolveJobProviderRuntime(projectId: string, jobId: string, runI
             AND ((connection.provider_type = 'native' AND connection.id = ?)
               OR (credential_project.id IS NOT NULL AND item.organization_id = run.organization_id AND item.owner_kind = 'organization')))
         OR (connection.owner_kind = 'installation' AND connection.organization_id IS NULL
-            AND credential_project.is_global = 1 AND item.owner_kind = 'organization'))
+            AND EXISTS(SELECT 1 FROM veyra_installation_identity installation JOIN veyra_installation_legacy_refs storage ON storage.instance_id=installation.instance_id WHERE installation.singleton=1 AND storage.legacy_project_id=credential_project.id) AND item.owner_kind = 'organization'))
     ORDER BY connection.id LIMIT 2
   `).all(now, DELETED_POLICY, runId, projectId, jobId, nativeJobConnectionId(jobId)) as Array<{
     id: string; provider_key: string; provider_type: string; config_json: string;

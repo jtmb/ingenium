@@ -19,7 +19,7 @@ export interface Core126ImageApproval {imageId:string;manifestSha256:string;sour
 declare const observationBrand:unique symbol,clientBrand:unique symbol,definitionBrand:unique symbol,registryBrand:unique symbol;
 export interface Core126Observation {readonly [observationBrand]:true}
 export interface Core126ImageDefinition {readonly [definitionBrand]:true}
-export interface Core126ObservationClient {readonly [clientBrand]:true;acquire(runtimeId:string):Promise<Core126Observation>}
+export interface Core126ObservationClient {readonly [clientBrand]:true;acquire(runtimeId:string):Promise<Core126Observation>;acquireCandidate(runtimeId:string):Promise<Core126Observation>}
 export interface Core126ImageRegistry {readonly [registryBrand]:true;load(imageId:string):Promise<Core126ImageDefinition>}
 export interface Core126QualifiedImage {
  readonly qualified:true;readonly id:string;readonly hash:string;readonly imageId:string;readonly parentImageId:string;readonly daemonId:string;readonly provisioningRevision:number;readonly approvedScopes:readonly string[];readonly expiresAt:number;readonly agentHash:string;readonly model:string;readonly modelBindingHash:string;readonly jobRunAudience:'job-run';readonly transport:'scoped-core126-mcp-v1';
@@ -43,3 +43,5 @@ export function createCore126ImageRegistry(ports:{loadManifestBytes:(imageId:str
 export function createCore126ImageOwner(ports:{client:Core126ObservationClient;registry:Core126ImageRegistry;originalProvisionProfile:(facts:Core126Facts)=>Core126OriginalProvisionProfile|null|undefined;inTransaction:()=>boolean;now?:()=>number}):Core126ImageOwner;
 /** Original manager calls with its own fresh probe before EACH create and start. */
 export function assertAdmissionOriginalImage(admission:Core126ImageAdmission,proof:Core126ManagerProof,definition:Core126ImageDefinition,registry:Core126ImageRegistry,now?:number):true;
+export function withOriginalCandidateSourceObservation<T>(owner:Core126ImageOwner,facts:Core126Facts,work:()=>T|Promise<T>):Promise<T>;
+export function spendOriginalCandidateSourceObservation(owner:Core126ImageOwner,facts:Core126Facts,attemptId:string,runIdentityHash:string):Readonly<{intent:import('../../tools/veyra-release/core126-candidate-intent.mjs').CandidateInertIntent;selectionSha256:string}>;

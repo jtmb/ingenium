@@ -255,7 +255,7 @@ const MAIL_SYNC_DEFAULT_MS = 300_000;
 
 function getMailSyncInterval(): number {
   try {
-    const gid = projects.getGlobalProject()?.id;
+    const gid = projects.getInstallationStorageProject()?.id;
     if (gid) {
       const val = settings.getSetting(gid, "mail_sync_interval_ms");
       if (val !== undefined) {
@@ -590,7 +590,7 @@ export function isSchedulerRunning(): boolean {
 
 function logSynthesisHealth(): void {
   try {
-    const globalProject = projects.getGlobalProject();
+    const globalProject = projects.getInstallationStorageProject();
     if (globalProject) {
       const model = settings.getSetting(globalProject.id, "synthesis_model");
       const endpoint = settings.getSetting(globalProject.id, "synthesis_endpoint");

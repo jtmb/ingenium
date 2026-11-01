@@ -1,5 +1,7 @@
 export interface CustomizeEntry {
   id: string; name: string; description: string; kind: "plugin" | "skill";
+  connectionState?: "available"|"unavailable"|"proposal-review-required"|"archived"|"installed"|"disabled";
+  catalog?: {sourceId:string;sourceSha256:string;sourceRevision:number;organizationId:string;projectId:string;apiProject:string;resourceId:string|null;targetName:string|null};
   scope: string; apiProject?: string; scopeKind?: "project" | "installation" | "public" | "personal" | "system"; revision?: number | null; actions?: string[]; scopeId?: string; category: string; installed: boolean; enabled: boolean; archived: boolean;
 }
 export function projectCatalog(project: string, plugins: {id: string; name: string; description?: string; enabled: boolean | number}[], skills: {id: string; name: string; description?: string; enabled: boolean | number; category?: string | null; archived_at?: string | null}[]): CustomizeEntry[];

@@ -20,11 +20,11 @@ function narrowScreen() { return typeof window.matchMedia === "function" && wind
 function serverScreen() { return false; }
 
 export default function WorkShell({ projectLabel, projects, conversations, activeId, onSelect, onNew,
-  children, composer, web, status, tools, dot, newPending = false, onPresentationChange, installationAdmin = false,
+  children, composer, web, status, tools, dot, projectCatalog, newPending = false, onPresentationChange, installationAdmin = false,
 }: {
   projectLabel: string; projects: WorkProject[]; conversations: WorkConversation[]; activeId: string | null;
   onSelect: (id: string) => void; onNew: () => void; children: ReactNode; composer: ReactNode;
-  web: ReactNode; status?: ReactNode; tools?: ReactNode; dot?: ReactNode; newPending?: boolean;
+  web: ReactNode; status?: ReactNode; tools?: ReactNode; dot?: ReactNode; projectCatalog?: ReactNode | ((search:string)=>ReactNode); newPending?: boolean;
   onPresentationChange?: (view: "work" | "web") => void;
   installationAdmin?: boolean;
 }) {
@@ -33,7 +33,7 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
   const narrow = useSyncExternalStore(subscribeNarrowScreen, narrowScreen, serverScreen);
   const [sidebarOverride, setSidebar] = useState<boolean | null>(null);
   const sidebar = sidebarOverride ?? !narrow;
-  const [sidebarSize, setSidebarSize] = useState(2);
+  const [sidebarSize, setSidebarSize] = useState(1);
   const dragOrigin = useRef<{ x: number; width: number } | null>(null);
   const selectedSize = sidebarSizes[sidebarSize]!;
   const [features, setFeatures] = useState(false);
@@ -61,6 +61,7 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
     {sidebar && <aside id="veyra-work-sidebar" aria-label="Projects and conversations" className={`flex ${selectedSize.className} max-w-[40vw] shrink-0 flex-col border-r border-white/5 bg-[#1c1a1a] p-2 max-sm:max-w-[45vw]`}>
       <div className="px-2 py-2 text-sm font-semibold">Veyra</div>
       <button type="button" onClick={onNew} disabled={newPending} className="rounded-lg px-3 py-2 text-left text-xs hover:bg-white/5 disabled:opacity-40">＋ New chat</button>
+      <Link href="/work/history" className="rounded-lg px-3 py-2 text-xs text-neutral-400 hover:bg-white/5 focus-visible:outline-blue-400">Saved chats</Link>
       {dot}
       <label className="px-2 py-2"><span className="sr-only">Search conversations</span><input type="search" value={search}
         onChange={(event) => setSearch(event.target.value)} placeholder="Search chats" className="w-full rounded-lg border border-white/10 bg-transparent p-2 text-xs focus-visible:outline-blue-400" /></label>
@@ -68,6 +69,7 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
         <h2 className="px-3 pb-2 pt-4 text-xs text-neutral-400">Pinned</h2>
         <ul>{conversations.filter((item) => item.pinned && matches(item)).map(renderConversation)}</ul>
         <h2 className="px-3 pb-2 pt-4 text-xs text-neutral-400">Projects</h2>
+        {typeof projectCatalog === "function" ? projectCatalog(search) : projectCatalog}
         {projects.map((project) => <details key={project.id} open className="mb-1">
           <summary className="cursor-pointer truncate rounded-lg px-3 py-2 text-xs hover:bg-white/5">▱ {project.label}</summary>
           <ul className="pl-3">{project.conversations.filter(matches).map(renderConversation)}</ul>

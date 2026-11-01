@@ -82,6 +82,8 @@ const WRITE = new Set([
 ]);
 
 export function explicitMcpAuthorizationPolicy(toolName: string, category: string): McpAuthorizationPolicy {
+  if(toolName==="ingenium_workspace_runtime_scope")return {action:"runtime.read",resource:"runtime",permission:"read",target:"private",scopes:["runtime:activity"],launcherBinding:"required"};
+  if(["ingenium_workspace_memory_policy","ingenium_workspace_memory_read"].includes(toolName))return {action:"memory.read",resource:"memory",permission:"read",target:"private",scopes:["memory:read"],launcherBinding:"required"};
   const transportName = toolName.startsWith("ingenium_") ? toolName.slice("ingenium_".length) : toolName;
   if (!READ.has(transportName) && !ADMIN.has(transportName) && !EXECUTE.has(transportName) && !WRITE.has(transportName)) throw new Error(`Missing explicit MCP authorization policy: ${toolName}`);
   const permission: AuthorizationPermission = ADMIN.has(transportName) ? "admin" : EXECUTE.has(transportName) ? "execute" : READ.has(transportName) ? "read" : "write";

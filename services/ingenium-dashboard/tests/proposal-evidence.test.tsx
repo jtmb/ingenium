@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import ProposalReviewOverlay, { type EnrichedObservation, type ProposalDto } from "../src/app/components/proposals/ProposalReviewOverlay";
 import EvidenceCard from "../src/app/components/proposals/EvidenceCard";
@@ -85,5 +85,32 @@ describe("proposal evidence from the API", () => {
     expect(screen.getByText("No supporting summaries available.")).toBeTruthy();
     expect(screen.queryByText("Source previews")).toBeNull();
     expect(screen.getByRole("link").getAttribute("title")).toContain("No preview available");
+  });
+});
+
+
+describe("draft proposal review admission", () => {
+  it("exposes submit and current-status refresh without approval or installation", () => {
+    const onSubmit=vi.fn(),onRefresh=vi.fn(),draft={...proposal,status:"draft",appliedAt:null};
+    render(<ProposalReviewOverlay isOpen onClose={vi.fn()} proposal={draft} proposalDetail={draft}
+      detailLoading={false} currentSkillContent={null} enrichedObservations={[]} project="actual-project"
+      onSubmit={onSubmit} onRefresh={onRefresh} onApprove={vi.fn()} onReject={vi.fn()} onRollback={vi.fn()}
+      actionLoading={false} onViewSkill={vi.fn()}/>);
+    fireEvent.click(screen.getByRole("button",{name:"Submit for review"}));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button",{name:"Refresh proposal status"}));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button",{name:/Approve/})).toBeNull();
+    expect(screen.queryByRole("button",{name:"View Skill"})).toBeNull();
+  });
+  it("blocks draft submit while its original action is pending", () => {
+    const onSubmit=vi.fn(),draft={...proposal,status:"draft",appliedAt:null};
+    render(<ProposalReviewOverlay isOpen onClose={vi.fn()} proposal={draft} proposalDetail={draft}
+      detailLoading={false} currentSkillContent={null} enrichedObservations={[]} project="actual-project"
+      onSubmit={onSubmit} onApprove={vi.fn()} onReject={vi.fn()} onRollback={vi.fn()}
+      actionLoading onViewSkill={vi.fn()} actionError="Check the current status."/>);
+    const button=screen.getByRole("button",{name:"Submitting…"}) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);fireEvent.click(button);expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("current status");
   });
 });

@@ -675,7 +675,7 @@ async function fetchHealth(): Promise<{
     health.docker = { status: "healthy" };
     const processNames = isControlPlaneMode()
       ? ["restore-handoff", "ingenium-api", "ingenium-api-boundary", "ingenium-dashboard", "ingenium-gateway"]
-      : ["ingenium-api", "ingenium-api-boundary", "ingenium-dashboard", "ingenium-gateway", "opencode-web", "ttyd-opencode", "vscode"];
+      : ["ingenium-api", "ingenium-api-boundary", "ingenium-dashboard", "ingenium-gateway", "opencode-web", "ttyd-opencode"];
     const foundProcesses: Map<string, { statename: string; startSecs: number }> = new Map();
     for (const process of processes) {
       if (!processNames.includes(process.name)) continue;
@@ -694,7 +694,6 @@ async function fetchHealth(): Promise<{
       "restore-handoff": "Restore Handoff",
       "opencode-web": "OpenCode",
       "ttyd-opencode": "OpenCode CLI",
-      vscode: "VS Code",
     };
 
     for (const name of processNames) {

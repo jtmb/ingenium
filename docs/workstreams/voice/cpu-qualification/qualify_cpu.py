@@ -62,8 +62,10 @@ def main():
         raise ValueError("exact qualified Linux CPython3.12.13 and protected plan required")
     run_id, plan_path = sys.argv[1:]
     plan = json.loads(bounded(plan_path))
-    if plan.get("kind") != "root-qualification-envelope-v1" or plan.get("productionApproval") is not False:
-        raise ValueError("separate operator qualification envelope required")
+    if plan.get("kind") != "cpu-model-qualification-input-v1" or plan.get("productionApproval") is not False:
+        raise ValueError("separate non-authority model input required")
+    if plan.get("runId") != run_id or set(plan) != {"kind", "productionApproval", "runId", "hardLimits", "profile", "profileFileSha256"}:
+        raise ValueError("closed original model input required")
     envelope = plan["hardLimits"]
     if not all(positive(envelope.get(key)) for key in ("memoryBytes", "pids", "quotaUsec", "periodUsec", "timeoutMs")):
         raise ValueError("actual finite operator hard limits required")
@@ -94,7 +96,8 @@ def main():
         if not path.is_absolute() or path.is_symlink() or not path.is_dir():
             raise ValueError("approved immutable code/dependency path required")
         sys.path.insert(0, str(path))
-    os.environ["OMP_NUM_THREADS"] = str(profile["settings"]["cpu_threads"])
+    for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[variable] = str(profile["settings"]["cpu_threads"])
     for variable in ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"):
         if os.environ.get(variable) != "":
             raise ValueError("CPU-only environment required")

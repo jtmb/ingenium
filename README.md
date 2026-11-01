@@ -155,7 +155,7 @@ Plugins ship inside the `@ingenium/extension` package. Reference the five regist
 >
 > **Restart required:** After modifying MCP server settings in your local `opencode.json`, you must restart OpenCode for the changes to take effect.
 
-**Open the dashboard** — Navigate to `http://localhost:3000` in your browser. In WSL, Windows localhost forwarding reaches the local gateway on host port `3000` without an HTTP Basic Auth prompt. The API boundary on `4097` and OpenCode/VS Code upstreams on `4098`/`4099`/`4100` are not gateway ports and must remain private. Do not use this plain-HTTP local profile for LAN or remote access.
+**Open the dashboard** — Navigate to `http://localhost:3000` in your browser. In WSL, Windows localhost forwarding reaches the local gateway on host port `3000` without an HTTP Basic Auth prompt. The API boundary on `4097` and OpenCode Web/CLI upstreams on `4098`/`4099` are not gateway ports and must remain private. Do not use this plain-HTTP local profile for LAN or remote access.
 
 Dashboard browser calls use the same-origin API proxy; the Next.js server uses a
 protected dashboard-bootstrap credential only for public bootstrap routes and
@@ -226,7 +226,7 @@ ingenium/
 
 ## Deployment
 
-Single-container compatibility deployment via `docker compose --profile compatibility up --build`. Supervisord manages nine active processes:
+Single-container compatibility deployment via `docker compose --profile compatibility up --build`. Supervisord manages eight active processes:
 
 | Process | Port (Container) | Published | Description |
 |---------|-----------------|-----------|-------------|
@@ -238,11 +238,10 @@ Single-container compatibility deployment via `docker compose --profile compatib
 | OpenCode internal auth proxy | private `:4101` | not published | API-only Basic-auth proxy to OpenCode Web |
 | OpenCode Web | internal `:4098` | `http://opencode.localhost:3000` | Local root gateway; private upstream, do not publish 4098 |
 | ttyd OpenCode CLI | internal `:4099` | `http://cli.localhost:3000` | Local root gateway; private upstream, do not publish 4099 |
-| code-server | internal `:4100` | `http://vscode.localhost:3000` | VS Code root gateway; private upstream, do not publish 4100 |
 
-Only host port `3000` is the browser-facing local gateway for the default dashboard, OpenCode, and VS Code roots. The gateway also listens on `127.0.0.1:1455` for the exact OAuth callback path and forwards it to private Express `:4096`. The supported dashboard origins are `http://localhost:3000/` and `http://127.0.0.1:3000/`; the default virtual host also supports Windows-to-WSL forwarded host headers. Nginx proxies the dashboard host plus `opencode.localhost`, `cli.localhost`, and `vscode.localhost` to their private upstreams without HTTP Basic Auth. The bearer API boundary remains on loopback `127.0.0.1:4097` for MCP clients; do not publish or forward it as a browser gateway. The dashboard does not use `/opencode-web/` or `/opencode-cli/` subpath proxies. Remote/LAN deployments are not enabled by the default Compose profile: an operator must provide an authenticated TLS operator profile protecting the dashboard and dedicated root HTTPS origins, set the public origins, then rebuild.
+Only host port `3000` is the browser-facing local gateway for the default dashboard and OpenCode Web/CLI roots. The gateway also listens on `127.0.0.1:1455` for the exact OAuth callback path and forwards it to private Express `:4096`. The supported dashboard origins are `http://localhost:3000/` and `http://127.0.0.1:3000/`; the default virtual host also supports Windows-to-WSL forwarded host headers. Nginx proxies the dashboard host plus `opencode.localhost` and `cli.localhost` to their private upstreams without HTTP Basic Auth. The bearer API boundary remains on loopback `127.0.0.1:4097` for MCP clients; do not publish or forward it as a browser gateway. The dashboard does not use `/opencode-web/` or `/opencode-cli/` subpath proxies. Remote/LAN deployments are not enabled by the default Compose profile: an operator must provide an authenticated TLS operator profile protecting the dashboard and dedicated root HTTPS origins, set the public origins, then rebuild.
 
-After changing build-time origins, gateway configuration, or image contents, run `docker compose --profile compatibility up --build -d` and verify the running gateway roots. After changing only runtime secrets, recreate/restart the service so the runtime and workspace token files are reseeded; no image rebuild is needed. Host MCP setup can run `./scripts/bootstrap-local-secrets.sh`, which creates ignored mode-0600 files and refuses mismatches. If the new deployment cannot be verified, roll back to the last known-good image and configuration rather than exposing `4096`, `4098`, `4099`, `4100`, or `4101`. Never disclose token bytes in diagnostics.
+After changing build-time origins, gateway configuration, or image contents, run `docker compose --profile compatibility up --build -d` and verify the running gateway roots. After changing only runtime secrets, recreate/restart the service so the runtime and workspace token files are reseeded; no image rebuild is needed. Host MCP setup can run `./scripts/bootstrap-local-secrets.sh`, which creates ignored mode-0600 files and refuses mismatches. If the new deployment cannot be verified, roll back to the last known-good image and configuration rather than exposing `4096`, `4098`, `4099`, or `4101`. Never disclose token bytes in diagnostics.
 
 The API image follows a clean-build path: generated `dist/` directories are excluded from the Docker build context, the builder compiles the checked-in source, and the API launcher runs the resulting build. This prevents stale or partial tracked artifacts from determining which server code starts.
 

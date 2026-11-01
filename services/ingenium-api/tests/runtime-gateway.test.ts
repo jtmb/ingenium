@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 describe("AUTH-109 runtime gateway", () => {
-  it.each(["web", "cli", "vscode"] as const)("accepts only an exact %s runtime host", (audience) => {
+  it.each(["web", "cli"] as const)("accepts only an exact %s runtime host", (audience) => {
     expect(runtimeScope({ headers: { host: `${audience}--${runtimeId}.runtime.example.test` } })).toEqual({
       audience,
       runtimeId,
@@ -90,6 +90,10 @@ describe("AUTH-109 runtime gateway", () => {
     });
     expect(runtimeScope({ headers: { host: `cli--${runtimeId}.runtime.example.test.evil.test` } })).toBeUndefined();
     expect(runtimeScope({ headers: { host: `web--${runtimeId}.runtime.example.test:443` } })).toBeUndefined();
+  });
+
+  it("rejects retired editor hosts even with a valid-looking former cookie", () => {
+    expect(runtimeScope({headers:{host:`vscode--${runtimeId}.runtime.example.test`,cookie:`__Host-ingenium_runtime_vscode=${sessionToken}`}})).toBeUndefined();
   });
 
   it("uses trustworthy HTTP only for special-use localhost runtime roots", () => {
@@ -218,7 +222,7 @@ describe("AUTH-109 runtime gateway", () => {
       .not.toHaveProperty("x-ingenium-authenticated-user");
   });
 
-  it.each(["web", "cli", "vscode"] as const)("uses a cross-site embeddable host-only secure %s cookie and replaces upstream frame denial", (audience) => {
+  it.each(["web", "cli"] as const)("uses a cross-site embeddable host-only secure %s cookie and replaces upstream frame denial", (audience) => {
     expect(runtimeCookie(audience, sessionToken, 60)).toBe(
       `__Host-ingenium_runtime_${audience}=${sessionToken}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=60`,
     );
@@ -281,7 +285,6 @@ describe("AUTH-109 runtime gateway", () => {
   it.each([
     ["web", "/"],
     ["cli", "/"],
-    ["vscode", "/?folder=/workspace"],
   ] as const)("probes the exact %s audience root before reporting ready", (audience, path) => {
     expect(runtimeBackendHealthPath(audience)).toBe(path);
   });

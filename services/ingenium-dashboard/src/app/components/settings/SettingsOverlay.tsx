@@ -9,6 +9,8 @@ import SettingsSidebar from "./SettingsSidebar";
 import Select from "../Select";
 import GeneralPanel from "./panels/GeneralPanel";
 import MailPanel from "./panels/MailPanel";
+import {ProjectProvider} from "@/lib/ProjectContext";
+function ScopedMailPanel(){return <ProjectProvider><MailPanel/></ProjectProvider>}
 import PipelinePanel from "./panels/PipelinePanel";
 import ConfigPanel from "./panels/ConfigPanel";
 import CloudflarePanel from "./panels/CloudflarePanel";
@@ -62,7 +64,7 @@ const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
     destination: "/plugins",
     description: "Create, edit, enable, and disable OpenCode plugins in the Plugins workspace.",
   },
-  mail: MailPanel,
+  mail: ScopedMailPanel,
   agents: {
     destination: "/agents",
     description: "Manage agent profiles, categories, content, and availability in the Agents workspace.",

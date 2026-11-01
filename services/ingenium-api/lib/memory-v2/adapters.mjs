@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {resolveContextPairCandidate} from './opencode-context-pair.mjs';
 import { MemoryLifecycle, MemoryError, scopeKey } from './lifecycle.mjs';
 
 const denied = () => { throw new MemoryError('FORBIDDEN'); };
@@ -6,13 +7,13 @@ const unavailable = () => { throw new MemoryError('MEMORY_ADAPTER_UNAVAILABLE');
 const id = (value) => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 512;
 const sameScope = (left, right) => ['organizationId', 'ownerUserId', 'hostId', 'environmentId', 'projectId', 'workspaceId', 'bindingHash', 'bindingEpoch', 'visibility']
   .every((field) => left?.[field] === right?.[field]);
-const validPermissions = new Set(['read', 'read-source', 'write-policy', 'forget', 'generate', 'backup', 'restore']);
-function hasCapability(principal, permission) {
+const validPermissions = new Set(['read', 'read-source', 'write-policy', 'forget', 'preview-forget', 'generate', 'backup', 'restore']);
+export function hasMemoryCapability(principal, permission) {
   if (!Array.isArray(principal.scopes)) return false;
   const allowed = new Set(principal.scopes);
   if (allowed.has('*') || allowed.has('user:*') || allowed.has('memory:*')) return true;
   if (permission === 'read' || permission === 'read-source') return ['memory:read', 'memory:write', 'memory:share'].some((scope) => allowed.has(scope));
-  if (permission === 'forget' || permission === 'write-policy') return allowed.has('memory:write');
+  if (permission === 'forget' || permission === 'preview-forget' || permission === 'write-policy') return allowed.has('memory:write');
   return allowed.has(`memory:${permission}`);
 }
 function selectors(input) {
@@ -25,7 +26,7 @@ function selectors(input) {
  * are filled from owner/org/hash request fields. Uses the existing core connection; no second database or scheduler is created.
  */
 export function createApiMemorySession({ core, request, selected, authenticate, resolveExistingScope, resolveExecution, resolveChatBinding,
-  authorizeOperation, resolveSourceState, resolveProjectlessScope, clock }) {
+  authorizeOperation, resolveSourceState, resolveProjectlessScope, resolveProjectlessServiceScope, clock }) {
   const selection = selectors(selected);
   if (!core || !['getDb', 'execTransaction', 'checkpointAfterWrite'].every((key) => typeof core[key] === 'function')
     || ![authenticate, resolveExistingScope, resolveExecution, resolveChatBinding, authorizeOperation, resolveSourceState].every((port) => typeof port === 'function')) throw new MemoryError('INVALID_ADAPTER');
@@ -35,7 +36,7 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
     if (!validPermissions.has(permission) || (chatId !== null && !id(chatId))) denied();
     const authenticated = authenticate(request);
     const principal = authenticated?.principal;
-    if (!principal || !['user', 'service'].includes(principal.type) || !id(principal.id) || !hasCapability(principal, permission)) denied();
+    if (!principal || !['user', 'service'].includes(principal.type) || !id(principal.id) || !hasMemoryCapability(principal, permission)) denied();
     connection();
     let ownership;
     if (principal.type === 'service') {
@@ -44,9 +45,19 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
         || !proof || proof.credentialId !== principal.tokenId || proof.workspaceId !== selection.workspaceId || proof.storageMappingHash !== principal.storageMappingHash) denied();
     }
     if (selection.projectId === null) {
-      if (typeof resolveProjectlessScope !== 'function' || principal.type !== 'user') unavailable();
-      ownership = resolveProjectlessScope({ request, principal, workspaceId: selection.workspaceId });
-      if (!ownership || ownership.projectId !== null || ownership.ownerUserId !== principal.id || ownership.workspaceId !== selection.workspaceId
+      if (principal.type === 'user') {
+        if (typeof resolveProjectlessScope !== 'function') unavailable();
+        ownership = resolveProjectlessScope({ request, principal, workspaceId: selection.workspaceId });
+        if (!ownership || ownership.ownerUserId !== principal.id) denied();
+      } else {
+        // Only the dedicated runtime factory supplies this owner. Existing
+        // browser factories remain unable to admit projectless service callers.
+        if (typeof resolveProjectlessServiceScope !== 'function' || !['read','read-source'].includes(permission)) unavailable();
+        ownership = resolveProjectlessServiceScope({ request, principal, workspaceId: selection.workspaceId });
+        if (!ownership || !id(ownership.ownerUserId) || ownership.servicePrincipalId !== principal.id
+          || ownership.credentialId !== principal.tokenId || ownership.bindingHash !== principal.storageMappingHash) denied();
+      }
+      if (!ownership || ownership.projectId !== null || ownership.workspaceId !== selection.workspaceId
         || ownership.status !== 'authorized' || ownership.visibility !== 'private') denied();
     } else {
       // This is the existing explicit-memory resolver, including credential epoch,
@@ -75,8 +86,9 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
     if (!execution || execution.available !== true || !['runtime', 'native', 'compatibility'].includes(execution.mode)
       || execution.runtimeId !== selection.runtimeId || !id(execution.hostId) || !id(execution.environmentId)
       || ['workspaceId', 'ownerUserId', 'organizationId', 'projectId', 'bindingHash', 'bindingEpoch'].some((field) => execution[field] !== ownership[field])) denied();
+    if (principal.type === 'service' && selection.projectId === null && execution.mode !== 'runtime') denied();
     if (execution.mode === 'runtime') {
-      const runtime = connection().prepare(`SELECT id FROM runtime_instances WHERE id=? AND workspace_id=? AND organization_id=? AND project_id=?
+      const runtime = connection().prepare(`SELECT id FROM runtime_instances WHERE id=? AND workspace_id=? AND organization_id=? AND project_id IS ?
         AND owner_user_id=? AND security_epoch=? AND state IN ('READY','IDLE')`)
         .get(selection.runtimeId, ownership.workspaceId, ownership.organizationId, ownership.projectId, ownership.ownerUserId, ownership.bindingEpoch);
       if (!runtime) denied();
@@ -101,10 +113,13 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
   function readSource(scope, chatId, messageId) {
     if (!id(messageId)) return null;
     const current = assertScope(scope, 'read-source', chatId);
-    // Projectless context is unavailable until its real owner provides an exact
-    // mapping; never read a legacy global project as a substitute.
-    if (scope.projectId === null) return null;
-    const row = connection().prepare(`SELECT m.id,m.conversation_id,m.content,m.content_hash,m.role
+    let row;
+    if (scope.projectId === null) {
+      const pair=resolveContextPairCandidate(connection(),{scope,execution:current.execution,chatId,sourceRef:{id:messageId,contentHash:connection().prepare('SELECT content_hash FROM context_messages WHERE id=? AND project_id IS NULL').get(messageId)?.content_hash}});
+      if(!pair)return null;
+      const at=pair.sourceRefs.findIndex(ref=>ref.id===messageId);if(at<0)return null;
+      row={id:messageId,conversation_id:pair.conversationId,role:at===0?'user':'assistant',content:at===0?pair.user.content:pair.assistant.content,content_hash:pair.sourceRefs[at].contentHash};
+    } else row = connection().prepare(`SELECT m.id,m.conversation_id,m.content,m.content_hash,m.role
       FROM context_messages m JOIN context_conversations c ON c.project_id=m.project_id AND c.id=m.conversation_id
       WHERE m.id=? AND c.project_id=? AND c.organization_id=? AND c.owner_user_id=? AND c.visibility='private'
         AND json_extract(c.metadata,'$.source')='opencode-chat' AND json_extract(c.metadata,'$.sourceRuntimeId')=?

@@ -1,4 +1,7 @@
 import { VoiceError, validateTurn } from './session.mjs';
+// Module-owned location for server-side verification of THESE exact bytes.
+// This data value grants no source, filesystem, speech or dispatch authority.
+export const ORIGINAL_SEGMENTER_MODULE_URL=import.meta.url;
 
 const encoder = new TextEncoder();
 const invalid = () => { throw new VoiceError('VOICE_SOURCE_INVALID'); };

@@ -56,10 +56,10 @@ const PHASES = new Set([
 const CONTROL_PLANE_MODE = process.env.INGENIUM_DEPLOYMENT_MODE === "control-plane";
 const USER_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
   ? ["ingenium-api"]
-  : ["ttyd-opencode", "vscode", "opencode-web", "ingenium-api"];
+  : ["ttyd-opencode", "opencode-web", "ingenium-api"];
 const RESTART_PROGRAMS: readonly string[] = CONTROL_PLANE_MODE
   ? ["ingenium-api"]
-  : ["ingenium-api", "opencode-web", "ttyd-opencode", "vscode"];
+  : ["ingenium-api", "opencode-web", "ttyd-opencode"];
 
 type Phase = "claimed" | "quiescing" | "snapshotting" | "swapping" | "buffers_written" | "ingenium_rollback" | "ingenium_installed"
   | "opencode_rollback" | "opencode_installed" | "pair_committed" | "rehydrated" | "restarting" | "completed"
@@ -310,9 +310,15 @@ function signJournal(payload: string): string {
 }
 
 function writeJournal(root: string, runId: string, phase: Phase, capsule: backups.RestoreExecutionCapsule, targets: TargetMetadata): void {
+  // Original maintenance owner must capture a current complete ledger before
+  // any swap. Valid metadata grants no new restore/source authority.
+  try { backups.validateVoiceAttachmentRestoreLedger(capsule.voiceAttachmentDeliveries); }
+  catch { throw new MaintenanceError("JOURNAL_INVALID"); }
   const unsigned = { version: 1 as const, runId, phase, capsule, targets };
   const journal: Journal = { ...unsigned, hmac: signJournal(journalPayload(unsigned)) };
-  atomicWrite(root, JOURNAL_FILE, canonicalJson(journal));
+  const serialized = canonicalJson(journal);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_JOURNAL_BYTES) throw new MaintenanceError("JOURNAL_INVALID");
+  atomicWrite(root, JOURNAL_FILE, serialized);
 }
 
 function readJournal(root: string): Journal | null {
@@ -341,6 +347,11 @@ function readJournal(root: string): Journal | null {
   if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(journal.hmac, "hex"))) {
     throw new MaintenanceError("JOURNAL_INVALID");
   }
+  // HMAC has been verified above. Refuse BEFORE recover() can touch rollback
+  // files, sidecars, target metadata, journals or restored users. Missing legacy
+  // fields require original-owner verified rollback-DB upgrade, never emptiness.
+  try { backups.validateVoiceAttachmentRestoreLedger(journal.capsule.voiceAttachmentDeliveries); }
+  catch { throw new MaintenanceError("JOURNAL_INVALID"); }
   return journal as Journal;
 }
 
@@ -912,7 +923,7 @@ async function execute(): Promise<void> {
   let fence = "";
   let run: backups.RestoreExecutionRun | null = null;
   let suppressionMergeFailed = false;
-  const global = projects.getGlobalProject();
+  const global = projects.getInstallationStorageProject();
   try {
     if (!global) return;
     if (hasUnretiredManagedExecutionForRestore(getDb()) || CONTROL_PLANE_MODE && hasActiveRuntimeForRestore(runtimes.listRuntimeInstances())) {
@@ -1146,7 +1157,7 @@ function recover(): void {
     for (const component of ["ingenium", "opencode"] as const) {
       removeBufferArtifacts(root, bufferPath(root, lockRunId, component));
     }
-    const global = projects.getGlobalProject();
+    const global = projects.getInstallationStorageProject();
     const run = global ? backups.getRestoreExecutionRun(global.id, lockRunId) : null;
     if (!run || run.state === "queued") {
       unlinkSync(safeChild(root, LOCK_FILE));

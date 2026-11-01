@@ -12,7 +12,7 @@ export async function getManualSynthesisModels(projectId: string): Promise<{
   providers: ExpandedChatProviderInfo[];
   unavailable: boolean;
 }> {
-  const catalog = await getChatProviderCatalog(projects.getGlobalProject()?.id ?? projectId);
+  const catalog = await getChatProviderCatalog(projects.getInstallationStorageProject()?.id ?? projectId);
   if (catalog.unavailable) return { providers: [], unavailable: true };
   const native = await opencodeClient.listProviders();
   if (isOpenCodeError(native) || !record(native) || !Array.isArray(native.all) || !Array.isArray(native.connected)) {

@@ -8,8 +8,8 @@ export function createHostedMemoryHttp({dashboardFetch,base}) {
   if(typeof dashboardFetch!=='function'||typeof base!=='string'||!base.startsWith('/')||base.startsWith('//')||/[?#\\]/.test(base))throw new TypeError('Canonical dashboard HTTP owner required');
   const root=base.replace(/\/$/,'')+'/memory/lifecycle', owned=new WeakSet();
   const query=(selection,extra={})=>new URLSearchParams({workspaceId:selection.workspaceId,runtimeId:selection.runtimeId,
-    ...(typeof selection.projectId==='string'?{projectId:selection.projectId}:{}),
-    ...(typeof selection.expectedProjectId==='string'?{expectedProjectId:selection.expectedProjectId}:{}),...extra});
+    ...(selection.projectId===null?{projectless:'true'}:typeof selection.projectId==='string'?{projectId:selection.projectId}:{}),
+    ...(selection.expectedProjectId===null?{expectedProjectless:'true'}:typeof selection.expectedProjectId==='string'?{expectedProjectId:selection.expectedProjectId}:{}),...extra});
   async function request(path,selection,{method='GET',body,extra={},binding,signal}={}) {
     const headers={Accept:'application/json'};
     if(binding)Object.assign(headers,{
@@ -49,18 +49,25 @@ export function createHostedMemoryHttp({dashboardFetch,base}) {
   function forBinding(binding,{signal}={}) {
     requireOwned(binding);const identity=controllerBinding(binding);
     const boundFresh=(permission='read')=>fresh(binding,permission,signal);
+    const neverDispatched=new WeakSet();
+    const rejectedBeforeDispatch=error=>!!error&&typeof error==='object'&&neverDispatched.has(error);
+    const beforeWrite=async work=>{try{return await work();}catch(error){
+      if(error&&typeof error==='object')neverDispatched.add(error);throw error;
+    }};
     const boundRequest=(path,options={})=>request(path,binding,{...options,binding,signal});
     const ui=value=>{if(JSON.stringify(value)!==JSON.stringify(identity))throw new Error('Different original memory selection');};
     const extra={chatId:binding.engineSessionId};
     return Object.freeze({
+      rejectedBeforeDispatch,
       controller:{
+        rejectedBeforeDispatch,
         async read(value){ui(value);const current=await boundFresh();
           const result=await boundRequest('/policy',{extra});const p=result?.data;
           if(!p||p.scopeHash!==binding.scopeHash||p.chatId!==binding.engineSessionId||p.bindingHash!==binding.bindingHash
             ||p.bindingEpoch!==binding.bindingEpoch||p.available!==true)throw new Error('Policy binding changed');
           return {...p,canChange:current.canChange};
         },
-        async change(record){ui(record.identity);await boundFresh('change');
+        async change(record){await beforeWrite(async()=>{ui(record.identity);await boundFresh('change');});
           const host=record.change.target==='host';
           if(!host&&record.change.target!=='chat')throw new TypeError('Invalid policy operation');
           const fields=host?['enabled','generate','useMemory','externalContext']:['useMemory','contribute'];
@@ -85,7 +92,7 @@ export function createHostedMemoryHttp({dashboardFetch,base}) {
       },
       async manage(record){
         if(record.scopeHash!==binding.scopeHash||!['forget','reset'].includes(record.action))throw new TypeError('Invalid management operation');
-        await boundFresh('forget');const {scopeHash,origin,action,...body}=record;
+        await beforeWrite(()=>boundFresh('forget'));const {scopeHash,origin,action,...body}=record;
         const result=await boundRequest('/'+action,{method:'POST',body,extra});
         return managementReceipt(result?.data?.receipt,record);
       },

@@ -222,3 +222,19 @@ to make routine decisions. Authorization and preferences persist across turns.
 - If the user asks for status or corrects the work, incorporate it and continue
   unless they clearly ask to stop. Keep desktop control released throughout any
   user-input or approval wait.
+
+
+## Product first; focused verification
+
+Deliver a runnable, user-visible product increment before expanding verification.
+Prioritize working features and usable builds over new tests, harnesses, audit
+frameworks, receipts, or proof infrastructure.
+
+- Use existing, focused build and smoke checks for the implemented change.
+- Add tests only for a concrete observed product defect or an explicit user
+  request. Do not write tests for tests or speculative edge cases.
+- Do not repeat unchanged audits or broaden passing checks without a new failure
+  or concrete unresolved delivery risk.
+- A plan, library-only milestone, receipt, or passing test suite is not product
+  delivery. Continue toward the full approved product and acceptance criteria.
+- Preserve mandatory data, security, approval, storage, and cleanup safeguards.

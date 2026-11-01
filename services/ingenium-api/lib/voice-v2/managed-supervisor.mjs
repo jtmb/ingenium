@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { ManagedCpuProfile } from './managed-profile.mjs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { CpuOwnershipClient, CpuOwnershipError, cpuIdentity, cpuPayloadDigest } from './cpu-ownership.mjs';
 import { SupervisorChannel, privateJson } from './managed-channel.mjs';
@@ -43,10 +44,14 @@ function childOriginal(child, maximum, consume) {
  * and resource admission; this class has no permissive default authority.
  */
 export class ManagedCpuSupervisor {
+  #attachmentBootstraps = new WeakMap();
+  #attachmentLeases = new WeakMap(); #originalProfile; #originalLedger;
   #scopes = new Map(); #proofs = new WeakMap(); #prepared = new WeakMap(); #handles = new WeakMap(); #current = null; #opening = null;
   constructor({ profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, fetch: request = globalThis.fetch, spawn: launch = spawn }) {
     if (!profile?.helperSource || !profile?.witnessSource || ['reserveControl', 'listControls', 'reserve', 'privateRead', 'retireOriginal', 'settle'].some(method => typeof ledger?.[method] !== 'function')
       || [bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch].some(value => typeof value !== 'function')) fail('CPU_SUPERVISOR_BINDING_REQUIRED');
+    this.#originalProfile = profile;
+    this.#originalLedger = ledger;
     Object.assign(this, { profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch, nodeBootId: randomUUID() });
   }
   status() { const scope = this.#current; return { ready: Boolean(scope?.ready && !scope.closing), gpuReady: false, backend: 'cpu-onnx', qualified: false,
@@ -120,7 +125,20 @@ export class ManagedCpuSupervisor {
   }
   /** Real Core reservation, exact wire body and one non-reusable local dispatch
    * handle. No raw input is stored in Core or the long-lived operation registry. */
-  reserveCpu({ context, scope: requested, turn, requestId, parentOperationId = null, deadlineAt, kind, pcm, text, voice }) {
+  reserveCpu(input) { return this.#reserveCpu(input); }
+  #sourceLedger() {
+    const ledger=this.#originalLedger;
+    if(this.ledger!==ledger||['reserveOriginalAssistantSource','reserveAttachedAssistantTts','spendOriginalAssistantSource','fenceOriginalAssistantSources','requireOriginalAssistantCpuLive'].some(name=>typeof ledger[name]!=='function'))fail('CPU_ASSISTANT_SOURCE_LEDGER_UNAVAILABLE');
+    return ledger;
+  }
+  reserveOriginalAssistantSource(context,actualPrivatePlan) { return this.#sourceLedger().reserveOriginalAssistantSource(context,actualPrivatePlan); }
+  reserveAttachedAssistantCpu(input,sourceClaim) {
+    if(input.kind!=='synthesize'||Object.hasOwn(input,'parentOperationId'))fail('CPU_ASSISTANT_INPUT_INVALID');
+    return this.#reserveCpu(input,sourceClaim);
+  }
+  spendOriginalAssistantSource(context,sourceClaim,actualOpaqueDispatch) { this.#sourceLedger().spendOriginalAssistantSource(context,sourceClaim,actualOpaqueDispatch); }
+  fenceOriginalAssistantSources(actualOriginalCall,reason) { this.#sourceLedger().fenceOriginalAssistantSources(actualOriginalCall,reason); }
+  #reserveCpu({ context, scope: requested, turn, requestId, parentOperationId = null, deadlineAt, kind, pcm, text, voice },sourceClaim=null) {
     const scope = this.#current; requested = validateScope(requested); turn = Object.freeze({ ...validateTurn(turn) });
     if (!scope?.ready || scope.closing || scope.processExited || !sameScope(scope.scope, requested)) fail('CPU_SCOPE_NOT_READY');
     if (scope.busy || scope.preparedHandle) fail('CPU_BUSY_BEFORE_ADMISSION');
@@ -140,32 +158,63 @@ export class ManagedCpuSupervisor {
     const identity = cpuIdentity({ instanceId: scope.owner.instanceId, bootId: scope.workerBootId, ownerId: scope.owner.ownerId,
       ownerGeneration: scope.owner.ownerGeneration, requestId: operationId, operationId,
       generation: uuidFor('VEYRA-CPU-WIRE-GENERATION-V1\0' + canonical([operationId, turn.generation])), kind, digest: cpuPayloadDigest(kind, payload) });
+    if(sourceClaim!==null){this.#sourceLedger();parentOperationId=scope.controlOperationId;}
+    const assistantSource=sourceClaim===null?null:Object.freeze({sourceClaim,segmentIndex:sourceClaim.segmentIndex,requestId,textSha256:hash(Buffer.from(text)),voice});
     const original = { operationId, requestId, kind: kind === 'transcribe' ? 'voice-speech-stt' : 'voice-speech-tts', scope: requested,
       turnGeneration: turn.generation, inputSha256: identity.digest, parentOperationId, controlOperationId: scope.controlOperationId, control: null, deadlineAt, cpuIdentity: identity };
     scope.operations.set(operationId, { context, identity });
-    const reserved = this.ledger.reserve(scope.contextFor(context), original, scope.owner);
+    const reserved = sourceClaim===null?this.ledger.reserve(scope.contextFor(context), original, scope.owner):this.#sourceLedger().reserveAttachedAssistantTts(scope.contextFor(context),sourceClaim,original,scope.owner);
     if (!reserved.accepted || !reserved.fresh) fail('CPU_ORIGINAL_ALREADY_RETAINED');
     scope.coreOwner.registerReserved(context, reserved.operation);
     const handle = Object.freeze({ operationId, requestId, parentOperationId, turnGeneration: turn.generation });
-    this.#prepared.set(handle, { scope, context, identity, payload, original }); scope.preparedHandle = handle;
-    this.#handles.set(handle, { scope, context, identity });
+    this.#prepared.set(handle, { scope, context, identity, payload, original, assistantSource }); scope.preparedHandle = handle;
+    this.#handles.set(handle, { scope, context, identity, assistantSource });
     return handle;
   }
   inspectCpu(handle) {
     const retained = this.#handles.get(handle); if (!retained) fail('CPU_ORIGINAL_HANDLE_REQUIRED');
     return this.ledger.privateRead(retained.scope.contextFor(retained.context), { operationId: retained.identity.operationId, owner: retained.scope.owner });
   }
+  inspectOriginalAssistantCpuDispatch(context,handle) {
+    this.#sourceLedger();
+    const held=this.#handles.get(handle),prepared=this.#prepared.get(handle);
+    if(!held?.assistantSource)fail('CPU_ASSISTANT_ORIGINAL_REQUIRED');
+    const {scope,identity,assistantSource:s}=held;this.#assertAttachmentScope(context,scope);
+    if(this.#current!==scope||!scope.operations.has(identity.operationId)||identity.kind!=='synthesize'||identity.bootId!==scope.workerBootId
+      ||identity.instanceId!==scope.owner.instanceId||identity.ownerId!==scope.owner.ownerId||identity.ownerGeneration!==scope.owner.ownerGeneration
+      ||handle.operationId!==identity.operationId||handle.requestId!==s.requestId)fail('CPU_ASSISTANT_ORIGINAL_CHANGED');
+    if(prepared){
+      if(prepared.scope!==scope||prepared.assistantSource!==s||!equal(prepared.identity,identity)||scope.preparedHandle!==handle
+        ||prepared.original.parentOperationId!==scope.controlOperationId||prepared.original.controlOperationId!==scope.controlOperationId||prepared.original.requestId!==s.requestId
+        ||cpuPayloadDigest('synthesize',prepared.payload)!==identity.digest)fail('CPU_ASSISTANT_ORIGINAL_CHANGED');
+      const payload=JSON.parse(prepared.payload.toString('utf8'));
+      if(payload.requestId!==identity.operationId||payload.voice!==s.voice||typeof payload.text!=='string'||hash(Buffer.from(payload.text))!==s.textSha256)fail('CPU_ASSISTANT_ORIGINAL_CHANGED');
+    }
+    return {scope:scope.scope,owner:scope.owner,controlOperationId:scope.controlOperationId,operationId:identity.operationId,identity,textSha256:s.textSha256,voice:s.voice,requestId:s.requestId,segmentIndex:s.segmentIndex,sourceClaim:s.sourceClaim,prepared:!!prepared};
+  }
   cancelPrepared(handle) {
     const prepared = this.#prepared.get(handle); if (!prepared) fail('CPU_ORIGINAL_DISPATCH_SPENT');
-    this.#prepared.delete(handle); const { scope, context, identity } = prepared;
-    if (scope.preparedHandle !== handle) fail('CPU_ORIGINAL_HANDLE_CONFLICT'); scope.preparedHandle = null;
-    scope.coreOwner.quarantine(identity, 'CPU_CANCELLED_BEFORE_DISPATCH');
-    const proof = {}; this.#proofs.set(proof, { kind: 'sealed-no-start', scope, operationId: identity.operationId, outcome: 'cancelled-before-dispatch', retentionSeed: randomBytes(32).toString('hex') });
-    this.ledger.retireOriginal(scope.contextFor(context), { operationId: identity.operationId, owner: scope.owner, physicalProof: proof });
+    const { scope, context, identity } = prepared;
+    if (scope.preparedHandle !== handle) fail('CPU_ORIGINAL_HANDLE_CONFLICT');
+    if (prepared.cancelFailure) throw prepared.cancelFailure;
+    if (prepared.cancelStarted) fail('CPU_CANCEL_PREPARED_UNCONFIRMED');
+    // Publish negative custody BEFORE any external Core step. A failed or
+    // uncertain quarantine/retirement keeps this exact dispatch and blocks
+    // execute/new reservation; a later missing handle cannot erase the failure.
+    prepared.cancelStarted = true;
+    try {
+      scope.coreOwner.quarantine(identity, 'CPU_CANCELLED_BEFORE_DISPATCH');
+      const proof = {}; prepared.cancelProof = proof;
+      this.#proofs.set(proof, { kind: 'sealed-no-start', scope, operationId: identity.operationId, outcome: 'cancelled-before-dispatch', retentionSeed: randomBytes(32).toString('hex') });
+      this.ledger.retireOriginal(scope.contextFor(context), { operationId: identity.operationId, owner: scope.owner, physicalProof: proof });
+    } catch (error) { prepared.cancelFailure = error; throw error; }
+    this.#prepared.delete(handle); scope.preparedHandle = null;
   }
   async executeCpu(handle, { signal } = {}) {
     const prepared = this.#prepared.get(handle);
     if (!prepared || prepared.scope.preparedHandle !== handle) fail('CPU_ORIGINAL_DISPATCH_SPENT');
+    if (prepared.cancelStarted) fail('CPU_CANCEL_PREPARED_UNCONFIRMED');
+    if(prepared.assistantSource)this.#sourceLedger().requireOriginalAssistantCpuLive(prepared.scope.contextFor(prepared.context),prepared.identity.operationId,prepared.scope.owner);
     this.#prepared.delete(handle); const { scope, context, identity, payload } = prepared;
     scope.preparedHandle = null;
     if (scope.busy) fail('CPU_BUSY_BEFORE_ADMISSION'); scope.busy = true;
@@ -212,30 +261,41 @@ export class ManagedCpuSupervisor {
       if (scope.physicalRetired) { scope.operations.clear(); this.#scopes.delete(scope.owner.ownerId); }
     }
   }
-  openScope(input) {
-    if (this.#opening) return this.#opening.then(() => this.openScope(input));
-    const original = this.#open(input); this.#opening = original;
+  openScope(input) { try { return this.#queueScope(input); } catch(error) { return Promise.reject(error); } }
+  #queueScope(input, bootstrap = null) {
+    input.signal?.throwIfAborted();
+    if (this.#opening) return this.#opening.then(() => this.#queueScope(input, bootstrap));
+    const original = this.#open(input, bootstrap); this.#opening = original;
     original.finally(() => { if (this.#opening === original) this.#opening = null; }).catch(() => undefined); return original;
   }
-  async #open({ context, scope: requested, sessionId, deadlineAt, signal }) {
+  async #open({ context, scope: requested, sessionId, deadlineAt, signal }, bootstrap = null) {
     const requestedScope = validateScope(requested); signal?.throwIfAborted();
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128 || !Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now()) fail('CPU_SCOPE_DEADLINE_REQUIRED');
     if (this.#current?.ready && !this.#current.closing && sameScope(this.#current.scope, requestedScope)) {
       this.requireCpuAdmission(this.#current.admission,this.#current);
       if (this.#current.sessions.size >= 16 && !this.#current.sessions.has(sessionId)) fail('CPU_SCOPE_CAPACITY');
-      this.#current.sessions.add(sessionId); return this.status();
+      this.#current.sessions.add(sessionId); if(bootstrap)bootstrap.scope=this.#current; return this.status();
     }
     if (this.#current?.sessions.size && !this.#current.closing) fail('CPU_OTHER_SCOPE_BUSY');
     if (this.#current) await this.stopScope(this.#current, Math.min(deadlineAt, Date.now() + 20000));
+    signal?.throwIfAborted();
     const scope = this.#scope(context, requestedScope, deadlineAt);
+    if(bootstrap)bootstrap.scope=scope; // publish exact original before any recovery/admission await
     scope.sessions.add(sessionId);
+    let openingPhase="unallocated";
+    try {
     const controls = this.ledger.listControls(scope.contextFor(context), { instanceId: scope.owner.instanceId, owner: scope.owner });
-    for (const control of controls) if (!control.resourceRetired) await this.#recoverControl(context, control, Math.min(deadlineAt, Date.now() + 20000));
+    for (const control of controls) if (!control.resourceRetired) {
+      signal?.throwIfAborted(); openingPhase="recovering";
+      await this.#recoverControl(context, control, Math.min(deadlineAt, Date.now() + 20000));
+      openingPhase="unallocated"; signal?.throwIfAborted();
+    }
     const generation = Math.max(0, ...controls.map(control => control.owner.ownerGeneration)) + 1;
     scope.owner = Object.freeze({ ...scope.owner, ownerGeneration: generation });
+    signal?.throwIfAborted(); openingPhase="admitting";
     scope.admission = await this.admitCpu({ context, scope: requestedScope, owner: scope.owner, profileDigest: this.profile.profileDigest,
       memoryBytes: this.profile.value.memoryBytes, cpuThreads: this.profile.settings.cpu_threads, deadlineAt, signal });
-    try {
+    openingPhase="admitted"; signal?.throwIfAborted();
     this.requireCpuAdmission(scope.admission, scope);
     if (!Number.isSafeInteger(scope.admission.deadlineAt) || scope.admission.deadlineAt <= Date.now()) fail('CPU_RESOURCE_DEADLINE_REQUIRED');
     deadlineAt = Math.min(deadlineAt, scope.admission.deadlineAt); scope.deadlineAt = deadlineAt;
@@ -244,7 +304,8 @@ export class ManagedCpuSupervisor {
     const original = { operationId: scope.controlOperationId, requestId: 'voice-cpu-supervisor:' + scope.controlOperationId, kind: 'voice-cpu-supervisor',
       scope: requestedScope, turnGeneration: 0, inputSha256: this.profile.profileDigest, parentOperationId: null, controlOperationId: null, control: scope.control,
       deadlineAt, cpuIdentity: null };
-    const reserved = this.ledger.reserveControl(scope.contextFor(context), { original, owner: scope.owner, control: scope.control });
+    signal?.throwIfAborted(); const controlContext=scope.contextFor(context); scope.controlReservationAttempted=true;
+    const reserved = this.ledger.reserveControl(controlContext, { original, owner: scope.owner, control: scope.control });
     if (!reserved.accepted || !reserved.fresh) fail('CPU_CONTROL_ALREADY_RETAINED');
     this.#current = scope; scope.coreOwner = new CoreCpuOwner({ ledger: this.ledger, scope });
     const env = this.#environment();
@@ -252,6 +313,7 @@ export class ManagedCpuSupervisor {
       VEYRA_CPU_ORIGINAL_ENDPOINT: endpoint, VEYRA_CPU_ENDPOINT_IDENTITY: endpoint, VEYRA_CPU_RETIREMENT_SECRET: secret.toString('base64'),
       VEYRA_CPU_PIPE_KEY: key.toString('base64'), VEYRA_CPU_PARENT_PID: String(process.pid), VEYRA_CPU_MEMORY_BYTES: String(this.profile.value.memoryBytes) });
     // The real Core row and resource scope are retained before this sole launch.
+    signal?.throwIfAborted();
     scope.started = true;
     scope.child = this.launch(this.profile.value.python, ['-I', '-S', '-B', '-c', this.profile.helperSource], { env, cwd: this.profile.value.workerRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     scope.exitOriginal = deferred(); scope.closeOriginal = deferred();
@@ -271,13 +333,26 @@ export class ManagedCpuSupervisor {
     } catch (error) {
       scope.failure ??= error; scope.closing = true;
       if (scope.child) { try { await this.stopScope(scope, Date.now() + 20000); } catch (cleanupError) { scope.cleanupFailure ??= cleanupError; } }
+      else if (!scope.started && ["recovering","admitting"].includes(openingPhase)) {
+        // A rejecting external original may retain an effect without returning
+        // its handle. Keep this exact scope unknown; do not invent retirement.
+        scope.cleanupFailure=Object.assign(Error("CPU_OPEN_EXTERNAL_CLEANUP_UNKNOWN"),{code:"CPU_OPEN_EXTERNAL_CLEANUP_UNKNOWN",cause:error});
+      }
       else if (!scope.started) {
         // This exact launch producer is closed without calling spawn. Core's
         // current row (if a checkpoint ACK was lost) can retain that no-start.
         scope.physicalRetired = true; const proof = {}; this.#proofs.set(proof, { kind: 'physical', scope, outcome: 'cancelled-before-dispatch', retentionSeed: randomBytes(32).toString('hex') });
-        try { this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof }); }
-        catch (retentionError) { scope.retentionFailure ??= retentionError; }
-        try { await this.releaseCpu(scope.admission, proof, this); } catch (releaseError) { scope.releaseFailure ??= releaseError; }
+        if(scope.controlReservationAttempted) {
+          try { this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof }); }
+          catch (retentionError) { scope.retentionFailure ??= retentionError; }
+        } // No attempt means no Core row and no manufactured no-start receipt.
+        if(scope.admission && !scope.retentionFailure) {
+          try { await this.releaseCpu(scope.admission, proof, this); } catch (releaseError) { scope.releaseFailure ??= releaseError; }
+        }
+      }
+      if(scope.physicalRetired && !scope.cleanupFailure && !scope.retentionFailure && !scope.releaseFailure) {
+        if(this.#current===scope)this.#current=null;
+        if(!scope.busy && !scope.sessions.size)this.#scopes.delete(scope.owner.ownerId);
       }
       throw error;
     }
@@ -285,7 +360,8 @@ export class ManagedCpuSupervisor {
   #environment() {
     const scratch = this.profile.settings.scratch_root;
     return { PATH: '/usr/bin:/bin', HOME: scratch, TEMP: scratch, TMP: scratch, TMPDIR: scratch, XDG_CACHE_HOME: scratch, HF_HOME: scratch, TORCH_HOME: scratch,
-      CUDA_VISIBLE_DEVICES: '', HIP_VISIBLE_DEVICES: '', ROCR_VISIBLE_DEVICES: '', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', OMP_NUM_THREADS: String(this.profile.settings.cpu_threads) };
+      CUDA_VISIBLE_DEVICES: '', HIP_VISIBLE_DEVICES: '', ROCR_VISIBLE_DEVICES: '', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', OMP_NUM_THREADS: String(this.profile.settings.cpu_threads),
+      OPENBLAS_NUM_THREADS: String(this.profile.settings.cpu_threads), MKL_NUM_THREADS: String(this.profile.settings.cpu_threads), NUMEXPR_NUM_THREADS: String(this.profile.settings.cpu_threads) };
   }
   releaseSession({ sessionId, scope: requested }) {
     const scope = this.#current;
@@ -395,4 +471,125 @@ export class ManagedCpuSupervisor {
     await this.releaseCpu(scope.admission, proof, this); if (this.#current === scope) this.#current = null;
     if (!scope.busy) { scope.operations.clear(); this.#scopes.delete(scope.owner.ownerId); }
   }
+
+// INSERT inside actual ManagedCpuSupervisor class. New private fields:
+// #attachmentLeases = new WeakMap(); #originalProfile;
+// Constructor sets #originalProfile=profile before exposing public properties.
+// Import ManagedCpuProfile from './managed-profile.mjs' (actual protected loader).
+bindAttachmentContext(context) {
+ const scope=this.#current;this.#assertAttachmentScope(context,scope);return scope.contextFor(context);
+}
+captureAttachmentLease(context,scope,callId,deadlineAt) {
+ if(typeof callId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(callId)||!Number.isSafeInteger(deadlineAt)
+  ||deadlineAt<=Date.now()||deadlineAt>scope?.deadlineAt)fail('CPU_CALL_LEASE_INVALID');
+ this.#assertAttachmentScope(context,scope);
+ deadlineAt=Math.min(deadlineAt,scope.admission.deadlineAt);if(deadlineAt<=Date.now())fail('CPU_CALL_LEASE_INVALID');
+ if(scope.sessions.has(callId)||scope.sessions.size>=16)fail('CPU_CALL_LEASE_CAPACITY');
+ const handle=Object.freeze({});scope.sessions.add(callId);
+ this.#attachmentLeases.set(handle,{context,scope,callId,deadlineAt,release:null});return handle;
+}
+#assertAttachmentScope(context,scope) {
+ if(!this.isOwnedScope(scope)||this.#current!==scope||!scope.ready||scope.closing||scope.processExited||scope.physicalRetired
+  ||!scope.child||!scope.workerBootId||!(this.#originalProfile instanceof ManagedCpuProfile)||!Object.isFrozen(this.#originalProfile)||this.profile!==this.#originalProfile
+  ||scope.control?.profileDigest!==this.#originalProfile.profileDigest)fail('CPU_CALL_SCOPE_UNAVAILABLE');
+ this.requireCpuAdmission(scope.admission,scope);
+ const control=this.ledger.privateRead(scope.contextFor(context),{operationId:scope.controlOperationId,owner:scope.owner});
+ if(control.original.kind!=='voice-cpu-supervisor'||control.original.operationId!==scope.controlOperationId||!sameScope(control.original.scope,scope.scope)
+  ||control.state!=='running'||control.resourceRetired||!equal(control.owner,scope.owner)||control.control?.workerBootId!==scope.workerBootId
+  ||control.control?.profileDigest!==this.#originalProfile.profileDigest)fail('CPU_CALL_CONTROL_UNAVAILABLE');
+ if(!scope.health?.voices?.includes(this.#originalProfile.value.defaultVoice))fail('CPU_CALL_VOICE_UNAVAILABLE');
+}
+inspectAttachmentLease(handle) {
+ const original=this.#attachmentLeases.get(handle);
+ if(!original||original.release||original.deadlineAt<=Date.now()||!original.scope.sessions.has(original.callId))fail('CPU_CALL_LEASE_REQUIRED');
+ this.#assertAttachmentScope(original.context,original.scope);
+ return Object.freeze({scope:original.scope.scope,owner:original.scope.owner,controlOperationId:original.scope.controlOperationId,
+  profileDigest:this.#originalProfile.profileDigest,defaultVoice:this.#originalProfile.value.defaultVoice,deadlineAt:original.deadlineAt});
+}
+releaseAttachmentLease(handle) {
+ const original=this.#attachmentLeases.get(handle);if(!original)fail('CPU_CALL_LEASE_REQUIRED');
+ if(!original.release){
+  // Enroll the exact cleanup join before its effect. Keep the final session
+  // original until physical retirement is positively acknowledged.
+  original.release=Promise.resolve().then(async()=>{
+   if(!original.scope.sessions.has(original.callId))fail('CPU_CALL_LEASE_REQUIRED');
+   if(original.scope.cleanupFailure||original.scope.retentionFailure||original.scope.releaseFailure)fail('CPU_CALL_LEASE_CLEANUP_UNKNOWN');
+   if(original.scope.sessions.size>1){original.scope.sessions.delete(original.callId);return;}
+   if(!original.scope.physicalRetired)await this.stopScope(original.scope,Date.now()+20000);
+   original.scope.sessions.delete(original.callId);
+  });
+ }
+ return original.release;
+}
+
+// INSERT inside ManagedCpuSupervisor. Private field: #attachmentBootstraps=new WeakMap();
+  beginOriginalAttachmentScope({context,scope,deadlineAt,signal}) {
+    const requested=Object.freeze({...validateScope(scope)});
+    if(!Number.isSafeInteger(deadlineAt)||deadlineAt<=Date.now()||!(signal instanceof AbortSignal))fail('CPU_ATTACHMENT_BOOTSTRAP_INPUT');
+    signal.throwIfAborted();
+    const handle=Object.freeze({}),controller=new AbortController();
+    const record={context,scope:null,sessionId:'attachment-bootstrap:'+randomUUID(),controller,signal,
+      abort:null,work:null,release:null,released:false,failure:null};
+    record.abort=()=>controller.abort(signal.reason);
+    // The actual record and pending work are published before #queueScope can
+    // call #open, recovery, admission, reservation, network or spawn.
+    this.#attachmentBootstraps.set(handle,record);
+    record.work=Promise.resolve().then(()=>{
+      controller.signal.throwIfAborted();
+      return this.#queueScope({context,scope:requested,sessionId:record.sessionId,deadlineAt,signal:controller.signal},record);
+    });
+    record.work.catch(error=>{record.failure??=error;});
+    signal.addEventListener('abort',record.abort,{once:true});
+    if(signal.aborted)record.abort();
+    return handle;
+  }
+  async waitOriginalAttachmentScope(handle,signal) {
+    const record=this.#attachmentBootstraps.get(handle);
+    if(!record||record.released||!(signal instanceof AbortSignal))fail('CPU_ATTACHMENT_BOOTSTRAP_ORIGINAL_REQUIRED');
+    const abort=()=>record.controller.abort(signal.reason);
+    signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
+    try {
+      const status=await record.work;
+      record.controller.signal.throwIfAborted();signal.throwIfAborted();
+      this.#requireAttachmentBootstrap(record);return status; // status DATA, never authority
+    } catch(error) {
+      try{await this.releaseOriginalAttachmentScope(handle);}catch(cleanup){
+        record.failure??=cleanup;throw Object.assign(Error('CPU_ATTACHMENT_BOOTSTRAP_CLEANUP_UNKNOWN'),{code:'CPU_ATTACHMENT_BOOTSTRAP_CLEANUP_UNKNOWN',cause:cleanup});
+      }
+      throw error;
+    } finally {signal.removeEventListener('abort',abort);}
+  }
+  #requireAttachmentBootstrap(record) {
+    const scope=record.scope;
+    if(record.released||record.controller.signal.aborted||!scope||!this.isOwnedScope(scope)
+      ||!scope.ready||scope.closing||scope.physicalRetired||!scope.sessions.has(record.sessionId))fail('CPU_ATTACHMENT_BOOTSTRAP_NOT_READY');
+    this.requireCpuAdmission(scope.admission,scope);return scope;
+  }
+  bindOriginalAttachmentScope(handle,freshActualContext) {
+    const record=this.#attachmentBootstraps.get(handle);if(!record)fail('CPU_ATTACHMENT_BOOTSTRAP_ORIGINAL_REQUIRED');
+    const scope=this.#requireAttachmentBootstrap(record);
+    // Genuine bindContext validates actual context against exact retained scope.
+    // Neither #current nor a caller-supplied observer/scope participates.
+    return this.bindContext(freshActualContext,scope,this);
+  }
+  releaseOriginalAttachmentScope(handle) {
+    const record=this.#attachmentBootstraps.get(handle);if(!record)fail('CPU_ATTACHMENT_BOOTSTRAP_ORIGINAL_REQUIRED');
+    if(record.release)return record.release;
+    record.released=true;record.controller.abort();
+    record.signal.removeEventListener('abort',record.abort);
+    record.release=Promise.resolve().then(async()=>{
+      // Join the enrolled original even if it was still queued or admitting.
+      await record.work.catch(()=>undefined);
+      const scope=record.scope;if(!scope)return;
+      if(scope.cleanupFailure||scope.retentionFailure||scope.releaseFailure)
+        throw Object.assign(Error('CPU_ATTACHMENT_BOOTSTRAP_CLEANUP_UNKNOWN'),{code:'CPU_ATTACHMENT_BOOTSTRAP_CLEANUP_UNKNOWN'});
+      if(scope.sessions.size>1){scope.sessions.delete(record.sessionId);return;}
+      if(scope.physicalRetired){scope.sessions.delete(record.sessionId);if(!scope.busy)this.#scopes.delete(scope.owner.ownerId);return;}
+      if(!scope.child)fail('CPU_ATTACHMENT_BOOTSTRAP_CLEANUP_UNKNOWN');
+      await this.stopScope(scope,Date.now()+20000); // exact original, never #current
+      scope.sessions.delete(record.sessionId); // retain custody until actual retirement succeeds
+    });
+    record.release.catch(error=>{record.failure??=error;});return record.release;
+  }
+
 }

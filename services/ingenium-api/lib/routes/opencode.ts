@@ -1,3 +1,4 @@
+import {workspaceEngineSelection,createOriginalWorkspaceEngineSession} from '../projects-v2/projectless-context.mjs';
 import { Router, type Request, type Response } from "express";
 import formidable from "formidable";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -5,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:f
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { logger, settings } from "ingenium-core";
+import { logger } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
@@ -15,7 +16,8 @@ import {
   type OpenCodeResult,
   type SendPromptBody,
 } from "../opencode-client.js";
-import { requireActiveGlobalProject } from "../helpers.js";
+import {acquireInstallationChatOwner,assertInstallationChatOwner,writeInstallationChatPreference,type OriginalInstallationChatOwner} from '../projects-v2/request-installation-retention.js';
+import {ProjectError} from '../projects-v2/catalog.mjs';
 import {
   callOpenCodeWithProviderDeadline,
   connectNativeProviderCredential,
@@ -314,6 +316,10 @@ function sendOpenCodeError(req: any, res: any, result: any, status: number): voi
 function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): void {
   if (isOpenCodeError(result)) {
     const code = result.error.code;
+    if (code === "WORKSPACE_ENGINE_CREATION_UNCONFIRMED" || code === "WORKSPACE_ENGINE_CONTEXT_UNCONFIRMED") {
+      res.status(409).json({ error: { code, message: "Agent conversation creation could not be reconciled with saved history. Check existing agent history before creating another conversation.", retryable: false } });
+      return;
+    }
     // Map known error codes to HTTP statuses
     let status: number;
     if (code === "AUTH_NOT_CONFIGURED") {
@@ -601,15 +607,23 @@ function legacyChatDto(
   };
 }
 
-// Chat configuration is instance-owned; any caller project query is ignored.
+function installationChatOwner(request:Request,response:Response,permission:'read'|'write'):OriginalInstallationChatOwner|null{
+ try{return acquireInstallationChatOwner(request,permission)}catch(error){
+  if(error instanceof ProjectError){response.status(error.status).json({error:{code:error.code,message:'Installation Chat preferences are unavailable for this request.'}});return null}
+  throw error;
+ }
+}
+// Chat configuration is installation-owned; any caller workspace query is ignored.
 opencodeRouter.get("/chat-config", async (req, res) => {
-  const globalProject = requireActiveGlobalProject(req, res);
-  if (!globalProject) return;
-  const projectId = globalProject.id;
+  const originalOwner=installationChatOwner(req,res,'read');
+  if(!originalOwner)return;
+  const globalProject={id:originalOwner.projectId,name:originalOwner.projectName};
+  const projectId=originalOwner.projectId;
 
   let providers: ExpandedChatProviderInfo[];
   try {
     const catalog = await getChatProviderCatalog(projectId);
+    assertInstallationChatOwner(originalOwner,req,'read');
     if (catalog.unavailable) {
       if (catalog.unavailable === "network") {
         res.status(503).json({
@@ -629,7 +643,8 @@ opencodeRouter.get("/chat-config", async (req, res) => {
       return;
     }
     providers = catalog.providers;
-  } catch {
+  } catch (error) {
+    if(error instanceof ProjectError){res.status(error.status).json({error:{code:error.code,message:'Installation Chat preferences changed or are unavailable.'}});return}
     // Provider discovery can fail while OpenCode is unavailable. Never expose
     // transport details, endpoints, or credentials through this browser DTO.
     logger.warn(SOURCE, "Chat provider catalog unavailable");
@@ -667,9 +682,9 @@ opencodeRouter.get("/chat-config", async (req, res) => {
  * project, and only an exact current global-catalog pair is saved.
  */
 opencodeRouter.put(["/chat-selection", "/chat-defaults"], async (req, res) => {
-  const savingDefaults = req.path === "/chat-defaults";
+  const savingDefaults = req.path.toLowerCase().replace(/\/$/,'') === "/chat-defaults";
   if (req.query.project !== undefined || req.body?.project !== undefined) {
-    res.status(422).json({ error: { code: "CHAT_SELECTION_PROJECT_CONFLICT", message: "Chat model selection is owned by the active global project." } });
+    res.status(422).json({ error: { code: "CHAT_SELECTION_PROJECT_CONFLICT", message: "Chat model selection belongs to this installation." } });
     return;
   }
   const providerId = req.body?.providerId;
@@ -679,11 +694,13 @@ opencodeRouter.put(["/chat-selection", "/chat-defaults"], async (req, res) => {
     return;
   }
 
-  const globalProject = requireActiveGlobalProject(req, res);
-  if (!globalProject) return;
-  const projectId = globalProject.id;
+  const originalOwner=installationChatOwner(req,res,'write');
+  if(!originalOwner)return;
+  const globalProject={id:originalOwner.projectId,name:originalOwner.projectName};
+  const projectId=originalOwner.projectId;
   try {
     const catalog = await getChatProviderCatalog(projectId);
+    assertInstallationChatOwner(originalOwner,req,'write');
     if (catalog.unavailable) {
       res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
       return;
@@ -699,9 +716,10 @@ opencodeRouter.put(["/chat-selection", "/chat-defaults"], async (req, res) => {
       res.status(422).json({ error: { code: "CHAT_SELECTION_UNAVAILABLE", message: "The selected Chat provider or model is not currently available." } });
       return;
     }
-    settings.setSetting(projectId, savingDefaults ? CHAT_DEFAULTS_SETTING : CHAT_SELECTION_SETTING, JSON.stringify(selection));
+    writeInstallationChatPreference(originalOwner,req,savingDefaults?CHAT_DEFAULTS_SETTING:CHAT_SELECTION_SETTING,JSON.stringify(selection));
     res.json({ data: { project: globalProject.name, ...selection } });
-  } catch {
+  } catch (error) {
+    if(error instanceof ProjectError){res.status(error.status).json({error:{code:error.code,message:'Installation Chat preferences changed or are unavailable.'}});return}
     logger.warn(SOURCE, "Chat selection validation failed while loading the global catalog");
     res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
   }
@@ -739,10 +757,12 @@ opencodeRouter.post("/sessions", async (req, res) => {
   const directory = req.query.directory as string | undefined;
   let defaults: ReturnType<typeof getNewChatDefaults> = null;
   if (req.body?.chatDefaults === true) {
-    const globalProject = requireActiveGlobalProject(req, res);
-    if (!globalProject) return;
+    const originalOwner=installationChatOwner(req,res,'read');
+    if(!originalOwner)return;
+    const globalProject={id:originalOwner.projectId,name:originalOwner.projectName};
     try {
       const catalog = await getChatProviderCatalog(globalProject.id);
+      assertInstallationChatOwner(originalOwner,req,'read');
       if (catalog.unavailable) throw new Error("catalog unavailable");
       defaults = getNewChatDefaults(globalProject.id, catalog.providers);
     } catch {
@@ -750,14 +770,23 @@ opencodeRouter.post("/sessions", async (req, res) => {
       return;
     }
   }
-  const result = await opencodeClient.createSession(req.body, directory);
+  const workspaceSelection = workspaceEngineSelection(req);
+  let result: OpenCodeResult<import("../opencode-client.js").SessionInfo & { contextConversationId?: string }>;
+  try {
+    result = workspaceSelection
+      ? await createOriginalWorkspaceEngineSession(req, workspaceSelection, req.body?.title === undefined ? {} : { title: req.body.title })
+      : await opencodeClient.createSession(req.body, directory);
+  } catch {
+    res.status(503).json({ error: { code: "WORKSPACE_ENGINE_CREATION_UNAVAILABLE", message: "The selected workspace could not authorize a new agent conversation." } });
+    return;
+  }
   if (defaults && !isOpenCodeError(result)) {
     const selected = await opencodeClient.selectSessionModel(result.id, { id: defaults.modelId, providerID: defaults.providerId, ...(defaults.variant ? { variant: defaults.variant } : {}) }, directory);
     if (isOpenCodeError(selected)) {
-      res.status(503).json({ error: { code: "CHAT_DEFAULTS_APPLY_FAILED", message: "The conversation was created, but its defaults could not be applied. Reopen it from history before retrying.", sessionId: result.id } });
+      res.status(503).json({ error: { code: "CHAT_DEFAULTS_APPLY_FAILED", message: "The conversation was created, but its defaults could not be applied. Reopen it from history before retrying.", sessionId: result.id, ...(result.contextConversationId ? { contextConversationId: result.contextConversationId } : {}) } });
       return;
     }
-    sendResult(req, res, selected, 201); return;
+    sendResult(req, res, result.contextConversationId ? { ...selected, contextConversationId: result.contextConversationId } : selected, 201); return;
   }
   sendResult(req, res, result, 201);
 });

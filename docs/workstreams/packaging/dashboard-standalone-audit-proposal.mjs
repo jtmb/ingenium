@@ -53,6 +53,22 @@ export function inspectStandalone({ buildDir, standaloneDir }) {
   const traceWalk = p => { for (const n of fs.readdirSync(p)) { const q = path.join(p, n), st = fs.lstatSync(q); demand(!st.isSymbolicLink(), `Trace traversal link: ${q}`); if (st.isDirectory()) traceWalk(q); else if (n.endsWith('.nft.json')) traces.push(q); } };
   traceWalk(path.join(build, '.next/server'));
   demand(traces.length > 0, 'No generated traces');
+  // Root-reviewed standalone entry obligation for this exact Next16.4.2 build.
+  // The independent minimal-server entry is not consumed by copyTracedFiles.
+  // Keep every other union/required/asset/resolver check; admit no unknown omission.
+  const frameworkPins = {
+    'node_modules/next/dist/build/utils.js': '5fd190db661ac661673b75839156a52657b9ae64b790ad253ee8197a209683c2',
+    'node_modules/next/dist/build/collect-build-traces.js': 'bb009f03e0137f8aa3c27066b977b905003f686bad309220d78058d77ff9e5ae',
+    'node_modules/next/package.json': 'e84ada0a68191fed192392bfb8ee35ad4ed8e7439f645a40dd48cf139588ddc5',
+  };
+  for (const [name, digest] of Object.entries(frameworkPins)) demand(sha(path.join(tracing,name)) === digest,'Reviewed framework source changed: '+name);
+  const independentPath = path.join(tracing,'node_modules/next/dist/compiled/next-server/server.runtime.prod.js');
+  const independentTrace = path.join(build,'.next/next-minimal-server.js.nft.json');
+  const references = new Set();
+  for (const trace of traces) for (const name of JSON.parse(fs.readFileSync(trace,'utf8')).files ?? []) if (typeof name === 'string' && path.resolve(path.dirname(trace),name) === independentPath) references.add(trace);
+  demand(references.size === 1 && references.has(independentTrace),'Independent minimal entry tracing changed');
+  demand(sha(independentPath) === '0f86584a8bac2303e5cd1d024ed61311fc35ff3b198fa1c2af414ab28080b0ff','Independent minimal entry source changed');
+  const classifiedIndependentEntries = [];
   const checked = new Set();
   for (const trace of traces) {
     const nft = JSON.parse(fs.readFileSync(trace, 'utf8'));
@@ -62,6 +78,10 @@ export function inspectStandalone({ buildDir, standaloneDir }) {
       const original = path.resolve(path.dirname(trace), name);
       demand(within(tracing, original), `Trace outside source tracing root: ${original}`);
       const dest = path.resolve(deploy, path.relative(tracing, original));
+      if (!fs.existsSync(dest) && original === independentPath && trace === independentTrace) {
+        classifiedIndependentEntries.push({source:path.relative(tracing,original),trace:path.relative(build,trace),sourceSha256:sha(original),reason:'Independent minimal-server entry; pinned copyTracedFiles consumes next-server entry instead'});
+        continue;
+      }
       demand(within(deploy, dest) && within(deploy, fs.realpathSync(dest)), `Trace missing/escaping: ${dest}`);
       if (!checked.has(original)) {
         demand(fs.statSync(original).isFile() && fs.statSync(dest).isFile(), `Nonfile trace: ${original}`);
@@ -84,5 +104,5 @@ export function inspectStandalone({ buildDir, standaloneDir }) {
   return { entry: path.relative(deploy, entry), entrySha256: sha(entry), requiredMetadataSha256: sha(requiredFile), traces: traces.length, tracedFiles: checked.size, regularFiles, internalLinks, resolutions,
     public: sameTree(path.join(build, 'public'), path.join(serverDir, 'public')),
     static: sameTree(path.join(build, '.next/static'), path.join(serverDir, '.next/static')),
-    runtimeAccepted: false };
+    classifiedIndependentEntries, consumedStandaloneEntryTrace:'next-server.js.nft.json', runtimeAccepted: false };
 }

@@ -1,0 +1,30 @@
+import React from 'react';
+import {cleanup,fireEvent,render,screen,waitFor}from'@testing-library/react';
+import {afterEach,describe,expect,it,vi}from'vitest';
+const state=vi.hoisted(()=>({instances:[] as any[]}));
+vi.mock('next/image',()=>({default:()=>null}));
+vi.mock('../src/lib/api',()=>({dashboardFetch:vi.fn(),getApiBase:()=>'/api/v1'}));
+// Presentation-only controller fixture; actual controller and transport have
+// separate fault tests. This does not qualify devices, Core grants or audio.
+vi.mock('../src/app/components/voice-v2/current-agent-call-client.mjs',()=>({CurrentAgentCallClient:class{
+ options:any;listeners=new Set<()=>void>();ending:Promise<void>|null=null;selectedBackend='cpu-onnx';attentionText='';inputDeviceId='';outputDeviceId='';media={devices:async()=>[]};
+ snapshot={phase:'disconnected',muted:true,error:null,transcript:'',reply:'',tools:[],approval:null,generation:0};session:any;
+ constructor(options:any){this.options=options;state.instances.push(this);this.session={mode:options.mode,subscribe:(f:()=>void)=>{this.listeners.add(f);return()=>this.listeners.delete(f)},getSnapshot:()=>this.snapshot,sendText:async()=>{},interrupt:async()=>{},decideApproval:async()=>{}}}
+ publish(patch:any){this.snapshot={...this.snapshot,...patch};for(const f of this.listeners)f()}
+ start=vi.fn(async()=>this.publish({phase:'ready',muted:false}));
+ setPresentationActive=vi.fn(async(active:boolean)=>{if(!active)this.publish({muted:true})});
+ mute=vi.fn(async(muted:boolean)=>this.publish({muted}));selectDevices=vi.fn(async()=>{});reconnect=vi.fn(async()=>{});
+ getRetainedCapture=()=>null;hasRetainedCapture=()=>false;discardRetainedCapture=()=>{};
+ end=vi.fn(()=>{this.ending??=Promise.resolve().then(()=>{this.publish({phase:'ended',muted:true});this.options.onEnded()});return this.ending});
+}}));
+import{CurrentAgentVoiceControls}from'../src/app/components/voice-v2/CurrentAgentVoiceControls';
+const props={workspaceId:'workspace-a',runtimeId:'runtime-a',engineSessionId:'ses_a',onDictation:vi.fn(),onAdmitted:vi.fn()};
+afterEach(async()=>{cleanup();await Promise.resolve();vi.clearAllMocks();state.instances.length=0});
+describe('actual current voice mount presentation',()=>{
+ it('rendering acquires no controller or device and unavailable scope remains disabled',()=>{render(<CurrentAgentVoiceControls {...props} engineSessionId={null}/>);expect(state.instances).toHaveLength(0);expect(screen.getByRole('button',{name:'Start voice'}).hasAttribute('disabled')).toBe(true);expect(screen.getByRole('button',{name:'Dictate into composer'}).hasAttribute('disabled')).toBe(true)});
+ it('explicit start passes only selected workspace/runtime/engine IDs and focuses dialog',async()=>{render(<CurrentAgentVoiceControls {...props}/>);expect(state.instances).toHaveLength(0);fireEvent.click(screen.getByRole('button',{name:'Start voice'}));await screen.findByRole('dialog',{name:'Veyra voice'});expect(state.instances).toHaveLength(1);expect(state.instances[0].options.selection).toEqual({workspaceId:'workspace-a',runtimeId:'runtime-a',engineSessionId:'ses_a'});expect(state.instances[0].options.transport.basePath).toBe('/api/v1/voice/current-calls');expect(document.activeElement).toBe(screen.getByRole('button',{name:'Return to Work'}))});
+ it('Escape minimizes the retained panel without ending the call or losing focus',async()=>{render(<CurrentAgentVoiceControls {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Start voice'}));const dialog=await screen.findByRole('dialog',{name:'Veyra voice'});fireEvent.keyDown(dialog,{key:'Escape'});expect(screen.queryByRole('dialog',{name:'Veyra voice'})).toBeNull();expect(state.instances[0].end).not.toHaveBeenCalled();const trigger=screen.getByRole('button',{name:'Open active voice'});expect(document.activeElement).toBe(trigger);fireEvent.click(trigger);expect(screen.getByRole('dialog',{name:'Veyra voice'})).toBeTruthy();expect(state.instances).toHaveLength(1)});
+ it('dialog traps keyboard focus and explicit End closes the same owner',async()=>{render(<CurrentAgentVoiceControls {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Start voice'}));const dialog=await screen.findByRole('dialog',{name:'Veyra voice'});await waitFor(()=>expect(screen.getByRole('status').textContent).toBe('Listening'));fireEvent.keyDown(dialog,{key:'Tab',shiftKey:true});expect(document.activeElement).toBe(screen.getByRole('button',{name:'End voice'}));fireEvent.keyDown(dialog,{key:'Tab'});expect(document.activeElement).toBe(screen.getByRole('button',{name:'Return to Work'}));fireEvent.click(screen.getByRole('button',{name:'End voice'}));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Veyra voice'})).toBeNull());expect(state.instances[0].end).toHaveBeenCalled()});
+ it('Web presentation pauses the retained owner and does not create a second call',async()=>{const view=render(<CurrentAgentVoiceControls {...props} active/>);fireEvent.click(screen.getByRole('button',{name:'Start voice'}));await screen.findByRole('dialog',{name:'Veyra voice'});view.rerender(<CurrentAgentVoiceControls {...props} active={false}/>);await waitFor(()=>expect(state.instances[0].setPresentationActive).toHaveBeenCalledWith(false));expect(screen.queryByRole('dialog',{name:'Veyra voice'})).toBeNull();expect(state.instances[0].end).not.toHaveBeenCalled();view.rerender(<CurrentAgentVoiceControls {...props} active/>);expect(state.instances).toHaveLength(1);expect(screen.getByRole('button',{name:'Open active voice'}).textContent).toContain('mic off')});
+ it('a scope-key change ends the previous owner and starts no successor automatically',async()=>{const view=render(<CurrentAgentVoiceControls key="a" {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Start voice'}));await screen.findByRole('dialog',{name:'Veyra voice'});const prior=state.instances[0];view.rerender(<CurrentAgentVoiceControls key="b" {...props} workspaceId="workspace-b"/>);await waitFor(()=>expect(prior.end).toHaveBeenCalled());expect(state.instances).toHaveLength(1);expect(screen.getByRole('button',{name:'Start voice'})).toBeTruthy()});
+});

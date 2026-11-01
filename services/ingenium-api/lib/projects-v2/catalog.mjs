@@ -1,6 +1,7 @@
 import {randomUUID} from "node:crypto";
-import {requireValue, scopeKey, text} from "../../../../packages/veyra-projects/domain.mjs";
+import {ProjectError,requireValue, scopeKey, text} from "../../../../packages/veyra-projects/domain.mjs";
 
+export {ProjectError,requireValue};
 const key = scope => [scope.instanceId, scope.organizationId, scope.ownerUserId];
 export class ProjectCatalog {
   // db is supplied by the existing API writer. This class never opens a database.
@@ -69,6 +70,13 @@ export class ProjectCatalog {
     }
     this.transaction(() => {
       requireValue(!this.row(scope, id), "CONFLICT", 409);
+      // A new project cannot duplicate an existing folder in this owner scope.
+      // Archived originals keep their roots and must be restored instead. This
+      // typed refusal is before every insert in this same original transaction.
+      for (const root of roots) requireValue(!this.db.prepare(`SELECT 1 FROM veyra_workspace_roots
+        WHERE instance_id=? AND organization_id=? AND owner_user_id=?
+          AND host_id=? AND environment_id=? AND canonical_root_id=? LIMIT 1`)
+        .get(...key(scope),root.hostId,root.environmentId,root.canonicalRootId), "PROJECT_ROOT_ALREADY_ATTACHED", 409);
       this.db.prepare(`INSERT INTO veyra_workspace_projects
         (instance_id,organization_id,owner_user_id,id,label) VALUES(?,?,?,?,?)`).run(...key(scope), id, label);
       const insert = this.db.prepare(`INSERT INTO veyra_workspace_roots
