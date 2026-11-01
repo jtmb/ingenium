@@ -57,6 +57,7 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--phase-root',type=Path,required=True)
  parser.add_argument('--source-manifest',type=Path,required=True)
+ parser.add_argument('--frontend-build',type=int,default=19,help='Completed frontend build receipt to package')
  parser.add_argument('--role',choices=['compatibility','control-plane','user-runtime','runtime-manager','runtime-gateway'],default='compatibility')
  args=parser.parse_args();p=args.phase_root.resolve();a=Path(__file__).resolve().parents[1];root=p.parents[1]
  need(a==p.parent/'prd-ui-fixes'and root.name=='skill-zen-fix-1792810845','Existing task/source roots required')
@@ -107,7 +108,16 @@ def main():
  for package in ['packages/ingenium-core','packages/ingenium-email','packages/ingenium-extension','services/ingenium-api','services/ingenium-server']:
   add(a/package/'package.json','/app/'+package+'/package.json')
  standalone=p/'runtime/current-dashboard-standalone-r1'
- moved=json.loads((p/'coordination/integration/dashboard-standalone-move-r19.json').read_text());server=moved['relativeAppDir']
+ need(1<=args.frontend_build<=100000,'Invalid frontend build receipt')
+ front=p/'coordination/integration';number=str(args.frontend_build)
+ front_build=json.loads((front/('current-dashboard-build-r'+number+'.json')).read_text())
+ front_plan=json.loads((front/('current-dashboard-build-view-plan-r'+number+'.json')).read_text())
+ moved=json.loads((front/('dashboard-standalone-move-r'+number+'.json')).read_text());server=moved['relativeAppDir']
+ need(front_build['complete']and front_build['status']==0 and front_build['inventorySha256']==front_plan['sourceInventorySha256'],'Completed frontend build required')
+ committed={v['path']:v for v in source['files']}
+ need(all(row['source']in committed and committed[row['source']]['sha256']==row['sha256']for row in front_plan['files']),'Frontend build differs from committed release source')
+ need(moved['to']==str(standalone)and moved['owner']==OWNER and hashlib.sha256((standalone/server/'server.js').read_bytes()).hexdigest()==moved['entrySha256'],'Moved frontend identity changed')
+ need((standalone/server/'.next/BUILD_ID').read_text().strip()=='veyra-'+front_plan['sourceInventorySha256'],'Frontend build ID changed')
  for file in sorted(standalone.rglob('*')):
   need(not file.is_symlink(),'Unexpected standalone alias')
   if not file.is_file()or file==standalone/'.task-owner.json':continue
