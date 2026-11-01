@@ -231,3 +231,39 @@ been changed. The current operator SSH identity cannot perform noninteractive
 sudo on worker2; applying the reviewed host configuration still requires
 that actual host authorization. A failed authorization must not be bypassed
 with a privileged Pod, a different identity or a weaker process limit.
+
+### Reviewed worker2 staging command
+
+`ops/kubernetes/configure-workspace-runtime.py` defaults to a read-only check.
+It uses the existing handler fragment and the node's actual OCI defaults,
+changes only the base PID limit to128, and binds both effective configurations
+to the independently reviewed digests. It never invokes sudo, restarts a
+service, creates a RuntimeClass or claims kernel qualification.
+
+From the reviewed repository on workernode2, the current proposal is:
+
+```sh
+python3 -B ops/kubernetes/configure-workspace-runtime.py \
+  --expected-node workernode2 \
+  --expected-configuration 63bc442e10502416aafc0bfc96ca50894b3fb99794e08bf79cd1b25a2d27f39c \
+  --expected-effective fdcc9d173261fe619c5b7f780b9b47d96af152f5ea2c360abfd4c57a345d5045 \
+  --expected-candidate-effective e42f2dfcc5bc2bc0aa8e8061b2823e0b65b9c0da2c0e236d598bfd306b24d958 \
+  --expected-base ae2eee72e0db92c7b80bb480a06346cbfc0fd4caea580fab7507dcbcbb59c4f7
+```
+
+The exact source passed that check through the existing unprivileged SSH
+identity on2026-11-01. No remote file was created and no service changed.
+After the node change is authorized, administrator execution with `--apply`
+stages the new base and atomically appends the handler to the existing
+configuration. It refuses changed inputs, unsafe ownership, links and existing
+Work staging/recovery files. The original configuration is retained as the
+root-only `config.toml.veyra-workspace-original`; interrupted staging is retained
+for reconciliation. Apply mode has not been qualified or run.
+
+Before restarting `containerd-k8s.service`, the operator must review the staged
+effective configuration and existing node workloads. If staging is interrupted,
+inspect the original backup, base and `.veyra-workspace-config.new` before
+retrying. Preserve the original backup until the actual handler startup,
+kernel PID enforcement, bootstrap and controlled rollback consumers finish.
+The coordinator still owns RuntimeClass installation, explicit PVC assignment,
+image approval and the composed Work/restart/retirement acceptance.
