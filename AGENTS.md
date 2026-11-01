@@ -263,3 +263,24 @@ ConversationNavigation owns the contextual History panel frame, panel header,
 conversation-row styles and History/New conversation toolbar. Chat and Work
 reuse these components; keep their session operations, project grouping, resize
 state and presentation state in their existing feature controllers.
+
+## Coordinate cluster blockers with the migration chat
+
+For Veyra cluster storage, deployment or administrator-access blockers, contact
+the existing `swarm migration (2)` chat through supported chat tools. The user
+explicitly authorizes this scoped coordination and its reply/wakeup to the
+Veyra coordinator. Resolve the existing chat by title and current ID; keep its
+settings, and do not create another worker or migration chat.
+
+Give that owner the exact failures and fresh capacity observations. Assign
+cluster-side cleanup and deployment guidance, require immediate escalation if
+blocked, and require a completion message to wake the coordinator with exact
+removed paths/bytes, retained exceptions and verified remaining prerequisites.
+The coordinator continues useful independent work and retains exclusive local
+Veyra source/cleanup/integration ownership. Avoid concurrent cleanup of the same
+paths. Preserve source, data, models, credentials, required recovery artifacts,
+running workloads and every existing safety/approval/resource boundary.
+
+After the report, verify the actual unblocking and goal lifecycle, then continue
+the entire approved plan. A callback or new turn does not prove a blocked goal
+was reactivated. Do not leave either chat silently idle on a blocker.
