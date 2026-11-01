@@ -31,7 +31,7 @@ import {
 import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
 import { useMemoryCapabilities } from "./use-memory-capabilities";
 import Select from "../../components/Select";
-import ComposerSelect from "./ComposerSelect";
+import ModelEffortPicker, { effortLabel } from "./ModelEffortPicker";
 import ProjectDropdown from "../../components/ProjectDropdown";
 import { FreshConversationStart } from "../../../lib/fresh-conversation-start";
 
@@ -888,9 +888,10 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   );
 
   const effortVariants = Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {});
-  const effortControl = effortVariants.length > 0 ? <ComposerSelect label="Reasoning effort" value={variant ?? ""}
-    disabled={selectorsDisabled} onChange={value => setSelection(current => ({ ...current, variant: value || undefined }))}
-    options={[{ value: "", label: "Model default" }, ...effortVariants.map(key => ({ value: key, label: key.charAt(0).toUpperCase() + key.slice(1) }))]} /> : null;
+  const effortOptions = effortVariants.length > 0
+    ? [{ value: "", label: "Default" }, ...effortVariants.map(key => ({ value: key, label: effortLabel(key) }))] : [];
+  const effortChanged = (value: string) => setSelection(current => ({ ...current, variant: value || undefined }));
+
 
   /* ---- Rendering ---- */
 
@@ -904,20 +905,19 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
         memoryCanRead={memoryCapabilities.canRead} memoryCanSave={memoryCapabilities.canSave}
         memoryUnavailableReason={memoryCapabilities.reason} memorySavePending={memoryNotice?.status === "queued"}
         projectControl={<ProjectDropdown />} onOpenTools={() => setMcpDrawerOpen(true)}
-        modelControl={<><Select aria-label="Home chat model" value={JSON.stringify([providerId, modelId])}
+        modelControl={<ModelEffortPicker model={JSON.stringify([providerId, modelId])} effort={variant ?? ""} efforts={effortOptions}
           disabled={selectorsDisabled}
-          onChange={event => {
+          models={(chatConfig?.providers ?? []).flatMap(provider => provider.models.map(model => ({
+            value: JSON.stringify([provider.providerId, model.id]), label: model.label, description: provider.label,
+          })))}
+          onModelChange={value => {
             const candidate = (chatConfig?.providers ?? []).flatMap(provider => provider.models.map(model => ({ provider, model })))
-              .find(({ provider, model }) => JSON.stringify([provider.providerId, model.id]) === event.target.value);
+              .find(({ provider, model }) => JSON.stringify([provider.providerId, model.id]) === value);
             if (!candidate) return;
             setSelection({ providerId: candidate.provider.providerId, modelId: candidate.model.id });
             saveChatSelection(candidate.provider.providerId, candidate.model.id);
-          }} className="veyra-home-model text-sm">
-          {!hasSelectableModel && <option value={JSON.stringify([providerId, modelId])}>No model available</option>}
-          {(chatConfig?.providers ?? []).map(provider => <optgroup key={provider.providerId} label={provider.label}>
-            {provider.models.map(model => <option key={model.id} value={JSON.stringify([provider.providerId, model.id])}>{provider.label} · {model.label}</option>)}
-          </optgroup>)}
-        </Select>{effortControl}</>}/>
+          }} onEffortChange={effortChanged} />}/>
+
     </fieldset>
     {homePending && <p role="status">Preparing your new conversation…</p>}
     {homePending && chat.isStreaming && <button type="button" onClick={() => void handleStop()}>Stop generating</button>}
@@ -1362,9 +1362,11 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               memoryUnavailableReason={memoryCapabilities.reason}
               memorySavePending={memoryNotice?.status === "queued"}
               showSuggestions={chat.messages.length === 0}
-              modelControl={<div className="veyra-composer-controls"><ComposerSelect label="Chat model" value={hasSelectableModel ? modelId : ""}
-                onChange={handleModelChange} disabled={selectorsDisabled || currentModels.length === 0}
-                options={hasSelectableModel ? currentModels.map(model => ({ value: model.id, label: model.label })) : [{ value: "", label: "No model available" }]} />{effortControl}</div>}
+              modelControl={<div className="veyra-composer-controls"><ModelEffortPicker model={hasSelectableModel ? modelId : ""}
+                onModelChange={handleModelChange} disabled={selectorsDisabled || currentModels.length === 0}
+                models={hasSelectableModel ? currentModels.map(model => ({ value: model.id, label: model.label })) : [{ value: "", label: "No model available", disabled: true }]}
+                effort={variant ?? ""} efforts={effortOptions} onEffortChange={effortChanged} /></div>}
+
             />
             </fieldset>}
           </>

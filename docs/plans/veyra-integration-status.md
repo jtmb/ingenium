@@ -517,3 +517,12 @@ The user's existing compatibility-preview conversation and installation were
 preserved; these checks do not establish full release acceptance.
 
 The exact compatibility candidate digest32ee7d41431a41724bee614e7f05e39c1c65459bc5344258d14600bda74deea3 and control-plane digest4cd658d7eb9d832406c781e16b17b6168366d8754dd262a8cdf773161fd13bff were published from revision6e36a383923a5530a4e1d21e79c94588fab791f2. Both preview roles started normally; production was unchanged. Work still requires a qualified managed runtime. The consumed frontend compiler view109,942,973bytes and standalone77,128,431bytes were removed after preservation and lifetime checks; minimal hashes, source, recipes and screenshot evidence remain. No new tests were added and full release acceptance remains open.
+
+## Combined model and effort control (2026-11-01)
+
+Chat, Home and Work now share one model/effort pill. Its compact popup contains
+the current model row and a discrete effort slider; choosing the model row opens
+the real model catalog in the same popup. Supported effort values still come
+from the selected model. Existing selection, unavailable-state and send guards
+remain. The original Next production build22 and TypeScript compilation pass.
+Live browser and deployment verification are the next required consumers.

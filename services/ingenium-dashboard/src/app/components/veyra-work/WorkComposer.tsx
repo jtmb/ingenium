@@ -2,6 +2,7 @@
 
 import { useRef, type ReactNode } from "react";
 import { canSendWork, type WorkDraft, type WorkModel } from "./work-state";
+import ModelEffortPicker, { effortLabel } from "../../chat/components/ModelEffortPicker";
 export type { WorkModel } from "./work-state";
 
 export default function WorkComposer({ draft, onChange, onSend, onStop, ready, pending, streaming,
@@ -42,25 +43,19 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
         {onAttach && <button type="button" onClick={onAttach} aria-label="Attach files" disabled={pending || streaming}
           className="h-8 w-8 rounded-full text-lg hover:bg-white/10 disabled:opacity-40 focus-visible:outline-blue-400">＋</button>}
         {permissionControl}
-        <label className="ml-auto"> <span className="sr-only">Model</span>
-          <select aria-label="Work model" value={draft.providerId && draft.modelId ? JSON.stringify([draft.providerId, draft.modelId]) : ""}
-            disabled={pending || streaming} className="max-w-52 rounded bg-[#333131] p-1 focus-visible:outline-blue-400"
-            onChange={(event) => {
-              const model = models.find((item) => JSON.stringify([item.providerId, item.modelId]) === event.target.value);
-              if (model) onChange({ ...draft, providerId: model.providerId, modelId: model.modelId, variant: "", selectionOrigin: "explicit" });
-            }}>
-            <option value="" disabled>Select model</option>
-            {!selectedModel && draft.providerId && draft.modelId && <option value={JSON.stringify([draft.providerId, draft.modelId])} disabled>Unavailable: {draft.providerId} / {draft.modelId}</option>}
-            {models.map((model) => <option key={JSON.stringify([model.providerId, model.modelId])}
-              value={JSON.stringify([model.providerId, model.modelId])}>{model.label}</option>)}
-          </select>
-        </label>
-        {selectedModel?.variants?.length || draft.variant ? <select aria-label="Reasoning effort" value={draft.variant} disabled={pending || streaming}
-          className="rounded bg-[#333131] p-1" onChange={(event) => onChange({ ...draft, variant: event.target.value, selectionOrigin: "explicit" })}>
-          <option value="">Default reasoning</option>
-          {draft.variant && !selectedModel?.variants?.includes(draft.variant) && <option value={draft.variant} disabled>Unavailable effort: {draft.variant}</option>}
-          {selectedModel?.variants?.map((variant) => <option key={variant}>{variant}</option>)}
-        </select> : null}
+        <ModelEffortPicker className="ml-auto" model={draft.providerId && draft.modelId ? JSON.stringify([draft.providerId, draft.modelId]) : ""}
+          models={[
+            ...(!selectedModel && draft.providerId && draft.modelId ? [{ value: JSON.stringify([draft.providerId, draft.modelId]), label: "Unavailable: " + draft.providerId + " / " + draft.modelId, disabled: true }] : []),
+            ...models.map(model => ({ value: JSON.stringify([model.providerId, model.modelId]), label: model.label })),
+          ]}
+          effort={draft.variant} efforts={selectedModel?.variants?.length ? [{ value: "", label: "Default" }, ...selectedModel.variants.map(value => ({ value, label: effortLabel(value) }))] : []}
+          disabled={pending || streaming}
+          onModelChange={value => {
+            const model = models.find(item => JSON.stringify([item.providerId, item.modelId]) === value);
+            if (model) onChange({ ...draft, providerId: model.providerId, modelId: model.modelId, variant: "", selectionOrigin: "explicit" });
+          }}
+          onEffortChange={variant => onChange({ ...draft, variant, selectionOrigin: "explicit" })} />
+
         {voiceControl}
         {streaming ? <button type="button" onClick={onStop} aria-label="Stop response" className="h-8 w-8 rounded-full bg-white text-black">■</button>
           : <button type="submit" disabled={!sendable} aria-label="Send message" className="h-8 w-8 rounded-full bg-blue-500 text-lg text-white disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-blue-300">↑</button>}
