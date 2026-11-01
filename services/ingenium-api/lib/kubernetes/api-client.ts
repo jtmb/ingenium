@@ -97,12 +97,27 @@ export interface KubernetesClusterIdentity {
   apiOrigin: string;
 }
 
+/** AtomicWriter's mount root can be 1777 even though the container's bind mount
+ * is read-only. Trust that exception only at this exact kernel-reported tmpfs
+ * mount; an ordinary writable directory is never an acceptable token owner. */
+function readOnlyProjectedMount(base: string): boolean {
+  const text = readFileSync("/proc/self/mountinfo", "utf8");
+  if (Buffer.byteLength(text) > 1024 * 1024) return false;
+  return text.split("\n").some(line => {
+    const parts = line.split(" - ");
+    if (parts.length !== 2) return false;
+    const fields = parts[0]!.split(" ");
+    const mount = fields[4]?.replace(/\\([0-7]{3})/g, (_all, octal: string) => String.fromCharCode(parseInt(octal, 8)));
+    return mount === base && fields[5]?.split(",").includes("ro") === true && parts[1]!.split(" ")[0] === "tmpfs";
+  });
+}
+
 /** Bounded descriptor input from the fixed, read-only Kubernetes projected volume.
  * Token rotation can change the projection target; it cannot escape that volume. */
 function projectedFile(file: string, maximum: number): string {
   if (!["token", "ca.crt", "namespace"].includes(file)) return fail("KUBERNETES_CREDENTIAL_PATH");
   const base = realpathSync(PROJECTED), root = statSync(base);
-  if (!root.isDirectory() || root.uid !== 0 || (root.mode & 0o022) !== 0) return fail("KUBERNETES_CREDENTIAL_DIRECTORY");
+  if (!root.isDirectory() || root.uid !== 0 || ((root.mode & 0o022) !== 0 && !readOnlyProjectedMount(base))) return fail("KUBERNETES_CREDENTIAL_DIRECTORY");
   const target = realpathSync(PROJECTED + "/" + file);
   if (!target.startsWith(base + "/")) return fail("KUBERNETES_CREDENTIAL_PATH");
   const before = statSync(target);

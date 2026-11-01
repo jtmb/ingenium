@@ -295,6 +295,23 @@ and explicit storage-provisioning approval are required before creation through
 the established operator/deployment workflow. Keep the capacity floor and
 replica count intact.
 
+The isolated claim was subsequently provisioned after the migration owner
+recovered capacity. Its UID is `4855ff72-be3d-4358-995c-89374133d8a3`, and
+the production claim remains unchanged. Actual attachment on worker2 observed
+an encrypted healthy volume with two RW replicas on master and worker1.
+Post-mount statvfs observations retained the full remaining quota above the
+unchanged scheduling/headroom guards. The bounded read-only observation Pod
+was removed; detached `unknown` robustness afterwards is the normal offline
+state, not a substitute for fresh healthy attachment at the next consumer.
+
+The real manager startup also exposed AtomicWriter's sticky 1777 directory
+mode on the read-only service-account projection. The client accepts that
+directory only when the kernel reports an exact read-only tmpfs mount at the
+resolved fixed path. Root ownership, protected file modes/link counts, bounded
+stable reads and rotation/scope checks remain enforced. Writable mounts and
+non-root owners refuse. Four focused filesystem-double controls pass; physical
+manager/bootstrap qualification still uses the actual projected identity.
+
 ## Original commit before the manager reply
 
 After the original Kubernetes create/start/retained-attach flow, the manager
