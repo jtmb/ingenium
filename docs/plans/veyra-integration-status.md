@@ -498,3 +498,18 @@ All33,270 backend dependency files/299,836,147bytes match their freeze. Actual h
 Required cleanup removed /home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-dashboard/tests/artifacts/current-dashboard-build-view-r2 after Windows/Linux lifetime, ownership, source and evidence checks:109,892,935logical bytes/114,900,992Linuxallocated bytes across1461files. No Windows disk recovery is claimed. Retain only the77,120,263-byte standalone for the explicit candidate image-assembly consumer, then retire it safely when consumed or that route is rejected. Minimal compressed artifact metadata is186,314bytes. Existing protected/refused artifacts remain untouched.
 
 Full image assembly/source/OS provenance, original positive candidate/material/retirement, native/physical voice/Work-Web/platform acceptance, exact-source deployment and complete plan delivery remain open. Whole-image reserves were not lowered from these component observations.
+
+## Composer regression repair (2026-11-01)
+
+The Chat composer now uses themed model and reasoning menus instead of native
+settings selects. The menus support keyboard navigation, Escape and focus return,
+and stay within the viewport. A narrow composer puts typing and controls on
+separate rows when needed. Production Next compilation passed and the actual
+candidate rendered correctly at 794 pixels in the integrated browser.
+
+Fresh-chat model verification also accepts OpenCode's explicit `default` variant
+for an omitted default choice. Model and provider identities and explicit effort
+choices still require exact confirmation. The original API compiler passed for
+this observed startup defect. Runtime fresh-chat verification remains required.
+The user's existing compatibility-preview conversation and installation were
+preserved; these checks do not establish full release acceptance.

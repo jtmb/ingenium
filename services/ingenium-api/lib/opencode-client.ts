@@ -1494,7 +1494,7 @@ export const opencodeClient = {
     const result = await getV2Session(session.id, directory);
     if (isOpenCodeError(result)) return result;
     // Acknowledgement alone cannot prove that the new session holds the choice.
-    if (result.model?.id !== model.id || result.model?.providerID !== model.providerID || result.model?.variant !== model.variant) {
+    if (result.model?.id !== model.id || result.model?.providerID !== model.providerID || (result.model?.variant ?? "default") !== (model.variant ?? "default")) {
       return { error: { code: "CHAT_MODEL_SELECTION_UNCONFIRMED", message: "The conversation model choice could not be confirmed." } };
     }
     return mapV2Session(result);
