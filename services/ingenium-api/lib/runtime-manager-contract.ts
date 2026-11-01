@@ -303,6 +303,36 @@ export function workspaceRuntimeLabelsV2(input: WorkspaceRuntimeProvisionRequest
   };
 }
 
+/** Shared nonsecret environment for Docker and Kubernetes workspace runtimes.
+ * Capability material travels only through the original private bootstrap channel. */
+export function workspaceRuntimeEnvironmentV2(input: {
+  runtimeId: string; organizationId: string; ownerUserId: string; workspaceId: string; storageMappingHash: string;
+}, apiUrl: string): string[] {
+  const api = new URL(apiUrl);
+  if (![input.runtimeId, input.organizationId, input.ownerUserId].every(value => UUID.test(value))
+    || !SAFE_WORKSPACE_ID.test(input.workspaceId) || !SHA256.test(input.storageMappingHash)
+    || api.protocol !== "http:" || api.username || api.password || api.pathname !== "/api/v1"
+    || api.search || api.hash || !SAFE_NAME.test(api.hostname)) throw new Error("Invalid workspace runtime environment");
+  return [
+      "HOME=/home/appuser",
+      "XDG_CONFIG_HOME=/home/appuser/.config",
+      "XDG_DATA_HOME=/home/appuser/.local/share",
+      "XDG_STATE_HOME=/home/appuser/.local/state",
+      "TMPDIR=/home/appuser/.tmp",
+      `INGENIUM_API_URL=${apiUrl}`,
+      "INGENIUM_EXECUTION_SCOPE=workspace",
+      `INGENIUM_ORGANIZATION_ID=${input.organizationId}`,
+      `INGENIUM_RUNTIME_ID=${input.runtimeId}`,
+      `INGENIUM_RUNTIME_OWNER_ID=${input.ownerUserId}`,
+      `INGENIUM_WORKSPACE_ID=${input.workspaceId}`,
+      `INGENIUM_STORAGE_MAPPING_HASH=${input.storageMappingHash}`,
+      "INGENIUM_WORKTREE=/workspace",
+      "INGENIUM_MCP_AUDIENCE=runtime",
+      "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
+      "INGENIUM_DEPLOYMENT_MODE=user-runtime",
+    ];
+}
+
 export function buildWorkspaceRuntimeContainerSpecV2(
   input: WorkspaceRuntimeProvisionRequestV2,
   mapping: RuntimeWorkspaceMapping,
@@ -319,24 +349,7 @@ export function buildWorkspaceRuntimeContainerSpecV2(
     AttachStderr: false,
     OpenStdin: true,
     StdinOnce: true,
-    Env: [
-      "HOME=/home/appuser",
-      "XDG_CONFIG_HOME=/home/appuser/.config",
-      "XDG_DATA_HOME=/home/appuser/.local/share",
-      "XDG_STATE_HOME=/home/appuser/.local/state",
-      "TMPDIR=/home/appuser/.tmp",
-      `INGENIUM_API_URL=${config.apiUrl}`,
-      "INGENIUM_EXECUTION_SCOPE=workspace",
-      `INGENIUM_ORGANIZATION_ID=${input.organizationId}`,
-      `INGENIUM_RUNTIME_ID=${input.runtimeId}`,
-      `INGENIUM_RUNTIME_OWNER_ID=${input.ownerUserId}`,
-      `INGENIUM_WORKSPACE_ID=${input.workspaceId}`,
-      `INGENIUM_STORAGE_MAPPING_HASH=${input.storageMappingHash}`,
-      "INGENIUM_WORKTREE=/workspace",
-      "INGENIUM_MCP_AUDIENCE=runtime",
-      "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
-      "INGENIUM_DEPLOYMENT_MODE=user-runtime",
-    ],
+    Env: workspaceRuntimeEnvironmentV2(input, config.apiUrl),
     Labels: workspaceRuntimeLabelsV2(input),
     StopTimeout: 30,
     HostConfig: {
