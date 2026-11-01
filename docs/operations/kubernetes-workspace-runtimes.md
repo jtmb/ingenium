@@ -341,3 +341,16 @@ runtime files. Four focused orchestration controls pass for lost replies,
 ordinary/duplicate acknowledgements, missing bootstrap and contradictory replies.
 They use explicit identity/storage/manager doubles and do not qualify a physical
 runtime, image or live restart. No Core rebuild or dependency copies were needed.
+
+The real projected-credential manager now starts in the isolated Kubernetes
+Work service stack. Registration uses a fresh qualification account and the
+dedicated 4 GiB claim; its runtime owner/storage annotations are assigned only
+after checking the claim UID, original spec, empty bindings and absence of Pod
+consumers. This does not migrate or copy an existing installation.
+
+Kubernetes' actual v1 PodList omits kind/apiVersion on its items. Claim-user
+inspection validates the typed, complete list envelope and permits only those
+omitted item type fields; explicit conflicting types, missing names/UIDs/revisions
+or wrong namespaces remain refused. Named-resource reads retain mandatory type
+metadata. The original API compiler passes, and an independent compiler projection
+matches its emitted client exactly. Final Work bootstrap remains a live gate.

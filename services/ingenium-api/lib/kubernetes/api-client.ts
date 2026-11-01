@@ -135,10 +135,11 @@ function origin(server: string): URL {
   return url;
 }
 
-function resource<T extends KubernetesResource>(raw: unknown, kind: string, expectedName: string, namespace?: string,apiVersion="v1"): T {
+function resource<T extends KubernetesResource>(raw: unknown, kind: string, expectedName: string, namespace?: string,apiVersion="v1",typedListItem=false): T {
   const value = raw as T;
-  if (!value || typeof value !== "object" || Array.isArray(value) || value.apiVersion !== apiVersion || value.kind !== kind ||
-    !value.metadata || value.metadata.name !== expectedName || !value.metadata.resourceVersion ||
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value.apiVersion !== apiVersion && !(typedListItem && value.apiVersion === undefined)) ||
+    (value.kind !== kind && !(typedListItem && value.kind === undefined)) ||
+    !value.metadata || typeof value.metadata.name !== "string" || !NAME.test(value.metadata.name) || value.metadata.name !== expectedName || !value.metadata.resourceVersion ||
     typeof value.metadata.resourceVersion !== "string" || (namespace && value.metadata.namespace !== namespace)) return fail("KUBERNETES_RESOURCE_IDENTITY");
   uid(value.metadata.uid);
   return value;
@@ -275,11 +276,12 @@ export class KubernetesApiClient {
   async claimPods(claimName: string, signal?: AbortSignal): Promise<KubernetesPod[]> {
     name(claimName);
     const response=await this.#request("GET","/api/v1/namespaces/"+encode(this.namespace)+"/pods?limit=513",undefined,signal);
-    const list=response.value as {kind?:unknown;metadata?:{continue?:unknown};items?:unknown};
-    if(response.status!==200||list?.kind!=="PodList"||list.metadata?.continue||!Array.isArray(list.items)||list.items.length>512)return fail("KUBERNETES_CLAIM_POD_LIST_UNAVAILABLE");
+    const list=response.value as {apiVersion?:unknown;kind?:unknown;metadata?:{resourceVersion?:unknown;continue?:unknown};items?:unknown};
+    if(response.status!==200||list?.apiVersion!=="v1"||list.kind!=="PodList"||typeof list.metadata?.resourceVersion!=="string"||!list.metadata.resourceVersion||list.metadata.continue||!Array.isArray(list.items)||list.items.length>512)return fail("KUBERNETES_CLAIM_POD_LIST_UNAVAILABLE");
     return list.items.map(value=>{
       const pod=value as KubernetesPod;
-      return resource<KubernetesPod>(value,"Pod",pod.metadata?.name,this.namespace);
+      // Typed list items inherit only the envelope type; retain each actual item's identity.
+      return resource<KubernetesPod>(value,"Pod",pod?.metadata?.name,this.namespace,"v1",true);
     }).filter(pod=>Array.isArray(pod.spec.volumes)&&pod.spec.volumes.some(raw=>(raw as {persistentVolumeClaim?:{claimName?:unknown}})?.persistentVolumeClaim?.claimName===claimName));
   }
 
