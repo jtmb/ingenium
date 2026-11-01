@@ -525,7 +525,7 @@ the current model row and a discrete effort slider; choosing the model row opens
 the real model catalog in the same popup. Supported effort values still come
 from the selected model. Existing selection, unavailable-state and send guards
 remain. The original Next production build22 and TypeScript compilation pass.
-Live browser and deployment verification are the next required consumers.
+Actual browser verification passed in the isolated candidate: keyboard effort selection changed the single pill and popup, Home restored Default, and the current model row opened the real catalog. No inference was requested.
 ## Reused site navigation (2026-11-01)
 
 SiteChrome now owns the shared header and Navigation for every authenticated
@@ -534,5 +534,5 @@ rails have been removed. Work's projects, pinned chats and recents remain in
 its contextual History panel, which starts closed like Chat. The Work/Web
 presentation toggle and its retained conversation state are unchanged. The
 project guide now requires this shared shell and ModelEffortPicker reuse.
-Original Next production build23 and TypeScript compilation pass; actual
-candidate browser verification remains required before declaring UI acceptance.
+Original Next production build23 and TypeScript compilation pass. Actual IAB verification confirms the same header and navigation on Chat, Work, Customize and saved chats. Work History opens its contextual project/chat panel. The original localhost:17888 preview now runs immutable image sha256:67dcc16a6f5382a34f37a392e3a733960a3cbfdda489f889798a729f0e786934 from source739aaf7725130331f1d4210454096c89ed049f54. Its Pod UID, storage, login and original conversation remain unchanged; actual browser readback shows the combined model/effort control. Work execution still reports the missing managed backend. Production, native and full release acceptance remain open. No new tests were added.
+Consumed build23 outputs were removed after Windows exclusive-handle and Linux ownership, process, container, mount, source and regeneration checks: compiler view109,796,602bytes, standalone77,026,276bytes, OCI archive820,633,600bytes and application layer92,727,764bytes. The exact published image, source, lockfiles, recipes and minimal screenshots/hashes remain. Linux reclaimed allocation is recorded separately; no Windows disk recovery is inferred.
