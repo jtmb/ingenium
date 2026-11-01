@@ -572,3 +572,39 @@ JSON-patch tests removed only Veyra's key. Absence was confirmed; no smoke Pod
 remains. This is retirement transport evidence, not a real agent/Core retirement
 or READY grant. No tests were added, host settings changed, model/GPU initialized
 or production writer changed. Full delivery remains active and incomplete.
+
+## Kubernetes manager and gateway composition (2026-11-01)
+
+The source now has a dedicated authenticated Kubernetes manager, fixed private
+Core client, physical preflight, original lifecycle composition and fresh
+artifact-backed placement. Work may select its own image/service through two
+explicit settings while legacy Project/JobRun settings remain unchanged. The
+existing protected image registry supports a distinct Kubernetes Work role;
+the original Docker validator and writable-policy approval gate remain intact.
+
+The API and browser gateway take the actual original Pod address from the
+authenticated placement proof, bound to namespace/Pod/container identities.
+Workspace ttyd now requires the same derived runtime credential for HTTP and
+WebSocket traffic, preventing the generic trusted-proxy header from admitting
+another workspace after address reuse. Workspace profiles provide its separate
+bounded writable home. The legacy Project terminal behavior remains unchanged.
+
+Preflight rejects physical/configuration failures before credential issuance or
+leaving ABSENT. Confirmed failed POST201 children have bounded graceful cleanup;
+a lost create response cannot be adopted by name/labels. Durable failure and
+restart/successor reconciliation remain unfinished.
+
+The original API compiler/copier passes340 source files/169 compiler roots/298
+runtime files without Core recompilation or dependency copies. Shell syntax for
+the changed terminal launcher passes. An actual inert Pod measured all11
+canonical artifacts over the new fixed-command exec stream, matching an
+independent operator read of the existing pinned image; it then exited0 and was
+fully removed after its original connection closed. No agent/bootstrap/image
+approval, model/GPU or production-writer claim is made. No tests were added.
+
+The existing chart checkout was fast-forwarded from its ancestor to current main
+for subsequent deployment preparation. Its pre-existing tool link is preserved;
+no new checkout, worker or application publisher was created. Actual manager
+deployment/configuration, finite PID qualification, image/bootstrap approval,
+workspace registration, live Work/Web/native/audio and full release acceptance
+remain open. See the [Kubernetes runbook](../operations/kubernetes-workspace-runtimes.md).

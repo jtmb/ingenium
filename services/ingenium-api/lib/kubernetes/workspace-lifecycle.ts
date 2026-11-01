@@ -4,7 +4,8 @@ import { publicWorkspaceProvisionRequest, provisionHash, decodeWorkspaceRuntimeO
 import { KubernetesApiClient, type KubernetesPod, type KubernetesClusterIdentity, type KubernetesNode } from "./api-client.js";
 import { planKubernetesWorkspacePod, type KubernetesWorkspaceMapping, type KubernetesNodePidPolicy,
   type KubernetesWorkspaceImage, type KubernetesWorkspacePodPlan } from "./workspace-pod.js";
-import { joinKubernetesWorkspaceAttach, requireRetainedKubernetesWorkspaceAttach, joinStoppedKubernetesWorkspaceAttach } from "./workspace-wire.js";
+import { joinKubernetesWorkspaceAttach, requireRetainedKubernetesWorkspaceAttach, joinStoppedKubernetesWorkspaceAttach,releaseFailedKubernetesWorkspaceAttach } from "./workspace-wire.js";
+import {workspaceManagerCoreV2} from "../projects-v2/workspace-manager-core-client.js";
 
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code, status: 503 }); };
 const object = (value: unknown): Record<string, unknown> => {
@@ -68,6 +69,8 @@ interface Original {
   mapping: KubernetesWorkspaceMapping; nodePidPolicy: KubernetesNodePidPolicy; image: KubernetesWorkspaceImage; apiUrl: string;
   plan?: KubernetesWorkspacePodPlan; created?: KubernetesPod; original?: KubernetesWorkspaceRuntimeOriginalProvision;
   state: "creating" | "starting" | "stopping" | "stopped" | "unknown";
+  failedCleanup?:{podUid:string;podRemoved:boolean;observedAt:number};
+  cleanupFailure?:string;
 }
 const originals = new Map<string, Original>();
 function running(state: Original, pod: KubernetesPod, node: KubernetesNode, identity: KubernetesClusterIdentity): {containerId:string;startedAt:string} {
@@ -107,18 +110,27 @@ async function recheck(state: Original, signal?: AbortSignal) {
 export async function provisionKubernetesWorkspace(client: KubernetesApiClient, input: {
   request: PublicWorkspaceProvisionRequest; mapping: KubernetesWorkspaceMapping; nodePidPolicy: KubernetesNodePidPolicy;
   image: KubernetesWorkspaceImage; apiUrl: string; capability: string; capabilityExpiresAt: string;
-  bootstrapNonce: string; credentialId: string; signal?: AbortSignal;
+  bootstrapNonce: string; credentialId: string; admissionSha256: string; signal?: AbortSignal;
 }): Promise<KubernetesWorkspaceRuntimeOriginalProvision> {
   const request = publicWorkspaceProvisionRequest(input.request), {runtimeId} = request;
   if (!(client instanceof KubernetesApiClient) || originals.has(runtimeId) || originals.size >= 1024 ||
-    !/^[a-f0-9]{64}$/.test(input.bootstrapNonce) || !/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(input.capability) ||
+    !/^[a-f0-9]{64}$/.test(input.bootstrapNonce) || !/^[a-f0-9]{64}$/.test(input.admissionSha256) || !/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(input.capability) ||
     !stamp(input.capabilityExpiresAt) || Date.parse(input.capabilityExpiresAt) <= Date.now()+45000 ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.credentialId)) return fail("KUBERNETES_ORIGINAL_PROVISION_INPUT");
   const state: Original = {client,request,mapping:structuredClone(input.mapping),nodePidPolicy:structuredClone(input.nodePidPolicy),
     image:structuredClone(input.image),apiUrl:input.apiUrl,state:"creating"};
   originals.set(runtimeId,state);
+  const admission = async () => {
+    const current=await workspaceManagerCoreV2("admission",{runtimeId,requestId:request.originalRequestId,requestSha256:provisionHash(request)},input.signal);
+    if(provisionHash(current)!==input.admissionSha256||provisionHash(current.publicRequest)!==provisionHash(request)||
+      current.nonce!==input.bootstrapNonce||current.credentialId!==input.credentialId||current.definition.backendKind!=="kubernetes"||
+      current.definition.imageId!==state.image.imageId||current.definition.pullReference!==state.image.pullReference||
+      current.definition.sourceRevision!==state.image.sourceRevision||current.definition.validUntil!==state.image.validUntil)return fail("KUBERNETES_ORIGINAL_ADMISSION_CHANGED");
+  };
   try {
+    await admission();
     const initial = await recheck(state,input.signal);state.plan = initial.plan;
+    await admission();
     state.created = await client.createPod(runtimeId,state.plan.pod,input.signal);
     const deadline = Math.min(Date.now()+40000,Date.parse(input.capabilityExpiresAt));let pod: KubernetesPod | undefined;
     while (Date.now() < deadline) {
@@ -134,6 +146,7 @@ export async function provisionKubernetesWorkspace(client: KubernetesApiClient, 
       credentialId:input.credentialId,bindingHash:request.storageMappingHash,bindingEpoch:request.securityEpoch,startIdentity,
       requestId:request.originalRequestId,podUid:pod.metadata.uid,containerId:observed.containerId},input.signal);
     const final = await recheck(state,input.signal), current = await client.pod(runtimeId,input.signal);
+    await admission();
     if (!current) return fail("KUBERNETES_ORIGINAL_CHANGED");
     const container = running(state,current,final.node,final.identity), attachment = requireRetainedKubernetesWorkspaceAttach(runtimeId);
     if (!equal(container,observed) || attachment.source.podUid !== current.metadata.uid || attachment.source.containerId !== observed.containerId ||
@@ -154,7 +167,52 @@ export async function provisionKubernetesWorkspace(client: KubernetesApiClient, 
         nodePidPolicySha256:state.nodePidPolicy.configurationSha256}});
     if (original.backendKind !== "kubernetes") return fail("KUBERNETES_ORIGINAL_BACKEND");
     state.original = original;state.state = "starting";return original;
-  } catch (cause) { state.state = "unknown";throw cause; }
+  } catch (cause) {
+    state.state = "unknown";
+    // The original POST201 UID is required. A missing/lost create response never
+    // authorizes name/label adoption or deletion of a possibly unrelated Pod.
+    if(state.created){
+      try{await cleanupFailedOriginal(state);}catch{state.cleanupFailure="KUBERNETES_FAILED_PROVISION_CLEANUP_UNCONFIRMED";}
+    }
+    throw cause;
+  }
+}
+
+/** Stop this actual failed child even when its HTTP caller disconnected. It
+ * cannot publish a successful original, READY or a Core retirement receipt. */
+async function cleanupFailedOriginal(state:Original):Promise<void>{
+  const {client,request,created,nodePidPolicy:policy}=state;
+  if(!created||state.original)return fail("KUBERNETES_FAILED_PROVISION_OWNER");
+  const signal=AbortSignal.timeout(40000),deadline=Date.now()+35000;
+  let pod=await client.pod(request.runtimeId,signal);
+  if(!pod||pod.metadata.uid!==created.metadata.uid||!pod.metadata.finalizers?.includes(FINALIZER))return fail("KUBERNETES_FAILED_PROVISION_IDENTITY_CHANGED");
+  if(!pod.metadata.deletionTimestamp)await client.deletePod(request.runtimeId,{uid:pod.metadata.uid,resourceVersion:pod.metadata.resourceVersion},signal);
+  for(;;){
+    pod=await client.pod(request.runtimeId,signal);
+    if(!pod||pod.metadata.uid!==created.metadata.uid||!pod.metadata.deletionTimestamp||!pod.metadata.finalizers?.includes(FINALIZER))return fail("KUBERNETES_FAILED_PROVISION_IDENTITY_CHANGED");
+    const statuses=pod.status?.containerStatuses??[];
+    // An unbound, status-free Pod was never assigned to a kubelet. The finalizer
+    // patch tests the same resourceVersion, so a concurrent binding refuses it.
+    const unbound=!pod.spec.nodeName&&statuses.length===0;
+    let terminal=false;
+    if(pod.spec.nodeName===policy.nodeName&&["Failed","Succeeded"].includes(pod.status?.phase??"")&&statuses.length===1&&statuses[0]?.name==="workspace"){
+      const node=await client.node(policy.nodeName,signal),s=statuses[0],t=s.state.terminated;
+      terminal=node.metadata.uid===policy.nodeUid&&node.status?.nodeInfo?.bootID===policy.nodeBootId&&
+        node.status.conditions?.some(c=>c.type==="Ready"&&c.status==="True")===true&&s.restartCount===0&&
+        typeof s.containerID==="string"&&/^containerd:\/\/[a-f0-9]{64}$/.test(s.containerID)&&t?.containerID===s.containerID&&
+        stamp(t.startedAt)&&stamp(t.finishedAt)&&Date.parse(t.finishedAt)>=Date.parse(t.startedAt)&&Number.isSafeInteger(t.exitCode);
+    }
+    if(unbound||terminal)break;
+    if(Date.now()>=deadline)return fail("KUBERNETES_FAILED_PROVISION_STOP_UNCONFIRMED");
+    await pause(250,undefined,{signal});
+  }
+  await releaseFailedKubernetesWorkspaceAttach(request.runtimeId,created.metadata.uid);
+  await client.finishPodRetirement(request.runtimeId,pod,signal);
+  while(await client.pod(request.runtimeId,signal)){
+    if(Date.now()>=deadline)return fail("KUBERNETES_FAILED_PROVISION_DELETE_UNCONFIRMED");
+    await pause(100,undefined,{signal});
+  }
+  state.failedCleanup={podUid:created.metadata.uid,podRemoved:true,observedAt:Date.now()};
 }
 
 /** Fresh observation remains linked to the retained original, not adoption. The

@@ -137,3 +137,16 @@ export async function joinStoppedKubernetesWorkspaceAttach(runtimeId: string, po
   if (state.socket?.readyState !== 3) throw error("KUBERNETES_RETIREMENT_ATTACH_UNCONFIRMED");
   active.delete(runtimeId);
 }
+
+/** Release only failed-attempt socket custody after the physical owner has
+ * confirmed termination. This is cleanup, never a bootstrap/retirement grant. */
+export async function releaseFailedKubernetesWorkspaceAttach(runtimeId:string,podUid:string):Promise<void>{
+  const state=active.get(runtimeId);if(!state)return;
+  if(state.source&&state.source.podUid!==podUid)throw error("KUBERNETES_FAILED_ATTACH_IDENTITY_CHANGED");
+  const deadline=Date.now()+3000;
+  while(state.socket&&state.socket.readyState!==3){
+    if(Date.now()>=deadline)throw error("KUBERNETES_FAILED_ATTACH_CLOSE_UNCONFIRMED");
+    await new Promise(resolve=>setTimeout(resolve,25));
+  }
+  active.delete(runtimeId);
+}

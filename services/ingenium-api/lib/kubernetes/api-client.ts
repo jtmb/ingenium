@@ -3,6 +3,7 @@ import { readFileSync, statSync, realpathSync } from "node:fs";
 import { createHash, X509Certificate } from "node:crypto";
 import { isIP } from "node:net";
 import { parseStrictJobJson } from "../dot-v2/job-bootstrap-frame.mjs";
+import { WORKSPACE_V2_ARTIFACTS, type WorkspaceV2File } from "../projects-v2/workspace-v2-image.mjs";
 
 const PROJECTED = "/var/run/secrets/kubernetes.io/serviceaccount";
 const NAME = /^[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?$/;
@@ -248,6 +249,19 @@ export class KubernetesApiClient {
     return resource<KubernetesClaim>(response.value, "PersistentVolumeClaim", claimName, this.namespace);
   }
 
+  /** Includes unlabelled claim users, so a label cannot hide a conflicting
+   * workspace mount. The namespace list is complete and bounded or refused. */
+  async claimPods(claimName: string, signal?: AbortSignal): Promise<KubernetesPod[]> {
+    name(claimName);
+    const response=await this.#request("GET","/api/v1/namespaces/"+encode(this.namespace)+"/pods?limit=513",undefined,signal);
+    const list=response.value as {kind?:unknown;metadata?:{continue?:unknown};items?:unknown};
+    if(response.status!==200||list?.kind!=="PodList"||list.metadata?.continue||!Array.isArray(list.items)||list.items.length>512)return fail("KUBERNETES_CLAIM_POD_LIST_UNAVAILABLE");
+    return list.items.map(value=>{
+      const pod=value as KubernetesPod;
+      return resource<KubernetesPod>(value,"Pod",pod.metadata?.name,this.namespace);
+    }).filter(pod=>Array.isArray(pod.spec.volumes)&&pod.spec.volumes.some(raw=>(raw as {persistentVolumeClaim?:{claimName?:unknown}})?.persistentVolumeClaim?.claimName===claimName));
+  }
+
   async node(nodeName: string, signal?: AbortSignal): Promise<KubernetesNode> {
     const response = await this.#request("GET", "/api/v1/nodes/" + encode(nodeName), undefined, signal);
     if (response.status !== 200) throw new KubernetesRequestError("KUBERNETES_NODE_UNAVAILABLE", response.status);
@@ -261,6 +275,34 @@ export class KubernetesApiClient {
     const response = await this.#request("POST", "/api/v1/namespaces/" + encode(this.namespace) + "/pods", spec, signal);
     if (response.status !== 201) throw new KubernetesRequestError("KUBERNETES_POD_CREATE_UNCONFIRMED", response.status);
     return resource<KubernetesPod>(response.value, "Pod", podName, this.namespace);
+  }
+
+  async #workspaceStream(runtimeId: string, operation: "attach" | "exec", command: readonly string[], signal?: AbortSignal): Promise<import("ws").default> {
+    const credentials = this.#credentials();
+    const url = new URL("/api/v1/namespaces/" + encode(this.namespace) + "/pods/" + this.runtimeName(runtimeId) + "/" + operation, this.apiOrigin);
+    url.protocol = "wss:";
+    for (const [key,value] of Object.entries({container:"workspace",stdin:operation === "attach" ? "true" : "false",stdout:"true",stderr:"true",tty:"false"})) url.searchParams.set(key,value);
+    for (const value of command) url.searchParams.append("command",value);
+    const { default: WebSocket } = await import("ws");
+    const socket = new WebSocket(url, ["v5.channel.k8s.io"], {
+      ca: this.#ca, cert: credentials.cert, key: credentials.key, rejectUnauthorized: true,
+      agent: false, followRedirects: false, perMessageDeflate: false, handshakeTimeout: 10000, maxPayload: 65536,
+      headers: credentials.token ? { Authorization: "Bearer " + credentials.token } : {},
+    });
+    socket.on("error", () => {});
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => { socket.terminate(); reject(new KubernetesRequestError("KUBERNETES_STREAM_ABORTED")); };
+        const clear = () => signal?.removeEventListener("abort", aborted);
+        socket.once("open", () => { clear(); socket.protocol === "v5.channel.k8s.io" ? resolve() : reject(new KubernetesRequestError("KUBERNETES_STREAM_PROTOCOL")); });
+        socket.once("error", () => { clear(); reject(new KubernetesRequestError("KUBERNETES_STREAM_UNAVAILABLE")); });
+        socket.once("unexpected-response", (_request, response) => { clear(); response.destroy(); reject(new KubernetesRequestError("KUBERNETES_STREAM_UPGRADE_REFUSED")); });
+        socket.once("close", () => { clear(); reject(new KubernetesRequestError("KUBERNETES_STREAM_CLOSED")); });
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) aborted();
+      });
+      return socket;
+    } catch (cause) { socket.terminate(); throw cause; }
   }
 
   /** New Kubernetes v5 stdin/stdout connection, bracketed by actual Pod reads.
@@ -280,33 +322,12 @@ export class KubernetesApiClient {
         !status.state.running?.startedAt) return fail("KUBERNETES_ATTACH_ORIGINAL_CHANGED");
       return { status, pod };
     };
-    const initial = current(before), credentials = this.#credentials();
-    const url = new URL("/api/v1/namespaces/" + encode(this.namespace) + "/pods/" + this.runtimeName(runtimeId) +
-      "/attach?container=workspace&stdin=true&stdout=true&stderr=true&tty=false", this.apiOrigin);
-    url.protocol = "wss:";
-    const { default: WebSocket } = await import("ws");
-    const socket = new WebSocket(url, ["v5.channel.k8s.io"], {
-      ca: this.#ca, cert: credentials.cert, key: credentials.key, rejectUnauthorized: true,
-      agent: false, followRedirects: false, perMessageDeflate: false, handshakeTimeout: 10000, maxPayload: 65536,
-      headers: credentials.token ? { Authorization: "Bearer " + credentials.token } : {},
-    });
-    // Keep an error listener throughout the handoff to the retaining owner.
-    socket.on("error", () => {});
+    const initial = current(before), socket = await this.#workspaceStream(runtimeId,"attach",[],signal);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const aborted = () => { socket.terminate(); reject(new KubernetesRequestError("KUBERNETES_ATTACH_ABORTED")); };
-        const clear = () => signal?.removeEventListener("abort", aborted);
-        socket.once("open", () => { clear(); socket.protocol === "v5.channel.k8s.io" ? resolve() : reject(new KubernetesRequestError("KUBERNETES_ATTACH_PROTOCOL")); });
-        socket.once("error", () => { clear(); reject(new KubernetesRequestError("KUBERNETES_ATTACH_UNAVAILABLE")); });
-        socket.once("unexpected-response", (_request, response) => { clear(); response.destroy(); reject(new KubernetesRequestError("KUBERNETES_ATTACH_UPGRADE_REFUSED")); });
-        socket.once("close", () => { clear(); reject(new KubernetesRequestError("KUBERNETES_ATTACH_CLOSED")); });
-        signal?.addEventListener("abort", aborted, { once: true });
-        if (signal?.aborted) aborted();
-      });
       const final = current(await this.pod(runtimeId, signal));
       const afterIdentity = await this.identify(signal);
       if (afterIdentity.namespaceUid !== identity.namespaceUid || final.pod.spec.nodeName !== initial.pod.spec.nodeName ||
-        final.status.state.running?.startedAt !== initial.status.state.running?.startedAt || socket.readyState !== WebSocket.OPEN) return fail("KUBERNETES_ATTACH_ORIGINAL_CHANGED");
+        final.status.state.running?.startedAt !== initial.status.state.running?.startedAt || socket.readyState !== 1) return fail("KUBERNETES_ATTACH_ORIGINAL_CHANGED");
       return {
         socket,
         source: Object.freeze({ namespaceUid: identity.namespaceUid, apiCaSha256: identity.apiCaSha256,
@@ -314,6 +335,61 @@ export class KubernetesApiClient {
           startedAt: final.status.state.running!.startedAt, nodeName: final.pod.spec.nodeName! }),
       };
     } catch (cause) { socket.terminate(); throw cause; }
+  }
+
+  /** Fixed read-only image measurement, never a browser/agent exec endpoint.
+   * Only the canonical immutable runtime artifacts may be read; paths, commands,
+   * filesystem content and credentials are never accepted from a public request. */
+  async measureWorkspaceImageArtifacts(runtimeId: string, expected: {podUid:string;containerId:string;startedAt:string}, files: readonly WorkspaceV2File[], signal?: AbortSignal): Promise<Array<{path:string;sha256:string;bytes:number}>> {
+    if (files.length !== WORKSPACE_V2_ARTIFACTS.length || new Set(files.map(file=>file.path)).size !== files.length ||
+      WORKSPACE_V2_ARTIFACTS.some(path=>!files.some(file=>file.path === path))) return fail("KUBERNETES_IMAGE_ARTIFACT_SET");
+    const identity = await this.identify(signal);
+    const current = (pod: KubernetesPod | undefined) => {
+      const statuses = pod?.status?.containerStatuses, container = statuses?.length === 1 && statuses[0]?.name === "workspace" ? statuses[0] : undefined;
+      if (!pod || pod.metadata.uid !== expected.podUid || pod.metadata.deletionTimestamp || !pod.spec.nodeName ||
+        container?.containerID !== "containerd://"+expected.containerId || container.restartCount !== 0 ||
+        container.state.running?.startedAt !== expected.startedAt) return fail("KUBERNETES_IMAGE_ORIGINAL_CHANGED");
+      return pod;
+    };
+    const before = current(await this.pod(runtimeId,signal));
+    const program = "import fs from 'node:fs';import{createHash}from'node:crypto';const paths="+JSON.stringify(WORKSPACE_V2_ARTIFACTS)+";let total=0;const rows=paths.map(path=>{if(fs.realpathSync(path)!==path)throw Error('artifact');const named=fs.lstatSync(path),fd=fs.openSync(path,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const a=fs.fstatSync(fd);if(!a.isFile()||a.uid!==0||a.gid!==0||a.nlink!==1||(a.mode&0o022)||a.size<1||a.size>4194304||a.dev!==named.dev||a.ino!==named.ino||(total+=a.size)>16777216)throw Error('artifact');const bytes=fs.readFileSync(fd),b=fs.fstatSync(fd),c=fs.lstatSync(path);if(bytes.length!==a.size||[b,c].some(s=>['dev','ino','size','mtimeMs','ctimeMs'].some(k=>s[k]!==a[k]))||fs.realpathSync(path)!==path)throw Error('artifact');return {path,sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length,uid:a.uid,gid:a.gid,mode:a.mode&0o7777,kind:'file'}}finally{fs.closeSync(fd)}});process.stdout.write(JSON.stringify(rows)+'\\n');";
+    const socket = await this.#workspaceStream(runtimeId,"exec",["/usr/local/bin/node","--input-type=module","--eval",program],signal);
+    let stdout = Buffer.alloc(0);
+    try {
+      const raw = await new Promise<unknown>((resolve,reject)=>{
+        let settled = false, exited = false;
+        const done = (cause?: Error) => {
+          if (settled) return;
+          if (!cause && (!exited || stdout.at(-1) !== 10)) return;
+          settled = true;clearTimeout(timer);signal?.removeEventListener("abort",aborted);
+          if (cause) reject(cause);
+          else { try { resolve(parseStrictJobJson(stdout,16384)); } catch { reject(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_RESPONSE")); } }
+        };
+        const aborted = () => done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_ABORTED"));
+        const timer = setTimeout(()=>done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_TIMEOUT")),10000);timer.unref();
+        signal?.addEventListener("abort",aborted,{once:true});
+        socket.on("message",(data,binary)=>{
+          const frame = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+          if (!binary || frame.length < 1) return done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_CHANNEL"));
+          const channel = frame[0], body = frame.subarray(1);
+          if (channel === 1) {
+            if (stdout.length+body.length > 16384) return done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_BOUND"));
+            stdout = Buffer.concat([stdout,body]);done();
+          } else if (channel === 3) {
+            try { if ((parseStrictJobJson(body,4096) as {status?:string})?.status !== "Success") return done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_EXEC_FAILED")); }
+            catch { return done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_STATUS")); }
+            exited = true;done();
+          } else if (channel !== 255 || body.length !== 1 || ![1,2].includes(body[0]!)) return done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_CHANNEL"));
+        });
+        socket.once("error",()=>done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_STREAM")));
+        socket.once("close",()=>done(new KubernetesRequestError("KUBERNETES_IMAGE_ARTIFACT_CLOSED")));
+        if (signal?.aborted) aborted();
+      });
+      if (!Array.isArray(raw) || raw.length !== files.length || new Set(raw.map(row=>row?.path)).size !== files.length || files.some(file=>!raw.some(row=>row && Object.keys(row).sort().join("|") === "bytes|gid|kind|mode|path|sha256|uid" && ["path","sha256","bytes","uid","gid","mode","kind"].every(key=>row[key] === file[key as keyof WorkspaceV2File])))) return fail("KUBERNETES_IMAGE_ARTIFACT_MISMATCH");
+      const after = current(await this.pod(runtimeId,signal)), finalIdentity = await this.identify(signal);
+      if (after.spec.nodeName !== before.spec.nodeName || finalIdentity.namespaceUid !== identity.namespaceUid) return fail("KUBERNETES_IMAGE_ORIGINAL_CHANGED");
+      return files.map(({path,sha256,bytes})=>({path,sha256,bytes}));
+    } finally { stdout.fill(0);socket.terminate(); }
   }
 
   async deletePod(runtimeId: string, expected: { uid: string; resourceVersion: string }, signal?: AbortSignal): Promise<void> {

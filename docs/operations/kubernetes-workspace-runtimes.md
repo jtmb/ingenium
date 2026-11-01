@@ -32,10 +32,28 @@ workspace, account, organization, credential, image and lifecycle requirements.
   The new evolution verifies the predecessor receipts and its exact reversible
   DDL change. Kubernetes metadata binds namespace/CA, Pod UID, original CRI ID,
   node UID/boot ID, start, immutable image, PVC and finite PID policy.
+- `workspace-manager.ts` and `scripts/kubernetes-runtime-manager.ts` compose a
+  separate Kubernetes manager without initializing the Docker/JobRun owners.
+  The existing private manager token and actual Core admission endpoints remain
+  authoritative. Original admission is rechecked around creation and bootstrap;
+  fresh placement verifies every approved runtime artifact over actual exec.
+  Namespace-wide claim-user checks include unlabelled Pods and require retained
+  Core retirement receipts for predecessor executions.
+- A read-only physical preflight runs before credential issuance or the Core
+  ABSENT-to-PROVISIONING transition. Missing PID policy, conflicting claim use
+  or an unavailable manager preserves the existing not-dispatched outcome.
+  Confirmed POST201 children get bounded cleanup after a failed provision. Lost
+  create outcomes are retained rather than adopted through names/labels.
+- Both the API's OpenCode target and the browser gateway use the fresh original
+  Pod address. The private proof binds it to namespace UID, Pod UID and original
+  container ID. Workspace terminals use the same original derived Basic
+  credential as OpenCode, and a separate bounded writable terminal home.
+  The gateway injects that credential for both audiences. Legacy Project
+  terminal/header behavior is unchanged.
 
 The original Core compiler passes101 inputs and copies only the three new141
-resources alongside150 unchanged resources. The API compiler passes337 source
-inputs/166 compiler roots, with298 runtime copier files and no dependency copies.
+resources alongside150 unchanged resources. The API compiler passes340 source
+inputs/169 compiler roots, with298 runtime copier files and no dependency copies.
 The WebSocket runtime and types are
 the already installed, locked versions8.21.3 and8.18.1. Only their two direct
 API dependency references were added to the lockfile. Unrelated npm peer,
@@ -72,7 +90,12 @@ failure/success evidence remain; no Windows recovery is inferred.
 
 These checks qualify transport and the graceful retirement transport, not the
 agent bootstrap, a Work turn, image approval, tenant execution or complete Core
-retirement. The lifecycle source has not yet been connected to the manager.
+retirement. A further actual model-free Pod measured all11 canonical runtime
+artifacts through the compiled fixed-command exec path. Hashes, sizes and file
+metadata matched an independent operator read of the same immutable image.
+The original container/Pod were bracketed around measurement; graceful shutdown,
+closed attachment and complete removal were observed. This validates the actual
+artifact transport, not approval of that older image for the new Work role.
 
 Both worker nodes currently report kubelet `podPidsLimit: -1`. Veyra's ordinary
 Docker defaults are256 PIDs and128 processes. The Pod planner rejects a missing
@@ -89,9 +112,10 @@ No host configuration, kernel, kubelet or runtime class was changed.
 
 ## Remaining integration
 
-1. Connect the Kubernetes original-provision, placement and retirement producer
-   to the same authenticated manager/Core lifecycle. Preserve the private
-   admission, current workspace authority and persisted original identities.
+1. Package and deploy the compiled manager composition with its actual
+   ServiceAccount, namespace-scoped Pod/PVC permissions, selected node identity
+   reads and protected flat configuration. Keep the existing chart publisher.
+   Do not mount a Docker socket, state claim or agent capability into it.
 2. Qualify141 in actual Core startup/reopen and populated historical-original
    migration. Keep137/138 recipes and their predecessor DDL receipts unchanged.
 3. Complete actual workspace image/bootstrap qualification and independent
@@ -108,3 +132,33 @@ No host configuration, kernel, kubelet or runtime class was changed.
 The new backend is source work in progress. Work is still unavailable in the
 compatibility preview; no production deployment or full release completion is
 claimed.
+
+## Operator configuration being prepared
+
+The existing protected `/run/ingenium-core126/approval.json` registry and its
+content-addressed manifest files also support an explicit
+`kubernetes-workspace-runtime-v1` role. The original Docker Project/JobRun
+validator is unchanged and cannot consume this role. Actual immutable image,
+bootstrap/MCP, denial/isolation and runtime qualification remain prerequisites
+to coordinator installation of an approval. No writable policy was installed.
+
+`INGENIUM_WORKSPACE_RUNTIME_IMAGE` selects the Work role image; absence preserves
+the existing `INGENIUM_USER_RUNTIME_IMAGE` setting. Likewise,
+`INGENIUM_WORKSPACE_RUNTIME_MANAGER_URL` selects its private service; absence
+preserves the existing manager URL. Neither setting changes JobRun's manager
+or image. Empty/invalid explicit values refuse instead of falling back.
+
+The manager reads only `/run/ingenium-kubernetes-runtime/config.json`. It must be
+a bounded root-owned flat regular file under a non-writable root-owned directory,
+with exactly `schemaVersion`, `namespace`, `workspaceMappings` and
+`nodePidPolicies`. The workspace/PVC/user/organization identities, actual node
+UID/boot/version, finite PID enforcement and expiry are validated before use.
+Changing the live file invalidates the manager rather than silently adopting a
+new configuration. Mount only the manager's projected Kubernetes credentials;
+workspace Pods retain `automountServiceAccountToken: false`.
+
+Still open: actual composed manager startup, failed/unknown outcome recovery
+across restart, Core failure/successor reconciliation, scoped workspace
+registration, exact candidate packaging, runtime policy installation and the
+full Work/Web/terminal/Git workflow. Source compilation and the separate actual
+transport checks do not close those gates.

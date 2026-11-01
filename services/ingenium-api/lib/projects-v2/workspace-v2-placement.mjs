@@ -1,5 +1,6 @@
 import {RequestExecutionError} from './request-execution-owner.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {isIP} from 'node:net';
 import {getDb,runtimes} from 'ingenium-core';
 import * as provision from 'ingenium-core/lib/tools/runtime-original-provision';
 import {revalidateRequestIdentity} from '../request-identity.js';
@@ -26,7 +27,18 @@ export function qualifyWorkspaceV2Placement(r,w,o,d,proof,installationId){
  ||proof.organizationId!==r.organizationId||proof.ownerUserId!==r.ownerUserId||proof.workspaceId!==w.id||proof.projectId!==null||proof.bindingHash!==w.storageMappingHash||proof.bindingEpoch!==w.securityEpoch||r.securityEpoch!==w.securityEpoch||o.bindingHash!==w.storageMappingHash||o.bindingEpoch!==w.securityEpoch||proof.health!=='healthy'||proof.state!=='running'
  ||!Array.isArray(proof.artifacts)||proof.artifacts.length!==d.files.length||d.files.some(f=>!proof.artifacts.some(p=>p.path===f.path&&p.sha256===f.sha256&&p.bytes===f.bytes))
  ||[r.absoluteExpiresAt,r.idleExpiresAt,...(r.leaseExpiresAt===null?[]:[r.leaseExpiresAt])].some(v=>!Number.isFinite(Date.parse(v))||Date.parse(v)<=now))return fail('WORKSPACE_V2_ORIGINAL_PLACEMENT_UNAVAILABLE');
+ if((o.backendKind==='kubernetes')!==(d.backendKind==='kubernetes')||(o.backendKind==='kubernetes'&&d.pullReference!==o.kubernetes.pullReference))return fail('WORKSPACE_V2_ORIGINAL_BACKEND_CHANGED');
+ qualifiedWorkspaceV2BackendAddress(o,proof);
  return Object.freeze({organizationId:w.organizationId,ownerUserId:w.ownerUserId,projectId:null,workspaceId:w.id,bindingHash:w.storageMappingHash,bindingEpoch:w.securityEpoch,status:'authorized',runtimeId:r.id,mode:'runtime',hostId:proof.hostId,environmentId:'managed-workspace-runtime-v2:'+installationId,available:true});
+}
+/** Metadata check only; callers must first qualify the authenticated original
+ * placement. The private target is never a browser-selected hostname. */
+export function qualifiedWorkspaceV2BackendAddress(original,proof){
+ if(original.backendKind!=='kubernetes'){if(proof.kubernetes!==undefined)return fail('WORKSPACE_V2_ORIGINAL_BACKEND_CHANGED');return undefined;}
+ const k=proof.kubernetes;
+ if(!k||Object.keys(k).sort().join('|')!=='backendAddress|containerId|namespaceUid|podUid|schemaVersion'||k.schemaVersion!==1||
+  k.namespaceUid!==original.kubernetes.namespaceUid||k.podUid!==original.kubernetes.podUid||k.containerId!==original.parentContainerId||typeof k.backendAddress!=='string'||!isIP(k.backendAddress))return fail('WORKSPACE_V2_ORIGINAL_BACKEND_CHANGED');
+ return k.backendAddress;
 }
 export async function withManagedWorkspaceV2Placement(request,selection,work){
  if(typeof work!=='function')return fail('WORKSPACE_V2_WORK_CALLBACK');const initial=current(request,selection);
@@ -38,4 +50,9 @@ export async function withManagedWorkspaceV2Placement(request,selection,work){
 export function resolveCurrentWorkspaceV2Execution(request,selection){
  const lease=local.getStore(),facts=current(request,selection);if(!lease?.active||lease.db!==facts.db||lease.key!==facts.key||!['READY','IDLE'].includes(facts.runtime.state))return fail('WORKSPACE_V2_ORIGINAL_PLACEMENT_CONTEXT_REQUIRED');
  return qualifyWorkspaceV2Placement(facts.runtime,facts.workspace,facts.original,facts.definition,lease.proof,facts.installationId);
+}
+export function resolveCurrentWorkspaceV2BackendAddress(request,selection){
+ resolveCurrentWorkspaceV2Execution(request,selection);
+ const lease=local.getStore(),facts=current(request,selection);
+ return qualifiedWorkspaceV2BackendAddress(facts.original,lease.proof)??facts.runtime.backendName;
 }

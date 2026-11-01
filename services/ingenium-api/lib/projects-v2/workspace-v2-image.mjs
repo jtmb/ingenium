@@ -51,13 +51,39 @@ export const WORKSPACE_V2_CASES=Object.freeze({
 });
 const deny=()=>{throw Object.assign(Error('WORKSPACE_V2_IMAGE_QUALIFICATION_UNAVAILABLE'),{code:'WORKSPACE_V2_IMAGE_QUALIFICATION_UNAVAILABLE',status:503});};
 /** Immutable source/artifact preflight, before any inert image process is run. */
-export function validateWorkspaceV2ImageInputs(sourceFiles,files){
- if(!Array.isArray(sourceFiles)||sourceFiles.length!==WORKSPACE_V2_SOURCE_INPUTS.length||new Set(sourceFiles.map(r=>r?.path)).size!==WORKSPACE_V2_SOURCE_INPUTS.length
- ||WORKSPACE_V2_SOURCE_INPUTS.some(path=>!sourceFiles.some(r=>r&&r.path===path&&/^[a-f0-9]{64}$/.test(r.sha256)&&Number.isSafeInteger(r.bytes)&&r.bytes>0&&r.bytes<=16*1024*1024))
+function validateImageInputs(sourceFiles,files,requiredSources){
+ if(!Array.isArray(sourceFiles)||sourceFiles.length!==requiredSources.length||new Set(sourceFiles.map(r=>r?.path)).size!==requiredSources.length
+ ||requiredSources.some(path=>!sourceFiles.some(r=>r&&r.path===path&&/^[a-f0-9]{64}$/.test(r.sha256)&&Number.isSafeInteger(r.bytes)&&r.bytes>0&&r.bytes<=16*1024*1024))
  ||!Array.isArray(files)||files.length!==WORKSPACE_V2_ARTIFACTS.length||new Set(files.map(r=>r?.path)).size!==WORKSPACE_V2_ARTIFACTS.length
  ||WORKSPACE_V2_ARTIFACTS.some(path=>!files.some(r=>r&&r.path===path&&/^[a-f0-9]{64}$/.test(r.sha256)&&Number.isSafeInteger(r.bytes)&&r.bytes>0&&r.bytes<=4*1024*1024&&r.uid===0&&r.gid===0&&r.kind==='file'&&Number.isSafeInteger(r.mode)&&r.mode>=0&&r.mode<=0o7777&&(r.mode&0o022)===0)))return deny();
  for(const [artifact,source]of workspaceRawBindings){const from=sourceFiles.find(r=>r.path===source),to=files.find(r=>r.path===artifact);if(!from||!to||from.sha256!==to.sha256||from.bytes!==to.bytes)return deny();}
  return {sourceFilesSha256:hash(sourceFiles),artifactSetSha256:hash(files)};
+}
+export function validateWorkspaceV2ImageInputs(sourceFiles,files){return validateImageInputs(sourceFiles,files,WORKSPACE_V2_SOURCE_INPUTS);}
+export const KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS=Object.freeze([...WORKSPACE_V2_SOURCE_INPUTS,
+ 'packages/ingenium-core/data/migrations/141_kubernetes_workspace_runtime.sql',
+ 'packages/ingenium-core/data/migrations/migration-141.mjs','packages/ingenium-core/data/migrations/migration-141.d.mts',
+ 'services/ingenium-api/lib/kubernetes/api-client.ts','services/ingenium-api/lib/kubernetes/workspace-pod.ts',
+ 'services/ingenium-api/lib/kubernetes/workspace-wire.ts','services/ingenium-api/lib/kubernetes/workspace-lifecycle.ts',
+ 'services/ingenium-api/lib/kubernetes/workspace-manager.ts','services/ingenium-api/scripts/kubernetes-runtime-manager.ts',
+ 'services/ingenium-api/lib/projects-v2/workspace-manager-core-client.ts',
+]);
+/** Explicit Work-only Kubernetes image role in the existing root approval
+ * registry. It grants neither legacy Project nor JobRun qualification. Root
+ * installs approval only after actual immutable image/bootstrap qualification. */
+export function validateKubernetesWorkspaceV1ImageManifest(manifest){
+ if(!manifest||Object.keys(manifest).sort().join('|')!=='config|imageId|kind|pullReference|schemaVersion|source|workspaceRuntimeV2'
+ ||manifest.schemaVersion!==1||manifest.kind!=='kubernetes-workspace-runtime-v1'||!/^sha256:[a-f0-9]{64}$/.test(manifest.imageId)
+ ||!/^[a-z0-9][a-z0-9./:_-]{0,254}@sha256:[a-f0-9]{64}$/.test(manifest.pullReference)
+ ||!manifest.source||Object.keys(manifest.source).sort().join('|')!=='revision|sha256'||!/^[a-f0-9]{40}$/.test(manifest.source.revision)||!/^[a-f0-9]{64}$/.test(manifest.source.sha256))return deny();
+ const c=manifest.config,x=manifest.workspaceRuntimeV2;
+ if(!c||Object.keys(c).sort().join('|')!=='Cmd|Entrypoint|User|WorkingDir'||typeof c.User!=='string'||c.User.length>128||typeof c.WorkingDir!=='string'||!c.WorkingDir.startsWith('/')||c.WorkingDir.length>1024
+ ||![c.Entrypoint,c.Cmd].every(value=>value===null||(Array.isArray(value)&&value.length<=32&&value.every(arg=>typeof arg==='string'&&arg.length<=4096)))
+ ||!x||Object.keys(x).sort().join('|')!=='credentialScopes|files|schemaVersion|sourceFiles|sourceFilesSha256'||x.schemaVersion!==2
+ ||JSON.stringify(x.credentialScopes)!==JSON.stringify(WORKSPACE_V2_CREDENTIAL_SCOPES))return deny();
+ const digests=validateImageInputs(x.sourceFiles,x.files,KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS);
+ if(x.sourceFilesSha256!==digests.sourceFilesSha256)return deny();
+ return manifest;
 }
 /** Pure structural validation only. This grants no image approval or execution. */
 export function validateWorkspaceV2ImageManifest(manifest){
@@ -74,10 +100,11 @@ export function validateWorkspaceV2ImageManifest(manifest){
  return manifest;
 }
 export function workspaceV2ImageDefinition(manifest,approval){
- validateWorkspaceV2ImageManifest(manifest);
+ const kubernetes=manifest?.kind==='kubernetes-workspace-runtime-v1';
+ if(kubernetes)validateKubernetesWorkspaceV1ImageManifest(manifest);else validateWorkspaceV2ImageManifest(manifest);
  if(!approval||manifest.imageId!==approval.imageId||manifest.source.revision!==approval.sourceRevision||manifest.source.sha256!==approval.sourceSha256||!Number.isSafeInteger(approval.validUntil)||approval.validUntil<=Date.now())return deny();
  const x=manifest.workspaceRuntimeV2;
- return Object.freeze({schemaVersion:2,imageId:manifest.imageId,manifestSha256:approval.manifestSha256,sourceRevision:approval.sourceRevision,sourceSha256:approval.sourceSha256,validUntil:approval.validUntil,imageConfig:manifest.config,credentialScopes:Object.freeze([...x.credentialScopes]),files:Object.freeze(x.files.map(r=>Object.freeze({...r})))});
+ return Object.freeze({schemaVersion:2,...(kubernetes?{backendKind:'kubernetes',pullReference:manifest.pullReference}:{}),imageId:manifest.imageId,manifestSha256:approval.manifestSha256,sourceRevision:approval.sourceRevision,sourceSha256:approval.sourceSha256,validUntil:approval.validUntil,imageConfig:manifest.config,credentialScopes:Object.freeze([...x.credentialScopes]),files:Object.freeze(x.files.map(r=>Object.freeze({...r})))});
 }
 /** Strict one-file unextended ustar extraction. Refuses links, PAX/GNU extensions,
  * duplicate entries, traversal, wrong owners/mode, checksum faults and trailing payload.

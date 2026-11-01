@@ -3,6 +3,7 @@ import { createServer as createHttpServer, request as httpRequest, type Incoming
 import { createServer as createHttpsServer } from "node:https";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
+import {isIP} from "node:net";
 import { getDashboardAllowedOrigins } from "../config/index.js";
 import { loadRuntimeGatewayToken } from "../lib/runtime-gateway-auth.js";
 import { cloudflareIngressForHost, cloudflareLauncherOriginAllowed } from "../lib/cloudflare-trusted-ingress.js";
@@ -21,8 +22,14 @@ export type RuntimeGatewayTransportConfig = {
 type ValidatedSession = {
   workspaceV2AuthHeader?: string; // private Core response only; never browser headers
   backendName: string;
+  backendAddress?: string; // actual original Pod address from authenticated private Core response
   session: { expiresAt: string; launcherOrigin: string };
 };
+function backendTarget(session:ValidatedSession):string{
+  if(session.backendAddress===undefined)return session.backendName;
+  if(!isIP(session.backendAddress))throw Error("WORKSPACE_V2_BACKEND_ADDRESS");
+  return session.backendAddress;
+}
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const COOKIE_NAMES: Record<Audience, string> = {
@@ -242,7 +249,7 @@ export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeSco
     if (PRIVATE_HEADERS.has(lower) || (!websocket && HOP_HEADERS.has(lower)) || lower === "host" || lower === "origin" || lower === "referer") continue;
     result[lower] = value;
   }
-  if(workspaceV2AuthHeader!==undefined){if(!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(workspaceV2AuthHeader))throw Error("WORKSPACE_V2_AUTH_HEADER");if(scope.audience==="web")result.authorization=workspaceV2AuthHeader;}
+  if(workspaceV2AuthHeader!==undefined){if(!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(workspaceV2AuthHeader))throw Error("WORKSPACE_V2_AUTH_HEADER");result.authorization=workspaceV2AuthHeader;}
   result.host = scope.host;
   if (scope.audience === "cli") result["x-ingenium-authenticated-user"] = "runtime";
   if (websocket) {
@@ -397,7 +404,7 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
   }
   const token = runtimeAudienceSessionCookie(request, scope.audience);
   const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
-  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName,resolved.workspaceV2AuthHeader)) {
+  if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, backendTarget(resolved),resolved.workspaceV2AuthHeader)) {
     reject(response, 503, "Runtime audience is unavailable", origin, scope.audience);
     return;
   }
@@ -435,7 +442,7 @@ async function proxyHttp(request: IncomingMessage, response: ServerResponse, sco
     })();
   };
   const upstream = httpRequest({
-    hostname: resolved.backendName,
+    hostname: backendTarget(resolved),
     port: BACKEND_PORTS[scope.audience],
     method: request.method,
     path: request.url,
@@ -472,7 +479,7 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
     return;
   }
   const upstream = httpRequest({
-    hostname: resolved.backendName,
+    hostname: backendTarget(resolved),
     port: BACKEND_PORTS[scope.audience],
     method: request.method,
     path: request.url,

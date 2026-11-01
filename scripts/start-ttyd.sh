@@ -21,11 +21,20 @@ for candidate in \
 done
 fi
 
+# Workspace audiences share the original runtime's private derived credential.
+# A generic proxy header cannot authenticate a different runtime at a reused IP.
+if [ "${INGENIUM_EXECUTION_SCOPE:-project}" = workspace ]; then
+  if [ -z "$opencode_server_password" ]; then echo "ERROR: workspace terminal secret unavailable"; exit 1; fi
+  mkdir -p /home/ingenium-ttyd/.config /home/ingenium-ttyd/.local/share /home/ingenium-ttyd/.tmp
+  set -- --credential "opencode:$opencode_server_password"
+else
+  set -- --auth-header X-Ingenium-Authenticated-User
+fi
+
 # Keep the browser-facing terminal free of inherited credentials. OpenCode's
 # server process owns MCP/plugin access; this process is only an attach client.
-# Browser authentication belongs to the local gateway, not the attach client.
-# ttyd's loopback bind, origin check, and injected header
-# keep the browser-to-terminal boundary in that gateway.
+# The gateway validates the browser session. Workspace ttyd also verifies the
+# original runtime's Basic credential; Project ttyd keeps its proxy-header mode.
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   HOME="/home/ingenium-ttyd" \
@@ -38,7 +47,7 @@ exec env -i \
     --port 4099 \
     --writable \
     --check-origin \
-    --auth-header X-Ingenium-Authenticated-User \
+    "$@" \
     --client-option rendererType=canvas \
     --client-option 'theme={"background":"#000000"}' \
     --client-option fontSize=14 \

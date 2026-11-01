@@ -2,7 +2,7 @@
  * A version2 canonical session row selects this path. No browser scope/password DTO grants. */
 import {getDb,authentication,runtimes} from 'ingenium-core';
 import {originalWorkspaceProfileV2} from './workspace-v2-control.mjs';
-import {qualifyWorkspaceV2Placement} from './workspace-v2-placement.mjs';
+import {qualifyWorkspaceV2Placement,qualifiedWorkspaceV2BackendAddress} from './workspace-v2-placement.mjs';
 import {inspectOriginalWorkspaceRuntimeV2} from '../runtime-manager-client.js';
 import {workspaceRuntimeCredentialsV2 as credentials} from 'ingenium-core';
 async function withOriginalWorkspaceGatewaySessionV2(input,work){
@@ -30,13 +30,14 @@ async function withOriginalWorkspaceGatewaySessionV2(input,work){
  qualifyWorkspaceV2Placement(context.runtime,context.workspace,context.original,context.definition,proof,installationId);
  if(db.prepare('SELECT instance_id FROM veyra_installation_identity WHERE singleton=1').get()?.instance_id!==installationId)throw Error('WORKSPACE_V2_GATEWAY_INSTALLATION_CHANGED');
  if(JSON.stringify(read())!==JSON.stringify(row))return undefined;
- return work(row);
+ return work(row,context.original,proof);
 }
 export function validateWorkspaceGatewaySessionV2(input){
- return withOriginalWorkspaceGatewaySessionV2(input,row=>{
+ return withOriginalWorkspaceGatewaySessionV2(input,(row,original,proof)=>{
   // Private server-to-server field. Never send/log this on public responses.
   const workspaceV2AuthHeader=credentials.workspaceRuntimeOpenCodeAuthV2(row.runtime_id);
-  return {backendName:row.backend_name,session:{expiresAt:row.expires_at,launcherOrigin:row.launcher_origin},workspaceV2AuthHeader};
+  const backendAddress=qualifiedWorkspaceV2BackendAddress(original,proof);
+  return {backendName:row.backend_name,...(backendAddress===undefined?{}:{backendAddress}),session:{expiresAt:row.expires_at,launcherOrigin:row.launcher_origin},workspaceV2AuthHeader};
  });
 }
 export function recordWorkspaceGatewayActivityV2(input,idleLeaseMs){

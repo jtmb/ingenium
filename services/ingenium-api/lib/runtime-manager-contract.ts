@@ -367,6 +367,7 @@ export function buildWorkspaceRuntimeContainerSpecV2(
       SecurityOpt: ["no-new-privileges:true"],
       Tmpfs: {
         "/home/appuser": `rw,nosuid,nodev,size=${input.limits.diskBytes},uid=1000,gid=1000,mode=0700`,
+        "/home/ingenium-ttyd": "rw,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
         "/home/appuser/.tmp": "rw,exec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",
         "/run/ingenium-runtime": "rw,noexec,nosuid,nodev,size=1048576,uid=1000,gid=1000,mode=0700",
         "/tmp": "rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700",

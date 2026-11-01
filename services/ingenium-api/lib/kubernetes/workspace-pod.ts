@@ -171,6 +171,7 @@ export function planKubernetesWorkspacePod(input: {
         volumeMounts: [
           { name: "workspace", mountPath: "/workspace", readOnly: false },
           { name: "home", mountPath: "/home/appuser" },
+          { name: "terminal-home", mountPath: "/home/ingenium-ttyd" },
           { name: "runtime", mountPath: "/run/ingenium-runtime" },
           { name: "temp", mountPath: "/tmp" },
           { name: "exec-temp", mountPath: "/home/appuser/.tmp" },
@@ -181,6 +182,7 @@ export function planKubernetesWorkspacePod(input: {
       volumes: [
         { name: "workspace", persistentVolumeClaim: { claimName: mapping.claimName, readOnly: false } },
         { name: "home", emptyDir: { medium: "Memory", sizeLimit: String(request.limits.diskBytes) } },
+        { name: "terminal-home", emptyDir: { medium: "Memory", sizeLimit: "67108864" } },
         { name: "runtime", emptyDir: { medium: "Memory", sizeLimit: "1048576" } },
         { name: "temp", emptyDir: { medium: "Memory", sizeLimit: "67108864" } },
         { name: "exec-temp", emptyDir: { medium: "Memory", sizeLimit: "67108864" } },

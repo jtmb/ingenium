@@ -228,12 +228,26 @@ export async function inspectOriginalCallRuntimeJobRole(runtimeId:string,signal:
 // Append to actual runtime-manager-client.ts; uses its ORIGINAL URL/token/raw-fetch owners.
 const workspaceOriginalResponses=new WeakMap<object,runtimeProvision.WorkspaceRuntimeOriginalProvision>();
 export function authenticatedOriginalWorkspaceProvisionV2(result:object):runtimeProvision.WorkspaceRuntimeOriginalProvision|undefined{return workspaceOriginalResponses.get(result);}
+function workspaceManagerUrl():URL{
+ const configured=process.env.INGENIUM_WORKSPACE_RUNTIME_MANAGER_URL;
+ if(configured===undefined)return managerUrl();
+ if(!configured||configured!==configured.trim())throw Error('WORKSPACE_V2_MANAGER_URL');
+ const url=new URL(configured);
+ if(url.protocol!=='http:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash||!/^[a-z0-9][a-z0-9.-]*$/i.test(url.hostname))throw Error('WORKSPACE_V2_MANAGER_URL');
+ return url;
+}
 async function originalWorkspaceManagerV2(path:string,body?:unknown):Promise<Record<string,unknown>>{
- const url=new URL(path,managerUrl()).href,signal=AbortSignal.timeout(45000);
+ const url=new URL(path,workspaceManagerUrl()).href,signal=AbortSignal.timeout(45000);
  const response=await originalCallManagerFetch(url,{method:body===undefined?'GET':'POST',redirect:'manual',credentials:'omit',cache:'no-store',signal,
  headers:{Authorization:'Bearer '+managerToken(),Accept:'application/json','Accept-Encoding':'identity',...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
  const consumed=await consumeBoundedRawJson(response,url,RAW_ASSISTANT_LIMITS.sessionBytes,signal);
  try{const envelope=consumed.json as {data?:Record<string,unknown>};if(!envelope?.data||typeof envelope.data!=='object')throw Error('WORKSPACE_V2_MANAGER_RESPONSE');return envelope.data;}finally{consumed.raw.fill(0);}
+}
+/** Read-only physical admission before Core issues credentials or leaves ABSENT.
+ * This response grants neither bootstrap custody, readiness nor execution. */
+export async function preflightOriginalWorkspaceRuntimeV2(input:{publicRequest:runtimeProvision.PublicWorkspaceProvisionRequest;definition:unknown;retiredPredecessors:unknown}):Promise<void>{
+ const request=runtimeProvision.publicWorkspaceProvisionRequest(input.publicRequest),raw=await originalWorkspaceManagerV2('/v2/workspace-runtimes/preflight',input);
+ if(Object.keys(raw).sort().join('|')!=='available|definitionSha256|requestSha256'||raw.available!==true||raw.requestSha256!==runtimeProvision.provisionHash(request)||raw.definitionSha256!==runtimeProvision.provisionHash(input.definition))throw Error('WORKSPACE_V2_PHYSICAL_PREFLIGHT_UNAVAILABLE');
 }
 export async function postOriginalWorkspaceRuntimeV2(payload:runtimeProvision.PublicWorkspaceProvisionRequest&{capability:string;capabilityExpiresAt:string;bootstrapNonce:string}):Promise<RuntimeManagerInspect>{
  const {capability:_capability,capabilityExpiresAt:_expires,bootstrapNonce:_nonce,...publicRequest}=payload;

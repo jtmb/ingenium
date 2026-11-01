@@ -7,8 +7,8 @@ import {revalidateRequestIdentity} from '../request-identity.js';
 import {runtimeNumberSetting} from '../runtime-provisioner.js';
 import {deploymentMode} from '../runtime-mode.js';
 import {loadManagerToken} from '../runtime-manager-auth.js';
-import {loadInstalledWorkspaceRuntimeV2ImageDefinition} from '../dot-v2/core126-installed-image-owner.js';
-import {postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2} from '../runtime-manager-client.js';
+import {loadInstalledWorkspaceRuntimeV2ImageDefinition,configuredWorkspaceRuntimeImageV2} from '../dot-v2/core126-installed-image-owner.js';
+import {preflightOriginalWorkspaceRuntimeV2,postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2} from '../runtime-manager-client.js';
 import {qualifyWorkspaceV2Placement} from './workspace-v2-placement.mjs';
 const pending=new Map(),inFlight=new Map(),notDispatchedStarts=new WeakMap();
 export function workspaceStartWasNotDispatched(error,runtimeId){return !!error&&typeof error==='object'&&notDispatchedStarts.get(error)===runtimeId;}
@@ -33,7 +33,14 @@ export async function provisionWorkspaceRuntimeFromRequestV2(request,selection){
   let definition;
   try{
    agents.validateProtectedOpenCodeDeployment();
-   definition=loadInstalledWorkspaceRuntimeV2ImageDefinition(process.env.INGENIUM_USER_RUNTIME_IMAGE);
+   definition=loadInstalledWorkspaceRuntimeV2ImageDefinition(configuredWorkspaceRuntimeImageV2());
+   if(definition.backendKind==='kubernetes'){
+    const w=first.workspace,r=first.runtime;
+    const probe=provision.publicWorkspaceProvisionRequest({schemaVersion:2,scopeKind:'workspace',projectId:null,originalRequestId:randomUUID(),runtimeId:r.id,
+      backendName:r.backendName,organizationId:r.organizationId,ownerUserId:r.ownerUserId,workspaceId:w.id,storagePath:w.storagePath,
+      storageMappingHash:w.storageMappingHash,securityEpoch:w.securityEpoch,revision:r.revision,limits:Object.fromEntries(['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].map(k=>[k,r[k]]))});
+    await preflightOriginalWorkspaceRuntimeV2({publicRequest:probe,definition,retiredPredecessors:retiredPredecessorsV2(dbOf(),probe)});
+   }
    if(currentUser(request,selection).key!==first.key)return fail('WORKSPACE_V2_SCOPE_CHANGED');
   }catch(cause){const error=Object.assign(Error('WORKSPACE_V2_START_NOT_DISPATCHED'),{code:'WORKSPACE_V2_START_NOT_DISPATCHED',status:503,cause});notDispatchedStarts.set(error,key);throw error;}
   // The sealed error above can exist only before credential issuance or runtime mutation.
@@ -62,14 +69,16 @@ function pendingEntry(selector){
 export function originalWorkspaceAdmissionV2(selector){
  const e=pendingEntry(selector);const current=loadInstalledWorkspaceRuntimeV2ImageDefinition(e.definition.imageId);
  if(JSON.stringify(current)!==JSON.stringify(e.definition))return fail('WORKSPACE_V2_IMAGE_APPROVAL_CHANGED');
- const rows=e.db.prepare('SELECT r.id,r.backend_name,r.state FROM runtime_instances r WHERE r.workspace_id=? AND r.id<>? ORDER BY r.id LIMIT 513').all(e.publicRequest.workspaceId,e.publicRequest.runtimeId);
+ return {publicRequest:e.publicRequest,definition:e.definition,nonce:e.nonce,credentialId:e.credentialId,retiredPredecessors:retiredPredecessorsV2(e.db,e.publicRequest)};
+}
+function retiredPredecessorsV2(db,publicRequest){
+ const rows=db.prepare('SELECT r.id,r.backend_name,r.state FROM runtime_instances r WHERE r.workspace_id=? AND r.id<>? ORDER BY r.id LIMIT 513').all(publicRequest.workspaceId,publicRequest.runtimeId);
  if(rows.length>512)return fail('WORKSPACE_V2_PREDECESSOR_BOUND');
- const retiredPredecessors=rows.map(row=>{
-  const original=provision.readWorkspaceRuntimeOriginalProvision(e.db,row.id),receipt=e.db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(row.id);
-  if(!original||!receipt||!['STOPPED','FAILED','REVOKED'].includes(row.state)||receipt.workspace_id!==e.publicRequest.workspaceId||receipt.parent_container_id!==original.parentContainerId||receipt.daemon_id!==original.daemonId||receipt.start_identity!==original.startIdentity||receipt.public_profile_sha256!==original.publicProfileSha256||receipt.original_request_sha256!==original.requestSha256)return fail('WORKSPACE_V2_PREDECESSOR_RETIREMENT_REQUIRED');
+ return rows.map(row=>{
+  const original=provision.readWorkspaceRuntimeOriginalProvision(db,row.id),receipt=db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(row.id);
+  if(!original||!receipt||!['STOPPED','FAILED','REVOKED'].includes(row.state)||receipt.workspace_id!==publicRequest.workspaceId||receipt.parent_container_id!==original.parentContainerId||receipt.daemon_id!==original.daemonId||receipt.start_identity!==original.startIdentity||receipt.public_profile_sha256!==original.publicProfileSha256||receipt.original_request_sha256!==original.requestSha256)return fail('WORKSPACE_V2_PREDECESSOR_RETIREMENT_REQUIRED');
   return {runtimeId:row.id,backendName:row.backend_name,original,finishedAt:receipt.finished_at,proofSha256:receipt.proof_sha256};
  });
- return {publicRequest:e.publicRequest,definition:e.definition,nonce:e.nonce,credentialId:e.credentialId,retiredPredecessors};
 }
 export function originalWorkspaceProfileV2(runtimeId){
  const db=dbOf(),r=runtimes.getWorkspaceRuntimeV2(runtimeId),raw=db.prepare('SELECT * FROM runtime_original_provisions WHERE runtime_id=? AND schema_version=2 AND project_id IS NULL').get(runtimeId);
