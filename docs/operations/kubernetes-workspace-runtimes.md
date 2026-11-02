@@ -354,3 +354,36 @@ omitted item type fields; explicit conflicting types, missing names/UIDs/revisio
 or wrong namespaces remain refused. Named-resource reads retain mandatory type
 metadata. The original API compiler passes, and an independent compiler projection
 matches its emitted client exactly. Final Work bootstrap remains a live gate.
+Failed Work starts now have a separate negative retirement path. An uncommitted
+creation must have no persisted runtime original and no backend binding. The
+current reservation (including an exact PROVISIONING-to-FAILED orphan event,
+when present) is checked before cleanup. The original manager may finish its
+retained POST201 child's cleanup; after a manager restart an operator must install
+a bounded failedProvisionApprovals entry in the existing root-owned manager
+configuration. That entry pins the public request, Pod/namespace/node/claim UIDs,
+node boot ID, terminal time and exact Pod spec hash. It expires within 30 minutes.
+Only a matching terminal child can be removed through this recovery permission.
+
+The browser's existing Stop action requests retirement through the actual
+authenticated Core/manager owners. Core atomically withdraws access and appends
+an immutable workspace_failed_provision_retirements record. Migration142 preserves
+all previous rows and recipes, verifies the exact predecessor trigger inverse,
+and permits a new generation only after ordinary original retirement or this
+distinct negative receipt. It never supplies a STARTING original, READY placement,
+reattachment or a reused credential. The existing Reopen action then creates
+a new identity. Existing originals and their retirement path stay unchanged.
+
+Native image publication, capacity-qualified preload and complete/unpacked
+verification must finish before a new Work birth. The manager rejects an image
+missing from the selected node's image inventory before issuing a credential or
+creating a Pod; the bounded bootstrap deadline is unchanged. Manifest v1 remains
+supported for existing immutable Work images. Manifest v2 also binds the142
+source inputs; neither contract supplies Project/JobRun image qualification.
+
+The focused migration check used a read-only serialization of the actual isolated
+qualification installation, retained the original serialized bytes in memory,
+and used SQLite's documented two-byte deserialize projection on a separate
+buffer. It preserved250 ordinary tables and the failed revision3 reservation,
+passed integrity and a second verification, and saved no database snapshot files.
+Core102 inputs/156 data resources and API340 inputs/169 compiler roots compile.
+Live cancellation, new-birth bootstrap and complete release acceptance remain open.

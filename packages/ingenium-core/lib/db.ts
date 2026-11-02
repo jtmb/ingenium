@@ -1,7 +1,8 @@
 import { installContext136, hasVerifiedContext136 } from '../data/migrations/migration-136.mjs';
 import { verifiedWorkspace137Definitions } from '../data/migrations/migration-137.mjs';
 import { verifiedWorkspaceExecutionDefinitions } from '../data/migrations/migration-138.mjs';
-import { installKubernetesWorkspace141, verifiedKubernetesWorkspaceDefinitions } from '../data/migrations/migration-141.mjs';
+import { verifiedKubernetesWorkspaceDefinitions } from '../data/migrations/migration-141.mjs';
+import { installFailedWorkspaceProvision142, verifiedFailedWorkspaceProvision142 } from '../data/migrations/migration-142.mjs';
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
@@ -2115,7 +2116,7 @@ function compareMigrationDefinitions(
       reference.close();
     }
   }
-  const evolved = files.every(file => ["100_mcp_credentials.sql","101_runtime_isolation.sql","102_runtime_browser_sessions.sql","109_runtime_workspace_supersession.sql","127_runtime_original_provisions.sql"].includes(file)) ? (verifiedKubernetesWorkspaceDefinitions(db) ?? verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)) : undefined;
+  const evolved = files.every(file => ["100_mcp_credentials.sql","101_runtime_isolation.sql","102_runtime_browser_sessions.sql","109_runtime_workspace_supersession.sql","127_runtime_original_provisions.sql"].includes(file)) ? (verifiedFailedWorkspaceProvision142(db) ?? verifiedKubernetesWorkspaceDefinitions(db) ?? verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)) : undefined;
   return objectNames.flatMap((name) => {
     if (evolved && Object.hasOwn(evolved,name)) return []; // exact new owned DDL already verified
     const row = db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name) as { sql?: string } | undefined;
@@ -2565,7 +2566,7 @@ function inspectMcpCredentialMigration(db: Database.Database): AuthenticationFou
       if (!actual.has(column)) missing.push(`mcp_credentials.${column} column`);
     }
     for (const column of actualColumns) {
-      if (!(MCP_CREDENTIAL_COLUMNS as readonly string[]).includes(column) && !(column === "schema_version" && (verifiedKubernetesWorkspaceDefinitions(db) ?? verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)))) missing.push(`mcp_credentials.${column} unexpected column`);
+      if (!(MCP_CREDENTIAL_COLUMNS as readonly string[]).includes(column) && !(column === "schema_version" && (verifiedFailedWorkspaceProvision142(db) ?? verifiedKubernetesWorkspaceDefinitions(db) ?? verifiedWorkspaceExecutionDefinitions(db) ?? verifiedWorkspace137Definitions(db)))) missing.push(`mcp_credentials.${column} unexpected column`);
     }
   }
   if (!securityEpochPresent) missing.push("service_principals.security_epoch column");
@@ -5567,7 +5568,7 @@ function runMigrations(db: Database.Database): void {
   // Dedicated Context/workspace evolutions keep the existing single writer; GPU135 is separately allocated.
   // Each dedicated evolution toggles FK before its own BEGIN on this connection.
   installContext136(db);
-  installKubernetesWorkspace141(db);
+  installFailedWorkspaceProvision142(db);
   enforceReservedBrokerInvariant(db);
 }
 

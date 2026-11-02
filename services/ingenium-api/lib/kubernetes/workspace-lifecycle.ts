@@ -69,7 +69,7 @@ interface Original {
   mapping: KubernetesWorkspaceMapping; nodePidPolicy: KubernetesNodePidPolicy; image: KubernetesWorkspaceImage; apiUrl: string;
   plan?: KubernetesWorkspacePodPlan; created?: KubernetesPod; original?: KubernetesWorkspaceRuntimeOriginalProvision;
   state: "creating" | "starting" | "stopping" | "stopped" | "unknown";
-  failedCleanup?:{podUid:string;podRemoved:boolean;observedAt:number};
+  failedCleanup?:{podUid:string;podRemoved:boolean;observedAt:number;specSha256:string;finishedAt:string};
   cleanupFailure?:string;
   attachmentJoined?:boolean;
 }
@@ -208,13 +208,15 @@ async function cleanupFailedOriginal(state:Original):Promise<void>{
     if(Date.now()>=deadline)return fail("KUBERNETES_FAILED_PROVISION_STOP_UNCONFIRMED");
     await pause(250,undefined,{signal});
   }
+  const specSha256=provisionHash(pod.spec),ended=pod.status?.containerStatuses?.[0]?.state.terminated?.finishedAt;
+  const finishedAt=stamp(ended)?ended:new Date().toISOString();
   await releaseFailedKubernetesWorkspaceAttach(request.runtimeId,created.metadata.uid);
   await client.finishPodRetirement(request.runtimeId,pod,signal);
   while(await client.pod(request.runtimeId,signal)){
     if(Date.now()>=deadline)return fail("KUBERNETES_FAILED_PROVISION_DELETE_UNCONFIRMED");
     await pause(100,undefined,{signal});
   }
-  state.failedCleanup={podUid:created.metadata.uid,podRemoved:true,observedAt:Date.now()};
+  state.failedCleanup={podUid:created.metadata.uid,podRemoved:true,observedAt:Date.now(),specSha256,finishedAt};
 }
 
 /** Fresh observation remains linked to the retained original, not adoption. The
@@ -305,4 +307,82 @@ export async function finishKubernetesWorkspaceRetirement(client:KubernetesApiCl
   }
   originals.delete(runtimeId);
   return {runtimeId,workspaceId:original.workspaceId,podUid:k.podUid,podRemoved:true as const};
+}
+
+
+/** Explicit root-installed permission to finish ONE terminal orphan after the
+ * original manager restarted. This is negative cleanup, never a runtime birth
+ * receipt, credential, placement or image approval. */
+export interface FailedKubernetesProvisionApproval {
+ schemaVersion:1;publicRequest:PublicWorkspaceProvisionRequest;podUid:string;
+ namespaceUid:string;nodeUid:string;nodeBootId:string;claimUid:string;
+ specSha256:string;finishedAt:string;validUntil:number;
+}
+export async function retireFailedKubernetesWorkspace(client:KubernetesApiClient,input:{
+ profile:import('../projects-v2/workspace-manager-core-client.js').WorkspaceManagerFailedV2;
+ mapping:KubernetesWorkspaceMapping;approval?:FailedKubernetesProvisionApproval;signal?:AbortSignal;
+}):Promise<import('ingenium-core').runtimes.FailedWorkspaceProvisionRetirementV2>{
+ const {profile,mapping,signal}=input,r=profile.runtime,w=profile.workspace;
+ if(!['PROVISIONING','FAILED'].includes(r.state)||r.backendContainerId!==null||r.workspaceId!==w.id||r.organizationId!==w.organizationId||r.ownerUserId!==w.ownerUserId||
+  r.securityEpoch!==w.securityEpoch||mapping.workspaceId!==w.id||mapping.organizationId!==w.organizationId||mapping.ownerUserId!==w.ownerUserId)return fail('KUBERNETES_FAILED_PROVISION_SCOPE');
+ const validateScope=(request:PublicWorkspaceProvisionRequest)=>{
+  if(request.runtimeId!==r.id||request.backendName!==r.backendName||request.workspaceId!==w.id||request.organizationId!==w.organizationId||
+   request.ownerUserId!==w.ownerUserId||request.securityEpoch!==w.securityEpoch||request.revision!==profile.provisioningRevision||request.storageMappingHash!==w.storageMappingHash||
+   request.storagePath!==w.storagePath||['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].some(k=>request.limits[k as keyof typeof request.limits]!==r[k]))return fail('KUBERNETES_FAILED_PROVISION_SCOPE');
+ };
+ const local=originals.get(r.id);
+ let request:PublicWorkspaceProvisionRequest,podUid:string,namespaceUid:string,claimUid:string,specSha256:string,finishedAt:string;
+ if(local?.created&&local.client===client&&!local.original&&local.state==='unknown'){
+  request=local.request;validateScope(request);
+  if(!local.failedCleanup)await cleanupFailedOriginal(local);
+  if(!local.failedCleanup||!local.plan)return fail('KUBERNETES_FAILED_PROVISION_STOP_UNCONFIRMED');
+  ({podUid,specSha256,finishedAt}=local.failedCleanup);namespaceUid=local.plan.namespaceUid;claimUid=local.mapping.claimUid;
+ }else{
+  const a=input.approval,now=Date.now(),uid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+  if(!a||Object.keys(a).sort().join('|')!=='claimUid|finishedAt|namespaceUid|nodeBootId|nodeUid|podUid|publicRequest|schemaVersion|specSha256|validUntil'||a.schemaVersion!==1||
+   ![a.podUid,a.namespaceUid,a.nodeUid,a.nodeBootId,a.claimUid].every(v=>typeof v==='string'&&uid.test(v))||!/^[a-f0-9]{64}$/.test(a.specSha256)||
+   !stamp(a.finishedAt)||Date.parse(a.finishedAt)>now||!Number.isSafeInteger(a.validUntil)||a.validUntil<=now+5000||a.validUntil>now+1800000)return fail('KUBERNETES_FAILED_PROVISION_OPERATOR_APPROVAL_REQUIRED');
+  request=publicWorkspaceProvisionRequest(a.publicRequest);validateScope(request);
+  ({podUid,namespaceUid,claimUid,specSha256,finishedAt}=a);
+  const identity=await client.identify(signal),claim=await client.claim(mapping.claimName,signal);
+  let pod=await client.pod(r.id,signal);
+  if(identity.namespaceUid!==namespaceUid||claim.metadata.uid!==claimUid||claimUid!==mapping.claimUid)return fail('KUBERNETES_FAILED_PROVISION_IDENTITY_CHANGED');
+  if(pod){
+   const status=pod.status?.containerStatuses?.length===1?pod.status.containerStatuses[0]:undefined,t=status?.state.terminated;
+   const nodeName=pod.spec.nodeName;
+   if(typeof nodeName!=='string')return fail('KUBERNETES_FAILED_PROVISION_NODE_REQUIRED');
+   const node=await client.node(nodeName,signal);
+   if(pod.metadata.uid!==podUid||pod.metadata.ownerReferences?.length||provisionHash(pod.spec)!==specSha256||
+    pod.metadata.annotations?.['com.ingenium.runtime.request']!==request.originalRequestId||
+    pod.metadata.annotations?.['com.ingenium.runtime.workspace']!==request.workspaceId||
+    pod.metadata.annotations?.['com.ingenium.runtime.storage']!==request.storageMappingHash||
+    pod.metadata.labels?.['com.ingenium.runtime.id']!==r.id||pod.metadata.labels?.['com.ingenium.runtime.organization']!==w.organizationId||
+    pod.metadata.labels?.['com.ingenium.runtime.owner']!==w.ownerUserId||pod.metadata.labels?.['com.ingenium.runtime.scope']!=='workspace'||
+    !['Failed','Succeeded'].includes(pod.status?.phase??'')||status?.name!=='workspace'||status.restartCount!==0||
+    typeof status.containerID!=='string'||!/^containerd:\/\/[a-f0-9]{64}$/.test(status.containerID)||t?.containerID!==status.containerID||
+    t.finishedAt!==finishedAt||!stamp(t.startedAt)||Date.parse(t.finishedAt)<Date.parse(t.startedAt)||!Number.isSafeInteger(t.exitCode)||
+    node.metadata.uid!==a.nodeUid||node.status?.nodeInfo?.bootID!==a.nodeBootId||!node.status.conditions?.some(c=>c.type==='Ready'&&c.status==='True'))return fail('KUBERNETES_FAILED_PROVISION_ORPHAN_CHANGED');
+   if(!pod.metadata.deletionTimestamp){
+    await client.deletePod(r.id,{uid:podUid,resourceVersion:pod.metadata.resourceVersion},signal);
+    pod=await client.pod(r.id,signal);
+    if(!pod||pod.metadata.uid!==podUid||!pod.metadata.deletionTimestamp)return fail('KUBERNETES_FAILED_PROVISION_DELETE_UNCONFIRMED');
+   }
+   await client.finishPodRetirement(r.id,pod,signal);
+   const until=Date.now()+8000;
+   for(;;){
+    const current=await client.pod(r.id,signal);if(!current)break;
+    if(current.metadata.uid!==podUid||Date.now()>=until)return fail('KUBERNETES_FAILED_PROVISION_DELETE_UNCONFIRMED');
+    await pause(100,undefined,{signal});
+   }
+  }
+ }
+ // The request and current reservation are checked even on the locally retained
+ // POST201 branch. A failed child cannot be substituted for another generation.
+ if(request.runtimeId!==r.id||request.backendName!==r.backendName||request.workspaceId!==w.id||request.organizationId!==w.organizationId||
+  request.ownerUserId!==w.ownerUserId||request.securityEpoch!==w.securityEpoch||request.revision!==profile.provisioningRevision||request.storageMappingHash!==w.storageMappingHash||
+  request.storagePath!==w.storagePath||['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].some(k=>request.limits[k as keyof typeof request.limits]!==r[k]))return fail('KUBERNETES_FAILED_PROVISION_SCOPE');
+ const identity=await client.identify(signal);
+ if(identity.namespaceUid!==namespaceUid||await client.pod(r.id,signal))return fail('KUBERNETES_FAILED_PROVISION_DELETE_UNCONFIRMED');
+ const observedAt=Date.now();
+ return {schemaVersion:1,kind:'failed-kubernetes-workspace-provision-retirement-v1',publicRequest:request,namespaceUid,claimUid,podUid,specSha256,finishedAt,observedAt,expiresAt:observedAt+5000};
 }

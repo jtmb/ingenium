@@ -269,6 +269,10 @@ export async function postOriginalWorkspaceRuntimeV2(payload:runtimeProvision.Pu
  const result:RuntimeManagerInspect={backendId:raw.backendId,backendName:expected.backendName,runtimeId:expected.runtimeId,imageRevision:raw.imageRevision,state:'running',health:typeof raw.health==='string'?raw.health:'unknown'};
  workspaceOriginalResponses.set(result,original);return result; // no DTO constructor/adoption path
 }
+export async function retireFailedManagedWorkspaceV2(runtimeId:string):Promise<runtimes.FailedWorkspaceProvisionRetirementV2>{
+ if(!UUID.test(runtimeId))throw Error('WORKSPACE_V2_RUNTIME_ID');
+ return await originalWorkspaceManagerV2('/v2/workspace-runtimes/'+runtimeId+'/failed-retirement',{}) as unknown as runtimes.FailedWorkspaceProvisionRetirementV2;
+}
 export async function inspectOriginalWorkspaceRuntimeV2(runtimeId:string):Promise<unknown>{
  if(!UUID.test(runtimeId))throw Error('WORKSPACE_V2_RUNTIME_ID');return await originalWorkspaceManagerV2('/v2/workspace-runtimes/'+runtimeId+'/placement');
 }

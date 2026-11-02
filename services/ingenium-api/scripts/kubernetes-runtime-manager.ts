@@ -36,12 +36,12 @@ export function startKubernetesRuntimeManager(){
         if(request.headers["content-type"]!=="application/json")throw Error("KUBERNETES_MANAGER_CONTENT_TYPE");
         data=await manager.provision(await body(request),controller.signal);
       }else{
-        const match=/^\/v2\/workspace-runtimes\/([a-f0-9-]{36})\/(placement|stop|finish-retirement)$/.exec(url.pathname);
+        const match=/^\/v2\/workspace-runtimes\/([a-f0-9-]{36})\/(placement|stop|finish-retirement|failed-retirement)$/.exec(url.pathname);
         if(!match){response.writeHead(404).end(JSON.stringify({error:{code:"NOT_FOUND"}}));return;}
         if(request.method==="GET"&&match[2]==="placement")data=await manager.placement(match[1]!,controller.signal);
-        else if(request.method==="POST"&&(match[2]==="stop"||match[2]==="finish-retirement")){
+        else if(request.method==="POST"&&(match[2]==="stop"||match[2]==="finish-retirement"||match[2]==="failed-retirement")){
           if(request.headers["content-type"]!=="application/json"||Object.keys(await body(request)).length)throw Error("KUBERNETES_MANAGER_STOP_BODY");
-          data=match[2]==="stop"?await manager.stop(match[1]!,controller.signal):await manager.finishRetirement(match[1]!,controller.signal);
+          data=match[2]==="failed-retirement"?await manager.failedRetirement(match[1]!,controller.signal):match[2]==="stop"?await manager.stop(match[1]!,controller.signal):await manager.finishRetirement(match[1]!,controller.signal);
         }else{response.writeHead(405).end(JSON.stringify({error:{code:"METHOD_NOT_ALLOWED"}}));return;}
       }
       if(!controller.signal.aborted)response.writeHead(200).end(JSON.stringify({data}));

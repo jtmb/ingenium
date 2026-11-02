@@ -8,11 +8,11 @@ import {workspaceManagerCoreV2} from "../projects-v2/workspace-manager-core-clie
 import type {WorkspaceV2ImageDefinition} from "../projects-v2/workspace-v2-image.mjs";
 import {KubernetesApiClient} from "./api-client.js";
 import {planKubernetesWorkspacePod,observeKubernetesWorkspaceClaim,type KubernetesWorkspaceMapping,type KubernetesNodePidPolicy,type KubernetesWorkspaceOffer} from "./workspace-pod.js";
-import {provisionKubernetesWorkspace,inspectKubernetesWorkspaceOriginal,retireKubernetesWorkspaceOriginal,finishKubernetesWorkspaceRetirement} from "./workspace-lifecycle.js";
+import {provisionKubernetesWorkspace,inspectKubernetesWorkspaceOriginal,retireKubernetesWorkspaceOriginal,finishKubernetesWorkspaceRetirement,retireFailedKubernetesWorkspace,type FailedKubernetesProvisionApproval} from "./workspace-lifecycle.js";
 
 const CONFIG="/run/ingenium-kubernetes-runtime/config.json",UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{code,status:503});};
-interface Configuration {schemaVersion:1;namespace:string;workspaceMappings:KubernetesWorkspaceMapping[];nodePidPolicies:KubernetesNodePidPolicy[]}
+interface Configuration {schemaVersion:1;namespace:string;workspaceMappings:KubernetesWorkspaceMapping[];nodePidPolicies:KubernetesNodePidPolicy[];failedProvisionApprovals?:FailedKubernetesProvisionApproval[]}
 function configuration():{value:Configuration;sha256:string}{
   for(const path of ["/run",dirname(CONFIG)]){
     const st=lstatSync(path);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==0||(st.mode&0o022)||realpathSync(path)!==path)return fail("KUBERNETES_MANAGER_CONFIGURATION_OWNER");
@@ -24,9 +24,10 @@ function configuration():{value:Configuration;sha256:string}{
     const bytes=readFileSync(fd),b=fstatSync(fd),c=lstatSync(CONFIG);
     if(bytes.length!==a.size||[b,c].some(st=>["dev","ino","size","mtimeMs","ctimeMs","uid","nlink","mode"].some(k=>st[k as keyof typeof st]!==a[k as keyof typeof a]))||realpathSync(CONFIG)!==CONFIG)return fail("KUBERNETES_MANAGER_CONFIGURATION_CHANGED");
     const value=parseStrictJobJson(bytes,65536) as Configuration;
-    if(!value||Object.keys(value).sort().join("|")!=="namespace|nodePidPolicies|schemaVersion|workspaceMappings"||value.schemaVersion!==1||typeof value.namespace!=="string"||
+    if(!value||!["namespace|nodePidPolicies|schemaVersion|workspaceMappings","failedProvisionApprovals|namespace|nodePidPolicies|schemaVersion|workspaceMappings"].includes(Object.keys(value).sort().join("|"))||value.schemaVersion!==1||typeof value.namespace!=="string"||
       !Array.isArray(value.workspaceMappings)||value.workspaceMappings.length<1||value.workspaceMappings.length>128||new Set(value.workspaceMappings.map(row=>row.workspaceId)).size!==value.workspaceMappings.length||
       !Array.isArray(value.nodePidPolicies)||value.nodePidPolicies.length<1||value.nodePidPolicies.length>32||new Set(value.nodePidPolicies.map(row=>row.nodeName)).size!==value.nodePidPolicies.length)return fail("KUBERNETES_MANAGER_CONFIGURATION");
+    if(value.failedProvisionApprovals!==undefined&&(!Array.isArray(value.failedProvisionApprovals)||value.failedProvisionApprovals.length>64||new Set(value.failedProvisionApprovals.map(x=>x?.publicRequest?.runtimeId)).size!==value.failedProvisionApprovals.length))return fail("KUBERNETES_FAILED_PROVISION_APPROVALS");
     return {value,sha256:createHash("sha256").update(bytes).digest("hex")};
   }finally{closeSync(fd);}
 }
@@ -65,7 +66,11 @@ export class KubernetesWorkspaceManager {
     const request=publicWorkspaceProvisionRequest(input.publicRequest as PublicWorkspaceProvisionRequest),definition=input.definition as WorkspaceV2ImageDefinition;
     const {mapping,policy}=this.#profile(request),identity=await this.#client.identify(signal),node=await this.#client.node(policy.nodeName,signal),claim=await this.#client.claim(mapping.claimName,signal);
     const runtimeClass=policy.schemaVersion===2?await this.#client.runtimeClass(policy.runtimeClassName,signal):undefined;
-    planKubernetesWorkspacePod({request,mapping,nodePidPolicy:policy,identity,node,claim,runtimeClass,image:immutableImage(definition),apiUrl:process.env.INGENIUM_RUNTIME_API_URL!});
+    const image=immutableImage(definition);
+    // A bounded bootstrap is not an image downloader. Operator publication and
+    // capacity-qualified native preload must finish before a new child birth.
+    if(!node.status?.images?.some(row=>Array.isArray(row.names)&&row.names.includes(image.pullReference)))return fail("KUBERNETES_RUNTIME_IMAGE_NOT_PRELOADED");
+    planKubernetesWorkspacePod({request,mapping,nodePidPolicy:policy,identity,node,claim,runtimeClass,image,apiUrl:process.env.INGENIUM_RUNTIME_API_URL!});
     await this.#predecessors(request,input.retiredPredecessors,mapping,signal);
     this.#config();return {available:true,requestSha256:provisionHash(request),definitionSha256:provisionHash(definition)};
   }
@@ -73,6 +78,15 @@ export class KubernetesWorkspaceManager {
     if(!Array.isArray(predecessors)||predecessors.length>512)return fail("KUBERNETES_PREDECESSOR_BOUND");
     const retired=new Map<string,{podUid:string;finishedAt:string}>();
     for(const row of predecessors){
+      if(row.failedProvision){
+        const f=row.failedProvision,p=publicWorkspaceProvisionRequest(f.publicRequest);
+        if(Object.keys(row).sort().join('|')!=='backendName|failedProvision|runtimeId'||f.schemaVersion!==1||f.kind!=='failed-kubernetes-workspace-provision-retirement-v1'||
+          p.runtimeId!==row.runtimeId||p.runtimeId===request.runtimeId||p.backendName!==row.backendName||p.workspaceId!==request.workspaceId||p.organizationId!==request.organizationId||
+          p.ownerUserId!==request.ownerUserId||p.storageMappingHash!==request.storageMappingHash||p.securityEpoch!==request.securityEpoch||f.claimUid!==mapping.claimUid||
+          f.namespaceUid!==(await this.#client.identify(signal)).namespaceUid||!UUID.test(f.podUid)||!Number.isFinite(Date.parse(f.finishedAt)))return fail("KUBERNETES_PREDECESSOR_SCOPE");
+        if(await this.#client.pod(p.runtimeId,signal))return fail("KUBERNETES_PREDECESSOR_NOT_RETIRED");
+        continue; // Negative absence permits a fresh identity, never attachment adoption.
+      }
       const o=decodeWorkspaceRuntimeOriginalProvision(row.original);
       if(o.backendKind!=="kubernetes"||o.runtimeId!==row.runtimeId||o.runtimeId===request.runtimeId||retired.has(o.runtimeId)||
         o.workspaceId!==request.workspaceId||o.organizationId!==request.organizationId||o.ownerUserId!==request.ownerUserId||o.bindingHash!==request.storageMappingHash||
@@ -140,6 +154,20 @@ export class KubernetesWorkspaceManager {
       organizationId:w.organizationId,ownerUserId:w.ownerUserId,projectId:null,workspaceId:w.id,bindingHash:w.storageMappingHash,bindingEpoch:w.securityEpoch,
       state:"running",health:"healthy",artifacts,definitionSha256:provisionHash(d),observedAt,expiresAt:observedAt+5000,
       kubernetes:{schemaVersion:1,namespaceUid:o.kubernetes.namespaceUid,podUid:o.kubernetes.podUid,containerId:o.parentContainerId,backendAddress:address}};
+  }
+  async failedRetirement(runtimeId:string,signal?:AbortSignal){
+    if(!UUID.test(runtimeId)||this.#inFlight.has(runtimeId))return fail("KUBERNETES_ORIGINAL_REQUEST");
+    this.#inFlight.add(runtimeId);
+    try{
+      const config=this.#config(),before=await workspaceManagerCoreV2("failed-provision",{runtimeId},signal);
+      const mapping=config.workspaceMappings.find(row=>row.workspaceId===before.workspace.id&&row.organizationId===before.workspace.organizationId&&row.ownerUserId===before.workspace.ownerUserId);
+      if(!mapping)return fail("KUBERNETES_FAILED_PROVISION_SCOPE");
+      const approval=config.failedProvisionApprovals?.find(row=>row.publicRequest?.runtimeId===runtimeId);
+      const proof=await retireFailedKubernetesWorkspace(this.#client,{profile:before,mapping,approval,signal});
+      const after=await workspaceManagerCoreV2("failed-provision",{runtimeId},signal);this.#config();
+      if(provisionHash(before)!==provisionHash(after))return fail("KUBERNETES_FAILED_PROVISION_CHANGED");
+      return proof;
+    }finally{this.#inFlight.delete(runtimeId);}
   }
   async stop(runtimeId:string,signal?:AbortSignal){
     if(!UUID.test(runtimeId)||this.#inFlight.has(runtimeId))return fail("KUBERNETES_ORIGINAL_REQUEST");

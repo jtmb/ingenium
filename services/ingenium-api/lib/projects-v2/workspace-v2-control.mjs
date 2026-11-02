@@ -8,7 +8,7 @@ import {runtimeNumberSetting} from '../runtime-provisioner.js';
 import {deploymentMode} from '../runtime-mode.js';
 import {loadManagerToken} from '../runtime-manager-auth.js';
 import {loadInstalledWorkspaceRuntimeV2ImageDefinition,configuredWorkspaceRuntimeImageV2} from '../dot-v2/core126-installed-image-owner.js';
-import {preflightOriginalWorkspaceRuntimeV2,postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2,finishOriginalWorkspaceRetirementV2} from '../runtime-manager-client.js';
+import {retireFailedManagedWorkspaceV2,preflightOriginalWorkspaceRuntimeV2,postOriginalWorkspaceRuntimeV2,inspectOriginalWorkspaceRuntimeV2,authenticatedOriginalWorkspaceProvisionV2,stopOriginalWorkspaceRuntimeV2,authenticatedWorkspaceRetirementV2,finishOriginalWorkspaceRetirementV2} from '../runtime-manager-client.js';
 import {qualifyWorkspaceV2Placement} from './workspace-v2-placement.mjs';
 const pending=new Map(),inFlight=new Map(),notDispatchedStarts=new WeakMap();
 export function workspaceStartWasNotDispatched(error,runtimeId){return !!error&&typeof error==='object'&&notDispatchedStarts.get(error)===runtimeId;}
@@ -127,6 +127,11 @@ function retiredPredecessorsV2(db,publicRequest){
  const rows=db.prepare('SELECT r.id,r.backend_name,r.state FROM runtime_instances r WHERE r.workspace_id=? AND r.id<>? ORDER BY r.id LIMIT 513').all(publicRequest.workspaceId,publicRequest.runtimeId);
  if(rows.length>512)return fail('WORKSPACE_V2_PREDECESSOR_BOUND');
  return rows.map(row=>{
+  const failed=runtimes.getFailedWorkspaceProvisionRetirementV2(row.id);
+  if(failed){
+   if(row.state!=='FAILED'||failed.publicRequest.workspaceId!==publicRequest.workspaceId||failed.publicRequest.organizationId!==publicRequest.organizationId||failed.publicRequest.ownerUserId!==publicRequest.ownerUserId||failed.publicRequest.storageMappingHash!==publicRequest.storageMappingHash||provision.readWorkspaceRuntimeOriginalProvision(db,row.id))return fail('WORKSPACE_V2_PREDECESSOR_RETIREMENT_REQUIRED');
+   return {runtimeId:row.id,backendName:row.backend_name,failedProvision:failed};
+  }
   const original=provision.readWorkspaceRuntimeOriginalProvision(db,row.id),receipt=db.prepare('SELECT * FROM workspace_execution_retirements WHERE runtime_id=?').get(row.id);
   if(!original||!receipt||!['STOPPED','FAILED','REVOKED'].includes(row.state)||receipt.workspace_id!==publicRequest.workspaceId||receipt.parent_container_id!==original.parentContainerId||receipt.daemon_id!==original.daemonId||receipt.start_identity!==original.startIdentity||receipt.public_profile_sha256!==original.publicProfileSha256||receipt.original_request_sha256!==original.requestSha256)return fail('WORKSPACE_V2_PREDECESSOR_RETIREMENT_REQUIRED');
   return {runtimeId:row.id,backendName:row.backend_name,original:wireWorkspaceOriginalV2(original),finishedAt:receipt.finished_at,proofSha256:receipt.proof_sha256};
@@ -147,7 +152,7 @@ function manager(request){
  * Only these exact private paths receive the original manager/bootstrap audiences. */
 export function workspaceV2PrivateIngress(req,res,next){
  const path=req.path;
- if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/commit','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/internal/workspace-runtime-v2/retired','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
+ if(!['/api/v1/internal/workspace-runtime-v2/admission','/api/v1/internal/workspace-runtime-v2/commit','/api/v1/internal/workspace-runtime-v2/original','/api/v1/internal/workspace-runtime-v2/retirement','/api/v1/internal/workspace-runtime-v2/retired','/api/v1/internal/workspace-runtime-v2/failed-provision','/api/v1/runtime/workspace-v2/bootstrap'].includes(path))return next();
  try{
   if(req.method!=='POST'||req.originalUrl!==path||!req.body||JSON.stringify(req.body).length>(path.endsWith('/commit')?16384:2048))return fail('WORKSPACE_V2_PRIVATE_INPUT');
   let data;
@@ -163,7 +168,7 @@ export function workspaceV2PrivateIngress(req,res,next){
    manager(req);
    if(path.endsWith('/commit'))data=commitOriginalWorkspaceFromManagerV2(req.body);
    else if(path.endsWith('/admission')){if(Object.keys(req.body).sort().join('|')!=='requestId|requestSha256|runtimeId')return fail('WORKSPACE_V2_ADMISSION_INPUT');data=originalWorkspaceAdmissionV2(req.body);}
-   else{if(Object.keys(req.body).join('|')!=='runtimeId')return fail('WORKSPACE_V2_PROFILE_INPUT');data=path.endsWith('/retirement')?originalWorkspaceRetirementProfileV2(req.body.runtimeId):path.endsWith('/retired')?originalWorkspaceRetiredProfileV2(req.body.runtimeId):originalWorkspaceProfileV2(req.body.runtimeId);}
+   else{if(Object.keys(req.body).join('|')!=='runtimeId')return fail('WORKSPACE_V2_PROFILE_INPUT');data=path.endsWith('/failed-provision')?failedWorkspaceProvisionProfileV2(req.body.runtimeId):path.endsWith('/retirement')?originalWorkspaceRetirementProfileV2(req.body.runtimeId):path.endsWith('/retired')?originalWorkspaceRetiredProfileV2(req.body.runtimeId):originalWorkspaceProfileV2(req.body.runtimeId);}
   }
   res.status(200).json({data});
  }catch(error){res.status(error.status??503).json({error:{code:error.code??'WORKSPACE_V2_PRIVATE_UNAVAILABLE'}});}
@@ -188,6 +193,15 @@ export function requireOriginalWorkspaceMcpAdmissionV2(c,nonce){
  if(!original||!r||!['STARTING','READY','IDLE'].includes(r.state)||original.projectId!==null||original.workspaceId!==c.workspaceId||original.organizationId!==c.organizationId||original.ownerUserId!==c.ownerUserId||original.bindingHash!==c.bindingHash||original.bindingEpoch!==c.bindingEpoch||original.parentContainerId!==r.backendContainerId)return fail('WORKSPACE_MCP_PERSISTED_ORIGINAL_REQUIRED');
 }
 
+function failedWorkspaceProvisionProfileV2(runtimeId){
+ const runtime=runtimes.getWorkspaceRuntimeV2(runtimeId),workspace=runtime&&runtimes.getAuthorizedWorkspaceV2(runtime.workspaceId);
+ if(!runtime||!workspace||!['PROVISIONING','FAILED'].includes(runtime.state)||runtime.backendContainerId!==null||workspace.status!=='authorized'||
+  workspace.ownerUserId!==runtime.ownerUserId||workspace.organizationId!==runtime.organizationId||workspace.securityEpoch!==runtime.securityEpoch||
+  provision.readWorkspaceRuntimeOriginalProvision(dbOf(),runtimeId))return fail('WORKSPACE_V2_FAILED_PROVISION_PROFILE_UNAVAILABLE');
+ const orphan=runtime.state==='FAILED'?dbOf().prepare("SELECT 1 FROM runtime_activity_events WHERE runtime_id=? AND event_type='orphaned' AND from_state='PROVISIONING' AND to_state='FAILED' AND revision=? AND actor_type='system' AND actor_id='runtime-reconciler'").get(runtime.id,runtime.revision):undefined;
+ if(runtime.state==='FAILED'&&!orphan)return fail('WORKSPACE_V2_FAILED_PROVISION_PROFILE_UNAVAILABLE');
+ return {runtime,workspace,provisioningRevision:runtime.state==='FAILED'?runtime.revision-1:runtime.revision};
+}
 function originalWorkspaceRetirementProfileV2(runtimeId){
  const r=runtimes.getWorkspaceRuntimeV2(runtimeId),db=dbOf(),o=provision.readWorkspaceRuntimeOriginalProvision(db,runtimeId),w=o&&runtimes.getAuthorizedWorkspaceV2(o.workspaceId);
  if(!r||!o||!w||r.state!=='STOPPING'||r.backendContainerId!==o.parentContainerId||r.workspaceId!==o.workspaceId||w.id!==o.workspaceId||r.ownerUserId!==o.ownerUserId||r.organizationId!==o.organizationId||w.ownerUserId!==o.ownerUserId||w.organizationId!==o.organizationId||w.storageMappingHash!==o.bindingHash) return fail('WORKSPACE_V2_RETIREMENT_PROFILE_UNAVAILABLE');
@@ -204,6 +218,12 @@ export async function stopWorkspaceRuntimeFromRequestV2(request,selection){
  inFlight.set(first.runtime.id,'retirement');
  try{
   const original=provision.readWorkspaceRuntimeOriginalProvision(dbOf(),first.runtime.id);
+  if(!original&&first.runtime.backendContainerId===null&&(first.runtime.state==='PROVISIONING'||first.runtime.state==='FAILED'&&!runtimes.getFailedWorkspaceProvisionRetirementV2(first.runtime.id))){
+   const proof=await retireFailedManagedWorkspaceV2(first.runtime.id),same=currentUser(request,selection);
+   if(same.key!==first.key)return fail('WORKSPACE_V2_RETIREMENT_SCOPE_CHANGED');
+   return runtimes.recordFailedWorkspaceProvisionRetirementV2(first.runtime.id,first.runtime.revision,proof,'runtime-manager');
+  }
+  if(!original&&first.runtime.state==='FAILED'&&runtimes.getFailedWorkspaceProvisionRetirementV2(first.runtime.id))return first.runtime;
   if(original?.backendKind==='kubernetes'&&['STOPPED','FAILED'].includes(first.runtime.state)){
    originalWorkspaceRetiredProfileV2(first.runtime.id);
    await finishOriginalWorkspaceRetirementV2(first.runtime.id);
@@ -223,7 +243,7 @@ export function prepareWorkspaceSuccessorFromRequestV2(request,selection){
  const first=currentUser(request,selection),r=first.runtime;
  if(!['STOPPED','FAILED'].includes(r.state)||inFlight.has(r.id))return fail('WORKSPACE_V2_RETIRED_RUNTIME_REQUIRED');
  const receipt=dbOf().prepare('SELECT runtime_id FROM workspace_execution_retirements WHERE runtime_id=?').get(r.id);
- if(!receipt)return fail('WORKSPACE_V2_RETIREMENT_REQUIRED');
+ if(!receipt&&!runtimes.getFailedWorkspaceProvisionRetirementV2(r.id))return fail('WORKSPACE_V2_RETIREMENT_REQUIRED');
  const current=dbOf().prepare('SELECT runtime_id FROM workspace_execution_generations WHERE workspace_id=? ORDER BY generation DESC LIMIT 1').get(r.workspaceId);
  if(current?.runtime_id!==r.id||currentUser(request,selection).key!==first.key)return fail('WORKSPACE_V2_SCOPE_CHANGED');
  return runtimes.createWorkspaceRuntimeV2(r.workspaceId,Object.fromEntries(['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].map(key=>[key,r[key]])));

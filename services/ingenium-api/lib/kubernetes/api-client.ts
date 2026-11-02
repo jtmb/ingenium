@@ -74,6 +74,7 @@ export interface KubernetesNode extends KubernetesResource {
   kind: "Node";
   status?: {
     conditions?: Array<{ type: string; status: string }>;
+    images?: Array<{names?:string[];sizeBytes?:number}>;
     nodeInfo?: { bootID: string; kernelVersion: string; containerRuntimeVersion: string; kubeletVersion: string };
   };
 }

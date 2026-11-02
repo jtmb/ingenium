@@ -1,4 +1,4 @@
-import {readWorkspaceRuntimeOriginalProvision,provisionHash} from './runtime-original-provision.js';
+import {readWorkspaceRuntimeOriginalProvision,provisionHash,publicWorkspaceProvisionRequest} from './runtime-original-provision.js';
 import {insertWorkspaceRuntimeOriginalProvision,type WorkspaceRuntimeOriginalProvision} from './runtime-original-provision.js';
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
@@ -1451,5 +1451,56 @@ export function recordWorkspaceRuntimeRetirementV2(runtimeId:string,expectedRevi
   if(prior){if(prior.parent_container_id!==o.parentContainerId||prior.daemon_id!==o.daemonId||prior.start_identity!==o.startIdentity||prior.public_profile_sha256!==o.publicProfileSha256||prior.original_request_sha256!==o.requestSha256)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');}
   else db.prepare(`INSERT INTO workspace_execution_retirements(runtime_id,workspace_id,parent_container_id,daemon_id,start_identity,public_profile_sha256,original_request_sha256,observed_at,finished_at,proof_sha256)VALUES(?,?,?,?,?,?,?,?,?,?)`).run(r.id,r.workspace_id,o.parentContainerId,o.daemonId,o.startIdentity,o.publicProfileSha256,o.requestSha256,proof.observedAt,proof.finishedAt,provisionHash(proof));
   const next=db.prepare('SELECT * FROM runtime_instances WHERE id=?').get(r.id) as WorkspaceRuntimeRowV2;appendWorkspaceEventV2(next,'state_changed','manager',actorId,r.state);return runtimeV2Dto(next);
+ });checkpointAfterWrite();return result;
+}
+
+
+// A failed create can retire only its negative reservation. It supplies neither
+// a runtime original nor an executable placement or an ordinary retirement.
+export interface FailedWorkspaceProvisionRetirementV2 {
+ schemaVersion:1;kind:'failed-kubernetes-workspace-provision-retirement-v1';
+ publicRequest:import('./runtime-original-provision.js').PublicWorkspaceProvisionRequest;
+ namespaceUid:string;claimUid:string;podUid:string;specSha256:string;
+ finishedAt:string;observedAt:number;expiresAt:number;
+}
+export function getFailedWorkspaceProvisionRetirementV2(runtimeId:string):FailedWorkspaceProvisionRetirementV2|undefined {
+ const row=getDb(process.env.INGENIUM_CORE_DB_PATH).prepare('SELECT * FROM workspace_failed_provision_retirements WHERE runtime_id=?').get(runtimeId) as {public_request_json:string;namespace_uid:string;claim_uid:string;pod_uid:string;spec_sha256:string;finished_at:string;observed_at:number;proof_sha256:string}|undefined;
+ if(!row)return undefined;
+ const proof:FailedWorkspaceProvisionRetirementV2={schemaVersion:1,kind:'failed-kubernetes-workspace-provision-retirement-v1',
+  publicRequest:publicWorkspaceProvisionRequest(JSON.parse(row.public_request_json)),namespaceUid:row.namespace_uid,claimUid:row.claim_uid,podUid:row.pod_uid,
+  specSha256:row.spec_sha256,finishedAt:row.finished_at,observedAt:row.observed_at,expiresAt:row.observed_at+5000};
+ if(provisionHash(proof)!==row.proof_sha256)throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+ return proof;
+}
+export function recordFailedWorkspaceProvisionRetirementV2(runtimeId:string,expectedRevision:number,proof:FailedWorkspaceProvisionRetirementV2,actorId:string):WorkspaceRuntimeInstanceV2 {
+ const result=execTransaction(()=>{
+  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),r=workspaceRetirementHead(db,runtimeId,expectedRevision),w=getAuthorizedWorkspaceV2(r.workspace_id),now=Date.now();
+  const expectedKeys='claimUid|expiresAt|finishedAt|kind|namespaceUid|observedAt|podUid|publicRequest|schemaVersion|specSha256';
+  if(!proof||Object.keys(proof).sort().join('|')!==expectedKeys||proof.schemaVersion!==1||proof.kind!=='failed-kubernetes-workspace-provision-retirement-v1'||
+   !['namespaceUid','claimUid','podUid'].every(key=>typeof proof[key as keyof typeof proof]==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proof[key as keyof typeof proof] as string))||
+   !/^[a-f0-9]{64}$/.test(proof.specSha256)||!Number.isSafeInteger(proof.observedAt)||!Number.isSafeInteger(proof.expiresAt)||proof.observedAt>now||now>=proof.expiresAt||proof.expiresAt!==proof.observedAt+5000||
+   !Number.isFinite(Date.parse(proof.finishedAt))||Date.parse(proof.finishedAt)>proof.observedAt||!['PROVISIONING','FAILED'].includes(r.state)||r.backend_container_id!==null||!w||w.status!=='authorized'||
+   readWorkspaceRuntimeOriginalProvision(db,runtimeId))throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const request=publicWorkspaceProvisionRequest(proof.publicRequest);
+  const orphan=r.state==='FAILED'?db.prepare("SELECT 1 FROM runtime_activity_events WHERE runtime_id=? AND event_type='orphaned' AND from_state='PROVISIONING' AND to_state='FAILED' AND revision=? AND actor_type='system' AND actor_id='runtime-reconciler'").get(r.id,r.revision):undefined;
+  if(r.state==='FAILED'&&(!orphan||r.active_connections!==0||r.active_generations!==0||r.lease_owner_hash!==null||r.lease_expires_at!==null))throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const provisioningRevision=r.state==='FAILED'?r.revision-1:r.revision;
+  if(request.runtimeId!==r.id||request.backendName!==r.backend_name||request.workspaceId!==w.id||request.organizationId!==r.organization_id||
+   request.ownerUserId!==r.owner_user_id||request.securityEpoch!==r.security_epoch||request.revision!==provisioningRevision||request.storageMappingHash!==w.storageMappingHash||request.storagePath!==w.storagePath||
+   ['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].some(key=>request.limits[key as keyof RuntimeLimits]!==runtimeV2Dto(r)[key as keyof RuntimeLimits]))throw new RuntimeConflictError('SCOPE_UNAVAILABLE');
+  const at=new Date(now).toISOString();
+  db.prepare('UPDATE mcp_credentials SET revoked_at=? WHERE schema_version=2 AND workspace_id=? AND revoked_at IS NULL').run(at,w.id);
+  db.prepare('UPDATE runtime_capability_bindings SET revoked_at=? WHERE runtime_id=? AND revoked_at IS NULL').run(at,r.id);
+  db.prepare('UPDATE runtime_browser_sessions SET revoked_at=? WHERE runtime_id=? AND revoked_at IS NULL').run(at,r.id);
+  db.prepare('UPDATE runtime_browser_launch_tickets SET consumed_at=? WHERE runtime_id=? AND consumed_at IS NULL').run(at,r.id);
+  if(r.state==='PROVISIONING'){
+   const changed=db.prepare("UPDATE runtime_instances SET state='FAILED',revision=revision+1,active_connections=0,active_generations=0,lease_owner_hash=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND revision=?").run(at,r.id,r.revision);
+   if(changed.changes!==1)throw new RuntimeConflictError('REVISION_CONFLICT');
+  }
+  db.prepare('INSERT INTO workspace_failed_provision_retirements(runtime_id,workspace_id,public_request_json,pod_uid,namespace_uid,claim_uid,spec_sha256,observed_at,finished_at,proof_sha256) VALUES(?,?,?,?,?,?,?,?,?,?)')
+   .run(r.id,w.id,JSON.stringify(request),proof.podUid,proof.namespaceUid,proof.claimUid,proof.specSha256,proof.observedAt,proof.finishedAt,provisionHash(proof));
+  const next=db.prepare('SELECT * FROM runtime_instances WHERE id=?').get(r.id) as WorkspaceRuntimeRowV2;
+  appendWorkspaceEventV2(next,'failed_creation_retired','manager',actorId,r.state);
+  return runtimeV2Dto(next);
  });checkpointAfterWrite();return result;
 }

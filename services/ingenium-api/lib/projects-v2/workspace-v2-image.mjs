@@ -68,12 +68,13 @@ export const KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS=Object.freeze([...WORKSPACE_V
  'services/ingenium-api/lib/kubernetes/workspace-manager.ts','services/ingenium-api/scripts/kubernetes-runtime-manager.ts',
  'services/ingenium-api/lib/projects-v2/workspace-manager-core-client.ts',
 ]);
+export const KUBERNETES_WORKSPACE_V2_SOURCE_INPUTS=Object.freeze([...KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS,'packages/ingenium-core/data/migrations/142_failed_workspace_provision.sql','packages/ingenium-core/data/migrations/migration-142.mjs','packages/ingenium-core/data/migrations/migration-142.d.mts']);
 /** Explicit Work-only Kubernetes image role in the existing root approval
  * registry. It grants neither legacy Project nor JobRun qualification. Root
  * installs approval only after actual immutable image/bootstrap qualification. */
 export function validateKubernetesWorkspaceV1ImageManifest(manifest){
  if(!manifest||Object.keys(manifest).sort().join('|')!=='config|imageId|kind|pullReference|schemaVersion|source|workspaceRuntimeV2'
- ||manifest.schemaVersion!==1||manifest.kind!=='kubernetes-workspace-runtime-v1'||!/^sha256:[a-f0-9]{64}$/.test(manifest.imageId)
+ ||manifest.schemaVersion!==1||!['kubernetes-workspace-runtime-v1','kubernetes-workspace-runtime-v2'].includes(manifest.kind)||!/^sha256:[a-f0-9]{64}$/.test(manifest.imageId)
  ||!/^[a-z0-9][a-z0-9./:_-]{0,254}@sha256:[a-f0-9]{64}$/.test(manifest.pullReference)
  ||!manifest.source||Object.keys(manifest.source).sort().join('|')!=='revision|sha256'||!/^[a-f0-9]{40}$/.test(manifest.source.revision)||!/^[a-f0-9]{64}$/.test(manifest.source.sha256))return deny();
  const c=manifest.config,x=manifest.workspaceRuntimeV2;
@@ -81,7 +82,7 @@ export function validateKubernetesWorkspaceV1ImageManifest(manifest){
  ||![c.Entrypoint,c.Cmd].every(value=>value===null||(Array.isArray(value)&&value.length<=32&&value.every(arg=>typeof arg==='string'&&arg.length<=4096)))
  ||!x||Object.keys(x).sort().join('|')!=='credentialScopes|files|schemaVersion|sourceFiles|sourceFilesSha256'||x.schemaVersion!==2
  ||JSON.stringify(x.credentialScopes)!==JSON.stringify(WORKSPACE_V2_CREDENTIAL_SCOPES))return deny();
- const digests=validateImageInputs(x.sourceFiles,x.files,KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS);
+ const digests=validateImageInputs(x.sourceFiles,x.files,manifest.kind==='kubernetes-workspace-runtime-v2'?KUBERNETES_WORKSPACE_V2_SOURCE_INPUTS:KUBERNETES_WORKSPACE_V1_SOURCE_INPUTS);
  if(x.sourceFilesSha256!==digests.sourceFilesSha256)return deny();
  return manifest;
 }
@@ -100,7 +101,7 @@ export function validateWorkspaceV2ImageManifest(manifest){
  return manifest;
 }
 export function workspaceV2ImageDefinition(manifest,approval){
- const kubernetes=manifest?.kind==='kubernetes-workspace-runtime-v1';
+ const kubernetes=['kubernetes-workspace-runtime-v1','kubernetes-workspace-runtime-v2'].includes(manifest?.kind);
  if(kubernetes)validateKubernetesWorkspaceV1ImageManifest(manifest);else validateWorkspaceV2ImageManifest(manifest);
  if(!approval||manifest.imageId!==approval.imageId||manifest.source.revision!==approval.sourceRevision||manifest.source.sha256!==approval.sourceSha256||!Number.isSafeInteger(approval.validUntil)||approval.validUntil<=Date.now())return deny();
  const x=manifest.workspaceRuntimeV2;
