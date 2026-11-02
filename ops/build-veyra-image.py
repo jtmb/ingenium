@@ -103,9 +103,9 @@ def main():
  # Package the same current Core/API inputs accepted by their original compilers.
  # This binds the existing compiler view to committed source without rebuilding it.
  owned=json.loads((c/'.task-owner.json').read_text());frozen=p/'coordination/integration'
- need(owned['owner']==OWNER and owned['currentCoreCompiledFreeze']=='kubernetes-core-build-r142-r3.json'and owned['currentApiInputFreeze']=='kubernetes-api-input-freeze-r18.json','Current Kubernetes Core/API compiler view required')
- core_build=json.loads((frozen/'kubernetes-core-build-r142-r3.json').read_text())
- api_build=json.loads((frozen/'kubernetes-api-build-r18.json').read_text())
+ need(owned['owner']==OWNER and owned['currentCoreCompiledFreeze']=='kubernetes-core-build-r142-r4.json'and owned['currentApiInputFreeze']=='kubernetes-api-input-freeze-r19.json','Current Kubernetes Core/API compiler view required')
+ core_build=json.loads((frozen/'kubernetes-core-build-r142-r4.json').read_text())
+ api_build=json.loads((frozen/'kubernetes-api-build-r19.json').read_text())
  api_inputs=json.loads((frozen/owned['currentApiInputFreeze']).read_text())
  core_runtime=json.loads((frozen/owned['currentCoreRuntimeFreeze']).read_text())
  need(core_build['complete']and core_build['compilerStatus']==0 and api_build['complete']and api_build['compilerStatus']==0 and api_build['inventorySha256']==api_inputs['apiInventorySha256']and core_runtime['complete'],'Successful current Core/API builds required')

@@ -1191,6 +1191,8 @@ export function transitionWorkspaceRuntimeV2(input: {
     insertWorkspaceRuntimeOriginalProvision(db,current,input,timestamp); // same original STARTING transaction
     const revoked = input.toState === "REVOKED";
     const releaseLease = input.toState === "STOPPED" || input.toState === "FAILED" || revoked;
+    // The provisioning control lease ends only with the qualified READY transition.
+    const releaseControlLease = releaseLease || current.state === "STARTING" && input.toState === "READY";
     const changed = db.prepare(`UPDATE runtime_instances SET state = ?, revision = revision + 1,
       backend_container_id = ?, idle_expires_at = ?, absolute_expires_at = ?,
        active_connections = CASE WHEN ? THEN 0 ELSE active_connections END,
@@ -1202,7 +1204,7 @@ export function transitionWorkspaceRuntimeV2(input: {
       WHERE id = ? AND revision = ?`)
       .run(input.toState, backend, input.idleExpiresAt?.toISOString() ?? current.idle_expires_at,
         input.absoluteExpiresAt?.toISOString() ?? current.absolute_expires_at,
-        releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseLease ? 1 : 0, revoked ? 1 : 0,
+        releaseLease ? 1 : 0, releaseLease ? 1 : 0, releaseControlLease ? 1 : 0, releaseControlLease ? 1 : 0, revoked ? 1 : 0,
         input.toState === "STOPPED" || revoked ? 1 : 0, timestamp, timestamp, current.id, current.revision);
     if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
     const updated = db.prepare("SELECT * FROM runtime_instances WHERE project_id IS NULL AND schema_version=2 AND id = ?").get(current.id) as WorkspaceRuntimeRowV2;

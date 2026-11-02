@@ -420,3 +420,26 @@ The requested profile and observed Pod spec keep their original separate hashes.
 Manager failures emit a bounded constant diagnostic code without bodies, tokens
 or private payloads. A new Work bootstrap, attached-volume health, Work/Web,
 terminal/Git, persistence and lifecycle acceptance remain required.
+
+
+## Service startup, readiness leases and expired originals
+
+Actual attach/exec upgrades were refused until the isolated manager Role included
+both `get` and `create` on those two Pod subresources. The chart carries the same
+permission pair. Kubernetes' [WebSocket authorization rule](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/)
+requires creation permission even for a GET upgrade. No cluster feature gate was
+disabled, and the manager's other permissions are unchanged.
+
+The first committed Work bootstrap completed its actual MCP handshake, but
+Supervisor reported ENXIO for both service log dispatchers. The bootstrap now
+flushes the MCP ACK first, then launches Supervisor with inherited container
+FIFOs. Service output follows that ACK without reopening Node child sockets.
+This confirms STARTING only; actual probes and original placement still gate READY.
+
+A qualified STARTING-to-READY Core transition atomically releases its provisioning
+control lease while preserving live connection/generation counters, capability
+bindings, workspace ownership and idle/absolute lifetime bounds. A failed startup
+with an existing original and no retirement receipt now follows the ordinary
+withdraw-access, stop-original and persist-retirement sequence. The retry cleanup
+branch applies only after its immutable receipt exists; FAILED metadata alone
+cannot stand in for physical retirement or authorize a successor.

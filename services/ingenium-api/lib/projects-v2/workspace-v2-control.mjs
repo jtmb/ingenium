@@ -224,7 +224,8 @@ export async function stopWorkspaceRuntimeFromRequestV2(request,selection){
    return runtimes.recordFailedWorkspaceProvisionRetirementV2(first.runtime.id,first.runtime.revision,proof,'runtime-manager');
   }
   if(!original&&first.runtime.state==='FAILED'&&runtimes.getFailedWorkspaceProvisionRetirementV2(first.runtime.id))return first.runtime;
-  if(original?.backendKind==='kubernetes'&&['STOPPED','FAILED'].includes(first.runtime.state)){
+  const recordedRetirement=original&&dbOf().prepare('SELECT runtime_id FROM workspace_execution_retirements WHERE runtime_id=?').get(first.runtime.id);
+  if(original?.backendKind==='kubernetes'&&['STOPPED','FAILED'].includes(first.runtime.state)&&recordedRetirement){
    originalWorkspaceRetiredProfileV2(first.runtime.id);
    await finishOriginalWorkspaceRetirementV2(first.runtime.id);
    return currentUser(request,selection).runtime;

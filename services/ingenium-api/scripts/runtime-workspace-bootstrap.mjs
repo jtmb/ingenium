@@ -42,10 +42,14 @@ async function main(){
  await new Promise((resolve,reject)=>{const helper=spawn(process.execPath,['/app/scripts/project-agent-profiles.mjs','--project-server-owned','/app/.opencode/agents','/home/appuser/.config/opencode/runtime/agents'],{stdio:'ignore',shell:false});helper.once('error',reject);helper.once('exit',code=>code===0?resolve():reject(Error('workspace agent projection unavailable')));});
  const password=await lstat('/run/ingenium-runtime/opencode-server-password');if(!password.isFile()||password.isSymbolicLink()||(password.mode&0o077)!==0||password.uid!==1000)return fail();
  process.env.INGENIUM_RUNTIME_BIND_HOST='0.0.0.0';
- const child=spawn('supervisord',['-c','/app/runtime-supervisord.conf'],{stdio:['inherit','pipe','pipe'],shell:false});
- await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
+ // This ACK confirms the completed MCP handshake. Flush it before service logs;
+ // STARTING still requires the real service probes and original placement for READY.
  const ack={schemaVersion:2,protocol:'workspace-runtime-v2',nonce:f.nonce,runtimeId:result.runtimeId,workspaceId:result.workspaceId,credentialId:result.credentialId,bindingHash:result.bindingHash,bindingEpoch:result.bindingEpoch,startIdentity:result.startIdentity,mcpProtocol:2};
- process.stdout.write(JSON.stringify(ack)+'\n',()=>{child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);});
+ await new Promise((resolve,reject)=>process.stdout.write(JSON.stringify(ack)+'\n',cause=>cause?reject(cause):resolve()));
+ // Inherit the container FIFOs: Supervisor reopens /dev/fd for service logging.
+ // Node's child stdio sockets cannot be reopened there and fail with ENXIO.
+ const child=spawn('supervisord',['-c','/app/runtime-supervisord.conf'],{stdio:'inherit',shell:false});
+ await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
  for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>child.kill(signal));
  child.once('exit',(code,signal)=>{process.exitCode=Number.isInteger(code)?code:signal?1:0;process.stdin.destroy();});
 }
