@@ -387,3 +387,10 @@ buffer. It preserved250 ordinary tables and the failed revision3 reservation,
 passed integrity and a second verification, and saved no database snapshot files.
 Core102 inputs/156 data resources and API340 inputs/169 compiler roots compile.
 Live cancellation, new-birth bootstrap and complete release acceptance remain open.
+The live recovery attempt exposed an activity-event constraint failure after the
+manager removed the failed Pod. Failed-provision retirement uses the existing
+state_changed event type and keeps its specific immutable negative receipt in
+workspace_failed_provision_retirements. No activity-event schema or predecessor
+migration changes are needed. A failed transaction preserves the previous runtime
+row and can be retried through the normal authenticated Stop action with a fresh
+bounded operator recovery approval.

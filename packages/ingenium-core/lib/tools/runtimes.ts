@@ -1500,7 +1500,7 @@ export function recordFailedWorkspaceProvisionRetirementV2(runtimeId:string,expe
   db.prepare('INSERT INTO workspace_failed_provision_retirements(runtime_id,workspace_id,public_request_json,pod_uid,namespace_uid,claim_uid,spec_sha256,observed_at,finished_at,proof_sha256) VALUES(?,?,?,?,?,?,?,?,?,?)')
    .run(r.id,w.id,JSON.stringify(request),proof.podUid,proof.namespaceUid,proof.claimUid,proof.specSha256,proof.observedAt,proof.finishedAt,provisionHash(proof));
   const next=db.prepare('SELECT * FROM runtime_instances WHERE id=?').get(r.id) as WorkspaceRuntimeRowV2;
-  appendWorkspaceEventV2(next,'failed_creation_retired','manager',actorId,r.state);
+  appendWorkspaceEventV2(next,'state_changed','manager',actorId,r.state);
   return runtimeV2Dto(next);
  });checkpointAfterWrite();return result;
 }
