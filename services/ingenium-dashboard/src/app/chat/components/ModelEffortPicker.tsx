@@ -20,11 +20,12 @@ export default function ModelEffortPicker({ model, models, effort = "", efforts 
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const id = useId();
+  const enabledEfforts = efforts.filter(option => !option.disabled);
   const selectedModel = models.find(option => option.value === model);
-  const selectedEffort = efforts.find(option => option.value === effort);
-  const hasEffort = efforts.length > 1 && Boolean(selectedModel && !selectedModel.disabled);
+  const selectedEffort = enabledEfforts.find(option => option.value === effort);
+  const hasEffort = enabledEfforts.length > 1 && Boolean(selectedModel && !selectedModel.disabled);
   const modelView = view === "models" || !hasEffort;
-  const effortIndex = efforts.findIndex(option => option.value === effort);
+  const effortIndex = enabledEfforts.findIndex(option => option.value === effort);
   const close = (restoreFocus = false) => { setOpen(false); if (restoreFocus) trigger.current?.focus(); };
   const show = () => { setView("settings"); setOpen(true); };
   useLayoutEffect(() => {
@@ -120,15 +121,15 @@ export default function ModelEffortPicker({ model, models, effort = "", efforts 
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m3.5 2.5 2.5 2.5-2.5 2.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
         {effortIndex >= 0 ? <div className="veyra-effort-scale"
-          style={{ "--effort-progress": (effortIndex / (efforts.length - 1) * 100) + "%" } as CSSProperties}>
-          <input type="range" min={0} max={efforts.length - 1} step={1} value={effortIndex}
+          style={{ "--effort-progress": (effortIndex / (enabledEfforts.length - 1) * 100) + "%" } as CSSProperties}>
+          <input type="range" min={0} max={enabledEfforts.length - 1} step={1} value={effortIndex}
             aria-label="Reasoning effort" aria-valuetext={selectedEffort?.label} title={selectedEffort?.label}
-            onChange={event => { const choice = efforts[Number(event.currentTarget.value)]; if (choice) onEffortChange(choice.value); }} />
+            onChange={event => { const choice = enabledEfforts[Number(event.currentTarget.value)]; if (choice) onEffortChange(choice.value); }} />
           <div className="veyra-effort-stops" aria-hidden="true">
-            {efforts.map((option, index) => <span key={option.value} title={option.label}
-              style={{ left: "calc(14px + (100% - 28px) * " + (index / (efforts.length - 1)) + ")", opacity: index === effortIndex ? 0 : 1 }} />)}
+            {enabledEfforts.map((option, index) => <span key={option.value} title={option.label}
+              style={{ left: "calc(14px + (100% - 28px) * " + (index / (enabledEfforts.length - 1)) + ")", opacity: index === effortIndex ? 0 : 1 }} />)}
           </div>
-        </div> : <button type="button" className="veyra-effort-reset" onClick={() => { const option = efforts[0]; if (option) onEffortChange(option.value); }}>Use model default</button>}
+        </div> : <button type="button" className="veyra-effort-reset" onClick={() => { const option = enabledEfforts[0]; if (option) onEffortChange(option.value); }}>Use model default</button>}
       </>}
     </div>, document.body)}
   </div>;

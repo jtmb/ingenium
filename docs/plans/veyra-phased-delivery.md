@@ -4,11 +4,11 @@ Status: Phase 1 implementation in progress, 2026-10-29. Both MVP runtime and vis
 
 ## Goal and boundaries
 
-Deliver Veyra as a Windows desktop build and a Linux Docker build, retaining Ingenium's application features and selecting the genuinely better parts of the original Veyra. Test Windows on the user's machine and Linux on the existing Ingenium Kubernetes cluster. Keep computer-use a separate external dependency. All development is in Veyra repositories, through Codex; never develop in computer-use or through OpenCode.
+Deliver Veyra as a Windows desktop build and a Linux Docker build, retaining Ingenium's application features and selecting the genuinely better parts of the original Veyra. Test Windows on the user's machine and Linux on the existing Ingenium Kubernetes cluster. Keep computer-use a separate external dependency. All development stays in Veyra repositories. The coordinating Codex chat owns design, architecture, contracts, review and integration. The user's 2026-11-02 authorization permits bounded implementation through the existing WSL OpenCode CLI using OpenCode Go DeepSeek Flash; it does not permit design delegation or changes to computer-use, upstream OpenCode Web or Stratus sources.
 
 The existing Windows Veyra chat remains stopped. The new phase owner may reuse its source/checkpoint without resuming that chat. Keep the current Windows inference implementation, settings and models intact but do not develop that engine. Exclude the custom inference engine, its local model manager and weights from Linux.
 
-Keep upstream OpenCode Web's frontend unchanged. Keep its Goal plugin outside ordinary Chat. Do not resurrect the discarded custom multi-chat orchestration feature. No subagents in this delivery workflow.
+Keep upstream OpenCode Web's frontend unchanged. Keep its Goal plugin outside ordinary Chat. Do not resurrect the discarded custom multi-chat orchestration feature. Do not use GPT-6.1 Sol subagents. The specifically approved DeepSeek implementation exception is governed by the writer, resource and review rules below.
 
 Chat and synthesis target ChatGPT / openai/gpt-6-luna, as separately requested. Do not copy computer-use's DeepSeek model defaults, workstation paths, permissions or credentials. Preserve all other model/profile settings.
 
@@ -22,7 +22,9 @@ Chat and synthesis target ChatGPT / openai/gpt-6-luna, as separately requested. 
 
 ## Thread execution
 
-One phase per local Codex chat, using gpt-6.1-sol with high reasoning. Work directly; no subagents. Create only the next chat when its predecessor is finished. Current planning is an explicitly requested planning handoff, not completion of Phase 1.
+The coordinating Codex chat retains the full active phases 1–7 goal and does all design, architecture, shared-contract work and review directly. Do not spawn or delegate to GPT-6.1 Sol subagents. The user separately authorized DeepSeek Flash as an implementor through the existing WSL OpenCode Go subscription: provide a complete coordinator design, a bounded exclusive file scope, a report-back channel and a conservative model setting. Use it only while the coordinator continues useful independent work. Blockers return immediately to the coordinator for guidance.
+
+Keep the existing thirteen repository checkouts; implementation permission creates no additional checkouts, design authority, provider fallback, resource budget or publication/device approval. Preserve account/org/project boundaries and the one database writer. Workers report ready for coordinator review; only reviewed source can be integrated. Reconcile each worker's inactive temporary outputs after its last consumer. The existing phase-end successor process still requires the complete phase gates, not a component milestone.
 
 At phase end: finish the actual phase gates; update docs and the acceptance matrix; review/stage only intended changes; commit/push to existing intended remotes and verify the exact remote branch SHA; clean owned disposable outputs; prepare one concise handoff/private companion. The successor verifies its owned checkout and establishes its own full-scope active goal, then writes one matching ownership receipt. Only then archive the predecessor. No recursive ancestor audit, unrelated checkout equality, extra startup-ack loop or silent acceptance waiver. Follow [phase workflow](../operations/veyra-phase-workflow.md).
 
