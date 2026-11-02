@@ -1,0 +1,137 @@
+@layer theme, base, components, utilities;
+@layer components {
+  div.veyra-composer-surface[data-testid='chat-composer-shell'] {
+    box-sizing: border-box;
+    max-width: 48rem;
+    margin-inline: auto;
+    border: 1px solid var(--color-border,var(--border,#333));
+    border-radius: 26px;
+    background: var(--color-surface-raised,var(--elevated,#2a2a2a));
+    box-shadow: 0 1px 2px #0000000d;
+    transition: background-color .15s,border-color .15s;
+  }
+
+  textarea.veyra-composer-input {
+    box-sizing: border-box;
+    min-width: 0;
+    flex: 1;
+    resize: none;
+    background: transparent;
+    color: var(--color-text-primary,var(--text,#ececec));
+    font-family: inherit;
+    font-size: .875rem;
+    line-height: 1.25rem;
+    outline: none;
+    padding: 4px 0;
+    min-height: 24px;
+    max-height: 200px;
+  }
+
+  textarea.veyra-composer-input::placeholder {
+    color: var(--color-text-muted,var(--muted,#969696));
+  }
+
+  textarea.veyra-composer-input:disabled {
+    opacity: .5;
+  }
+
+  .veyra-composer-surface button.veyra-composer-plus-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 50%;
+    padding: 0;
+    background: transparent;
+    color: var(--color-text-secondary,var(--muted,#969696));
+    cursor: pointer;
+  }
+
+  .veyra-composer-surface button.veyra-composer-plus-trigger:hover,
+  .veyra-composer-surface button.veyra-composer-plus-trigger[aria-expanded='true'] {
+    background: var(--color-surface-hover,var(--control,#353535));
+    color: var(--color-text-primary,var(--text,#ececec));
+  }
+
+  .veyra-composer-surface button.veyra-composer-plus-trigger:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+  }
+
+  .veyra-composer-surface button.veyra-composer-send {
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
+    padding: 8px;
+    border: 0;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color .15s,color .15s;
+    background: var(--color-surface-hover,var(--control,#353535));
+    color: var(--color-text-muted,var(--muted,#969696));
+    cursor: not-allowed;
+  }
+
+  .veyra-composer-surface button.veyra-composer-send[data-composer-mode='send'][data-composer-has-content='true'][data-composer-pending='false'] {
+    background: #2563eb;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .veyra-composer-surface button.veyra-composer-send[data-composer-mode='send'][data-composer-has-content='true'][data-composer-pending='false']:hover {
+    background: #1d4ed8;
+  }
+
+  .veyra-composer-surface button.veyra-composer-send[data-composer-mode='stop'] {
+    background: var(--color-surface-hover,var(--control,#353535));
+    color: var(--color-text-primary,var(--text,#ececec));
+    cursor: pointer;
+  }
+
+  .veyra-composer-surface button.veyra-composer-send[data-composer-mode='stop']:hover {
+    background: var(--color-surface-selected,var(--control,#3a3a3a));
+  }
+
+  .veyra-composer-surface button.veyra-composer-send:disabled {
+    background: var(--color-accent,var(--accent,#3b82f6));
+    color: #fff;
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  .veyra-composer-surface button.veyra-composer-plus-trigger:focus-visible,
+  .veyra-composer-surface button.veyra-composer-send:focus-visible {
+    outline: 2px solid var(--color-accent,var(--accent,#3b82f6));
+    outline-offset: 2px;
+  }
+
+  .veyra-composer-spinner {
+    animation: veyra-composer-spin 1s linear infinite;
+  }
+
+  @keyframes veyra-composer-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .veyra-composer-spinner {
+      animation: none;
+    }
+
+    div.veyra-composer-surface[data-testid='chat-composer-shell'] {
+      transition: none;
+    }
+
+    .veyra-composer-surface button.veyra-composer-send {
+      transition: none;
+    }
+  }
+}

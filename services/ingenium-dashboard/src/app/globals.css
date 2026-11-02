@@ -497,9 +497,6 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
 .veyra-home-quick-links a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 @media (max-width: 640px) { .veyra-home-quick-links > div { grid-template-columns: 1fr; gap: .625rem; } }
 
-.veyra-composer-plus-trigger { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; color: var(--color-text-secondary); }
-.veyra-composer-plus-trigger:hover, .veyra-composer-plus-trigger[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text-primary); }
-.veyra-composer-plus-trigger:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .veyra-chat-plus-panel { position: fixed; z-index: 60; width: min(22rem, calc(100vw - 24px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface-raised); color: var(--color-text-primary); box-shadow: 0 12px 36px #0004; }
 .veyra-chat-plus-panel button, .veyra-chat-plus-panel summary { font-size: 13px; }
 .veyra-chat-plus-attach, .veyra-chat-menu-options [data-menu-section="title"] > button, .veyra-chat-menu-options [data-menu-section="actions"] > button { display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 38px; padding: 9px 10px; border-radius: 9px; text-align: left; color: var(--color-text-primary); }

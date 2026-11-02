@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "package": "veyra-composer-primitives",
+  "version": "0.1.0",
+  "canonicalRepository": "https://github.com/jtmb/ingenium.git",
+  "canonicalDirectory": "services/ingenium-dashboard/src/app/chat/components",
+  "sourceBaseRevision": "a385f1c69720cc7d931b5b4c5f2bd3b2dc7957b6",
+  "files": [
+    {
+      "name": "ComposerPrimitives.tsx",
+      "bytes": 2866,
+      "sha256": "47cb9684c9b4d4a1f4acd69f7e724ff6dc8a9be4bf6efd5d81632fcfc680ee94"
+    },
+    {
+      "name": "composer-primitives.css",
+      "bytes": 3941,
+      "sha256": "c5b6c8af47539547e2c030b12afe13d5249a75f5e2ece10c3b5a32396a6f4b74"
+    }
+  ]
+}

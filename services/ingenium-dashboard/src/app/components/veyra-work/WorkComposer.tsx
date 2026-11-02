@@ -60,7 +60,7 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
         {voiceControl}
         <ComposerSendButton mode={streaming ? "stop" : "send"} type={streaming ? "button" : "submit"} onClick={streaming ? onStop : undefined}
           aria-label={streaming ? "Stop response" : "Send message"} title={streaming ? "Stop response" : "Send message"}
-          hasContent={Boolean(draft.text.trim())} disabled={!streaming && !sendable} />
+          hasContent={Boolean(draft.text.trim() || draft.attachments.length)} disabled={!streaming && !sendable} />
       </div>
       </ComposerSurface>
     </form>
