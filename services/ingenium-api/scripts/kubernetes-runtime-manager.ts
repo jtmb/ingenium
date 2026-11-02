@@ -47,6 +47,10 @@ export function startKubernetesRuntimeManager(){
       if(!controller.signal.aborted)response.writeHead(200).end(JSON.stringify({data}));
     }catch(cause){
       const code=(cause as {code?:unknown})?.code;
+      const diagnostic=code??(cause instanceof Error?cause.message:undefined);
+      // Emit a bounded constant diagnostic code; never request bodies or tokens.
+      const safeCode=typeof diagnostic==="string"&&diagnostic.length<=128&&/^(?:KUBERNETES|WORKSPACE_V2)_[A-Z0-9_]+$/.test(diagnostic)?diagnostic:"KUBERNETES_MANAGER_UNAVAILABLE";
+      process.stderr.write(JSON.stringify({source:"kubernetes-runtime-manager",code:safeCode})+"\n");
       if(!response.headersSent&&!response.destroyed)response.writeHead(503).end(JSON.stringify({error:{code:typeof code==="string"&&/^KUBERNETES_[A-Z0-9_]+$/.test(code)?code:"KUBERNETES_MANAGER_UNAVAILABLE"}}));
     }finally{clearTimeout(timeout);request.off("aborted",disconnect);response.off("close",disconnect);}
   });

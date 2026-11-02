@@ -394,3 +394,29 @@ workspace_failed_provision_retirements. No activity-event schema or predecessor
 migration changes are needed. A failed transaction preserves the previous runtime
 row and can be retried through the normal authenticated Stop action with a fresh
 bounded operator recovery approval.
+
+
+## Actual Work start and Pod defaults — 2026-11-02
+
+The isolated current-source qualification installation now selects the immutable
+Work role, with a verified dedicated worker1 runtime handler and an actual
+nonroot kernel observation of `pids.max=128`. Its registration, original claim,
+account and failed-generation history were preserved during replacement of its
+stale image selection. Production and the two user previews are unchanged.
+The manager's protected configuration is pinned at startup; applying new bytes
+requires a controlled replacement of that manager process. The same-Pod manager
+replacement passed normal authenticated health with Core and gateway preserved.
+These checks do not establish a successful Work bootstrap or release acceptance.
+
+The next normal authenticated Start created its actual Pod and attached the
+existing claim. Profile validation then stopped and removed the original child.
+Normal Stop committed its distinct immutable failed-provision retirement; no
+original or READY authority was manufactured. An actual server dry-run of the
+same public profile confirmed that Kubernetes omits `hostNetwork`, `hostPID`,
+`hostIPC`, `tty`, empty `args`, and the workspace mount/PVC's `readOnly: false`.
+The comparison now accepts only these exact absent/default pairs. Explicit
+changed values, other missing fields and unrequested fields remain refused.
+The requested profile and observed Pod spec keep their original separate hashes.
+Manager failures emit a bounded constant diagnostic code without bodies, tokens
+or private payloads. A new Work bootstrap, attached-volume health, Work/Web,
+terminal/Git, persistence and lifecycle acceptance remain required.

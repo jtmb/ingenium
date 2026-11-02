@@ -36,6 +36,15 @@ function defaultTolerations(value: unknown): boolean {
   }));
 }
 function profileMatches(expected: unknown, actual: unknown, at: string, nodeName: string): void {
+  // Kubernetes omits these explicit zero values from the Pod's JSON. Keep the
+  // requested profile and observed spec hashes intact; accept only the exact
+  // absent/default pairs observed through the actual API, never changed values.
+  if (actual === undefined) {
+    if (expected === false && ["/spec/hostNetwork", "/spec/hostPID", "/spec/hostIPC",
+      "/spec/containers/0/tty", "/spec/containers/0/volumeMounts/0/readOnly",
+      "/spec/volumes/0/persistentVolumeClaim/readOnly"].includes(at)) return;
+    if (at === "/spec/containers/0/args" && Array.isArray(expected) && expected.length === 0) return;
+  }
   if (/\/resources\/(?:limits|requests)\/(?:cpu|memory)$|\/volumes\/\d+\/emptyDir\/sizeLimit$/.test(at)) {
     const [a,b] = quantity(expected), [c,d] = quantity(actual);
     if (a * d !== c * b) return fail("KUBERNETES_ORIGINAL_RESOURCE_DRIFT");
